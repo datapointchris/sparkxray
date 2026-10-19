@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Regenerate the event log fixtures. Runs the fixture jobs under each Spark image and each setting
-# that changes what Spark writes, then rewrites logs/, decoded-by-spark/ and history-server-sql/
-# from the output.
+# that changes what Spark writes, then rewrites logs/, decoded-by-spark/, history-server-sql/ and
+# explain/ from the output.
 #
 #   fixtures/regenerate.sh              every variant
 #   fixtures/regenerate.sh VARIANT...   only these, e.g. spark-3.5.9-lz4
 #
-# Needs docker, zstd, gzip, curl and jq. README.md lists the variants and what each exercises.
+# Needs docker, zstd, gzip, curl and jq, and the plan-rules variants reach PyPI. README.md lists
+# the variants and what each exercises.
 set -euo pipefail
 
 readonly SPARK_3=apache/spark:3.5.9-python3
@@ -27,6 +28,8 @@ readonly VARIANTS=(
   spark-3.5.9-warmup
   spark-3.5.9-plan-shapes
   spark-4.2.0-plan-shapes
+  spark-3.5.9-plan-rules
+  spark-4.2.0-plan-rules
   glue-5.0
   apache-spark-events
 )
@@ -69,6 +72,24 @@ readonly PLAN_SHAPES_CONF=(
   --conf spark.sql.autoBroadcastJoinThreshold=-1
   --conf spark.sql.shuffle.partitions=4
 )
+
+# Settings the plan-rules job runs under. With broadcast joins off, a join plans as a sort-merge
+# join unless the query asks for a broadcast. The heap is 6 GiB because one query broadcasts a build
+# side over 1 GiB, which the driver holds while it hashes it into a table about as large again.
+readonly PLAN_RULES_CONF=(
+  --master 'local[4]'
+  --driver-memory 6g
+  --conf spark.eventLog.enabled=true
+  --conf spark.eventLog.dir=file:///out
+  --conf spark.eventLog.compress=false
+  --conf spark.eventLog.rolling.enabled=false
+  --conf spark.sql.autoBroadcastJoinThreshold=-1
+  --conf spark.sql.shuffle.partitions=8
+)
+
+# A pandas UDF needs pyarrow and pandas, and neither Spark image ships them. Spark 4.2 refuses a
+# pyarrow under 18.0.0 and a pandas under 2.2.0, and these releases still install on Python 3.10.
+readonly PANDAS_UDF_PACKAGES='pyarrow==18.1.0 pandas==2.2.3 numpy==1.26.4'
 
 # container_args IMAGE OUT: the docker flags every run shares, ending with the image and the
 # script that runs the command as root and hands /out and /data back to the caller.
@@ -227,6 +248,16 @@ run_variant() {
       capture_history_server "$image" "$out"
       zstd_plain "$out"/local-*
       ;;
+    spark-3.5.9-plan-rules | spark-4.2.0-plan-rules)
+      local image=$SPARK_3
+      [ "$variant" = spark-3.5.9-plan-rules ] || image=$SPARK_4
+      submit "$image" "$out" sh -c \
+        "pip install --quiet --disable-pip-version-check $PANDAS_UDF_PACKAGES && exec /opt/spark/bin/spark-submit \"\$@\"" \
+        spark-submit "${PLAN_RULES_CONF[@]}" /job/plan_rules_job.py /data/plan-rules /data/plan-rules-estimates.json
+      mkdir -p "$work/explain/$variant"
+      mv "$work/data/plan-rules-estimates.json" "$work/explain/$variant/cost-mode.json"
+      zstd_plain "$out"/local-*
+      ;;
     glue-5.0)
       # Glue's own spark-defaults.conf stays in force, apart from where the log goes.
       submit "$GLUE_5" "$out" /usr/lib/spark/bin/spark-submit --master 'local[4]' \
@@ -263,7 +294,7 @@ main() {
     rm -rf "${fixtures:?}/logs/$variant"
     mkdir -p "$fixtures/logs"
     mv "$work/$variant" "$fixtures/logs/$variant"
-    for beside in decoded-by-spark history-server-sql; do
+    for beside in decoded-by-spark history-server-sql explain; do
       rm -rf "${fixtures:?}/$beside/$variant"
       if [ -d "$work/$beside/$variant" ]; then
         mkdir -p "$fixtures/$beside"
