@@ -65,17 +65,18 @@ mode, or from a History Server's SQL graph. Every form reads into one tree of no
 ```python
 import json
 
-from sparkxray.plan import final_plans
+from sparkxray.plan import last_plans
 
 with open('eventlog.json') as log:
     events = [json.loads(line) for line in log]
-for execution_id, plan in final_plans(events).items():
-    print(execution_id, plan.truncated, plan.operator_counts().most_common(3))
+for execution_id, plan in last_plans(events).items():
+    print(execution_id, plan.is_final, plan.operator_counts().most_common(3))
 ```
 
-`final_plans` keeps each SQL execution's final plan, after adaptive query execution re-planned
-it. `parse_plan_text` reads `explain()` output, and `normalize_label` rewrites a node's ids, so
-two builds of one query compare equal.
+`last_plans` keeps each SQL execution's last plan, after adaptive query execution re-planned it.
+For an execution that never finished, as in a killed application, `is_final` is False.
+`parse_plan_text` reads `explain()` output. `normalize_label` rewrites a node's ids, so two builds
+of one query compare equal.
 
 ## Layout
 

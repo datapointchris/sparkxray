@@ -46,8 +46,16 @@ the id, so two builds of one transform compare equal. The ids themselves stay on
 fields: expression ids, the plan id, the query stage id and subquery ids.
 
 Names that differ per JVM are rewritten too. A lambda class such as
-`$$Lambda$2082/0x0000000840efd040@75e17c26` reads `$$Lambda`. An object's identity hash, as in
-`NoopWrite$@76babe95`, reads `NoopWrite$@N`.
+`$$Lambda$2082/0x0000000840efd040@75e17c26` reads `$$Lambda`. An object's identity hash reads
+`@N` only after a class name, as in `NoopWrite$@76babe95`. So a literal like `ops@cafe.example`
+survives.
+
+A URI reads `<path>` only after a filesystem scheme and `:/`, and it ends at a space, a comma or a
+closing bracket. So `struct<file:string>` survives, and `StartsWith(src#7, s3://raw/)` reads
+`StartsWith(src#N, <path>)`.
+
+Spark prints string literals unquoted. A literal holding `#` and digits, such as `PR#42`, reads as
+an expression id and normalizes to `PR#N`.
 
 ## Text trees are read by column, because inner children sit six columns in
 
@@ -81,11 +89,19 @@ execution started.
 Updates carry no timestamp. Their order is their position in the log, and the tables keep that
 order explicitly.
 
-`final_plans` reads each execution's last plan event, and leaves out one whose last plan is not
-final, as when the application was killed mid-query. It takes the tree from `sparkPlanInfo`,
-because only JSON carries accumulator ids. Where the text reads into the same operators in the same
-shape, each node also takes the text's formatted number, details and statistics. The plan then
-takes the text's initial plan. Where the two differ, the plan is JSON alone.
+`last_plans` reads each execution's last plan event. An execution that never finished keeps the
+last plan AQE reached, with `is_final` False. Killed and failed runs are the ones most worth
+explaining, so they are never dropped.
+
+It takes the tree from `sparkPlanInfo`, because only JSON carries accumulator ids. Where the text
+reads into the same operators in the same shape, each node also takes the text's formatted number,
+details and statistics. The plan then takes the text's initial plan. Where the two differ, the plan
+is JSON alone.
+
+Formatted text numbers each plan object once, so a node AQE left alone carries one number in both
+blocks. Each such initial node takes its final node's label, details and metrics. So an untouched
+node has one `normalized_label` and `subtree_hash` in both plans, and an initial-to-final diff
+marks only what AQE changed.
 
 Finished query stages print their measured size, as in `Statistics(sizeInBytes=8.4 MiB, …)`. These
 come from completed shuffles, not cost-model guesses, so plan rules can size a join's sides with no
@@ -102,7 +118,7 @@ Spark truncates plan text three ways:
 
 Each sets `Plan.truncated`. A cut text reads as its tree up to the cut. A text cut before its
 physical plan section reads as an empty plan. `maxPlanStringLength` never cuts the JSON, so
-`final_plans` still reads such an execution's whole tree, and flags it.
+`last_plans` still reads such an execution's whole tree, and flags it.
 
 ## The History Server's graph has no query stages
 
@@ -132,10 +148,10 @@ those ids, and each stage lists the ids it touched. Joining the two maps nodes t
 
 AQE allocates fresh accumulators every time it re-plans a node, and even the first update
 re-allocates every node. A query stage that finished before a re-plan then keeps its node and ids.
-So the final plan lists the ids of everything that actually ran.
+So the last plan lists the ids of everything that actually ran.
 
-That is why rules read metrics through the final plan's nodes. An initial-plan node with no
-updates is expected, not missing data.
+That is why rules read metrics through the last plan's nodes. A node of the version 0 plan
+`SQLExecutionStart` logs has no updates, which is expected, not missing data.
 
 Metrics aggregate per node the way the History Server's SQL tab shows them:
 

@@ -1,7 +1,8 @@
 # Event log fixtures
 
 The event logs every test reads. Each variant is one Spark setting that changes what Spark writes,
-run over the same fixture job in `job/eventlog_job.py`.
+run over the fixture job in `job/eventlog_job.py`. The plan-shapes variants run
+`job/plan_shapes_job.py` instead, one small query per physical plan shape.
 
 ## Each variant exercises one way Spark writes a log
 
@@ -16,12 +17,17 @@ run over the same fixture job in `job/eventlog_job.py`.
 | `spark-3.5.9-killed` | Spark 3.5.9, killed mid-run, then zstd'd | an `.inprogress` name and a truncated final line |
 | `spark-4.2.0-killed` | Spark 4.2.0, killed mid-run | an unfinished rolling directory: `appstatus_*.inprogress`, no `ApplicationEnd`, and whole zstd frames ending on a whole line |
 | `spark-3.5.9-warmup` | Spark 3.5.9, `--warmup` and skew-join handling on | the second run of a run diff: every stage id shifted, one config change |
+| `spark-3.5.9-plan-shapes`, `spark-4.2.0-plan-shapes` | each Spark version, one plain file, then zstd'd | subqueries, reused exchanges, dynamic pruning, a cached relation, a Cartesian product and a Python UDF; plan text cut by `spark.sql.maxPlanStringLength` of 400 and 0, and labels cut past `spark.sql.debug.maxToStringFields` |
 | `glue-5.0` | AWS's Glue 5.0 image (Spark 3.5.4), under Glue's own Spark defaults | a log as Glue's runtime configures it |
 | `apache-spark-events` | Apache Spark's own test logs at v4.2.0, zstd'd | a YARN application id, multi-attempt logs ending with no final newline, a standalone app id and older event shapes, and Spark's own rolling directory |
 
 `decoded-by-spark/` holds, for each lz4 and snappy log, the plain lines Spark's own
 `CompressionCodec` reads back from it, zstd'd. sparkxray's decoder for that codec must reproduce
 them byte for byte.
+
+`history-server-sql/` holds, for each plan-shapes log, what a History Server started over it
+serves at `/api/v1/applications/<app>/sql?details=true&planDescription=true`, compacted and zstd'd.
+Its graphs must count the same operators as the log's JSON plans, less the query stages.
 
 Every plain log is committed zstd'd, Apache's included, under the name Spark gives a log it
 compressed itself. `local-1` becomes `local-1.zstd`, and `local-1.inprogress` becomes
@@ -88,7 +94,7 @@ fixtures/regenerate.sh                      # every variant
 fixtures/regenerate.sh spark-3.5.9-lz4      # one
 ```
 
-It needs docker, zstd, gzip and curl, and the images `apache/spark:3.5.9-python3`,
+It needs docker, zstd, gzip, curl and jq, and the images `apache/spark:3.5.9-python3`,
 `apache/spark:4.2.0-python3` and `public.ecr.aws/glue/aws-glue-libs:5`. Each Spark run takes a
 2 GiB driver heap and about a minute. Each run gets a new application id and new timestamps, so a
 regenerated log never matches the committed one byte for byte. Shuffle bytes and records come

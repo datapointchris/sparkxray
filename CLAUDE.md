@@ -11,7 +11,7 @@ pyproject.toml   the workspace, and every tool's config for both members
 library/         sparkxray: imported as `sparkxray`, Python >=3.11, no scripts
 cli/             sparkxray-cli: imported as `sparkxray_cli`, Python >=3.13, the `sparkxray` command
 docs/            the design pages
-fixtures/        event logs per Spark setting, regenerate.sh, and the job that writes them
+fixtures/        event logs per Spark setting, History Server captures, regenerate.sh, and the jobs
 benchmarks/parse/ the parse benchmark, run by hand
 ```
 
@@ -61,7 +61,7 @@ uv run mypy .
 uv run pytest library                    # the library's tests, over the committed fixtures
 uv build --package sparkxray --out-dir dist
 uv build --package sparkxray-cli --out-dir dist
-fixtures/regenerate.sh [VARIANT...]      # rewrite fixtures/logs from Spark runs in docker
+fixtures/regenerate.sh [VARIANT...]      # rewrite the fixtures from Spark runs in docker
 zstd -dc fixtures/logs/spark-3.5.9/local-*.zstd | python3 fixtures/stage_totals.py
 ```
 

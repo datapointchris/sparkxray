@@ -3,8 +3,8 @@
 from sparkxray.plan.display_values import DisplayValue
 from sparkxray.plan.display_values import parse_display_value
 from sparkxray.plan.explain_text import parse_plan_text
-from sparkxray.plan.final_plans import final_plans
 from sparkxray.plan.labels import normalize_label
+from sparkxray.plan.last_plans import last_plans
 from sparkxray.plan.plan_info import parse_plan_info
 from sparkxray.plan.rest_graph import parse_rest_graph
 from sparkxray.plan.tree import MetricRef
@@ -20,7 +20,7 @@ __all__ = [
     'PlanNode',
     'PlanSource',
     'RuntimeStats',
-    'final_plans',
+    'last_plans',
     'normalize_label',
     'parse_display_value',
     'parse_plan_info',

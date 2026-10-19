@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Regenerate the event log fixtures. Runs the fixture job under each Spark image and each setting
-# that changes what Spark writes, then rewrites logs/ and decoded-by-spark/ from the output.
+# Regenerate the event log fixtures. Runs the fixture jobs under each Spark image and each setting
+# that changes what Spark writes, then rewrites logs/, decoded-by-spark/ and history-server-sql/
+# from the output.
 #
 #   fixtures/regenerate.sh              every variant
 #   fixtures/regenerate.sh VARIANT...   only these, e.g. spark-3.5.9-lz4
 #
-# Needs docker, zstd, gzip and curl. README.md lists the variants and what each exercises.
+# Needs docker, zstd, gzip, curl and jq. README.md lists the variants and what each exercises.
 set -euo pipefail
 
 readonly SPARK_3=apache/spark:3.5.9-python3
@@ -24,6 +25,8 @@ readonly VARIANTS=(
   spark-3.5.9-killed
   spark-4.2.0-killed
   spark-3.5.9-warmup
+  spark-3.5.9-plan-shapes
+  spark-4.2.0-plan-shapes
   glue-5.0
   apache-spark-events
 )
@@ -52,6 +55,19 @@ readonly SHARED_CONF=(
   --conf spark.sql.adaptive.skewJoin.enabled=false
   --conf spark.sql.shuffle.partitions=16
   --conf spark.memory.fraction=0.1
+)
+
+# Settings the plan-shapes job runs under. With broadcast joins off, a join plans as a sort-merge
+# join unless the query asks for a broadcast. The log is one plain file on both versions, so the
+# History Server and zstd_plain both read it.
+readonly PLAN_SHAPES_CONF=(
+  --master 'local[2]'
+  --conf spark.eventLog.enabled=true
+  --conf spark.eventLog.dir=file:///out
+  --conf spark.eventLog.compress=false
+  --conf spark.eventLog.rolling.enabled=false
+  --conf spark.sql.autoBroadcastJoinThreshold=-1
+  --conf spark.sql.shuffle.partitions=4
 )
 
 # container_args IMAGE OUT: the docker flags every run shares, ending with the image and the
@@ -120,9 +136,43 @@ decode_with_spark() {
     name=$(basename "$log")
     submit "$image" "$out" /opt/spark/bin/spark-submit --master 'local[1]' \
       /job/spark_decode.py "$codec" "/out/$name" "/out/$name.decoded"
-    mkdir -p "$work/decoded/$variant"
-    zstd -19 -q --rm "$log.decoded" -o "$work/decoded/$variant/$name.jsonl.zstd"
+    mkdir -p "$work/decoded-by-spark/$variant"
+    zstd -19 -q --rm "$log.decoded" -o "$work/decoded-by-spark/$variant/$name.jsonl.zstd"
   done
+}
+
+# capture_history_server IMAGE OUT: start IMAGE's History Server over the plain logs in OUT, and
+# save each application's SQL endpoint, with node details and plan text, under
+# history-server-sql/, compacted and zstd'd.
+capture_history_server() {
+  local image=$1 out=$2 variant name="sparkxray-fixture-history-$$" address apps='' app
+  variant=$(basename "$out")
+  # Spark creates each log readable by its own user only, and the server runs as that user.
+  chmod -R a+rX "$out"
+  docker run -d --name "$name" -p 127.0.0.1::18080 -v "$out:/logs:ro" \
+    -e SPARK_HISTORY_OPTS='-Dspark.history.fs.logDirectory=file:///logs -Dspark.history.fs.update.interval=1s' \
+    --entrypoint /opt/spark/bin/spark-class "$image" org.apache.spark.deploy.history.HistoryServer >/dev/null
+  address=$(docker port "$name" 18080/tcp)
+  for _ in $(seq 1 120); do
+    apps=$(curl -sf "http://$address/api/v1/applications" || true)
+    if [ -n "$apps" ] && [ "$(jq length <<<"$apps")" -gt 0 ]; then
+      break
+    fi
+    apps=''
+    sleep 1
+  done
+  if [ -z "$apps" ]; then
+    docker logs "$name" 2>&1 | tail -20 >&2
+    docker rm -f "$name" >/dev/null
+    echo "regenerate.sh: the History Server listed no application within two minutes" >&2
+    exit 1
+  fi
+  mkdir -p "$work/history-server-sql/$variant"
+  while IFS= read -r app; do
+    curl -fsS "http://$address/api/v1/applications/$app/sql?details=true&planDescription=true&length=1000" \
+      | jq -c . | zstd -19 -q -o "$work/history-server-sql/$variant/$app.json.zstd"
+  done < <(jq -r '.[].id' <<<"$apps")
+  docker rm -f "$name" >/dev/null
 }
 
 run_variant() {
@@ -170,6 +220,13 @@ run_variant() {
         --conf spark.sql.adaptive.skewJoin.enabled=true /job/eventlog_job.py /data --warmup
       zstd_plain "$out"/local-*
       ;;
+    spark-3.5.9-plan-shapes | spark-4.2.0-plan-shapes)
+      local image=$SPARK_3
+      [ "$variant" = spark-3.5.9-plan-shapes ] || image=$SPARK_4
+      submit "$image" "$out" /opt/spark/bin/spark-submit "${PLAN_SHAPES_CONF[@]}" /job/plan_shapes_job.py /data/plan-shapes
+      capture_history_server "$image" "$out"
+      zstd_plain "$out"/local-*
+      ;;
     glue-5.0)
       # Glue's own spark-defaults.conf stays in force, apart from where the log goes.
       submit "$GLUE_5" "$out" /usr/lib/spark/bin/spark-submit --master 'local[4]' \
@@ -198,18 +255,21 @@ run_variant() {
 }
 
 main() {
-  local selected=("$@") variant
+  local selected=("$@") variant beside
   [ ${#selected[@]} -gt 0 ] || selected=("${VARIANTS[@]}")
   for variant in "${selected[@]}"; do
     echo "regenerating $variant" >&2
     run_variant "$variant"
-    rm -rf "${fixtures:?}/logs/$variant" "${fixtures:?}/decoded-by-spark/$variant"
+    rm -rf "${fixtures:?}/logs/$variant"
     mkdir -p "$fixtures/logs"
     mv "$work/$variant" "$fixtures/logs/$variant"
-    if [ -d "$work/decoded/$variant" ]; then
-      mkdir -p "$fixtures/decoded-by-spark"
-      mv "$work/decoded/$variant" "$fixtures/decoded-by-spark/$variant"
-    fi
+    for beside in decoded-by-spark history-server-sql; do
+      rm -rf "${fixtures:?}/$beside/$variant"
+      if [ -d "$work/$beside/$variant" ]; then
+        mkdir -p "$fixtures/$beside"
+        mv "$work/$beside/$variant" "$fixtures/$beside/$variant"
+      fi
+    done
   done
 }
 
