@@ -55,21 +55,21 @@ have to name the extra, and the CLI would sit on the library's 3.11 floor.
 
 ## DuckDB parses the log, so there is no JVM and no custom parser
 
-The benchmark input was a 785 MB event log holding 131,400 `TaskEnd` events. Each engine parsed
-the file, kept `TaskEnd`, and computed per stage the count, median and max run time, spill sum, GC
-sum and max shuffle records. Each ran three times on a 16-thread CPU, with the file on tmpfs.
+The benchmark input is a fixture log inflated to 786 MB, holding 126,920 `TaskEnd` events. Over it,
+DuckDB's `read_json` with an explicit `columns=` map computed per-stage task aggregates in
+0.29–0.30 s on 16 threads. Reading the same log zstd'd took 0.32–0.37 s. On the same file:
 
-| Engine | Wall time |
-| --- | --- |
-| DuckDB `read_json` with explicit `columns=`, 16 threads | 0.32–0.33 s |
-| the same, one thread | 0.88–1.00 s |
-| Polars `scan_ndjson` with a schema | 1.50–2.43 s |
-| Python with orjson, every line | 2.26–2.35 s |
-| Rust `serde_json` with rayon | 1.24–2.61 s |
+- Polars 2.0.0's `scan_ndjson` took 0.36–0.39 s;
+- Python with orjson took 2.0–2.1 s.
+
+`benchmarks/parse/README.md` holds every arm and the method.
 
 The explicit `columns=` map is required. Every `SparkListener*` event has its own JSON shape, and
 auto-detection unifies them all into one enormous struct. With the map, DuckDB's reader parses in
 parallel and drops every field nobody asked for.
+
+*Rejected:* Polars. It parsed in a fifth more time than DuckDB. The rules are SQL over the tables,
+and DuckDB is the engine they run in, so Polars would be a second engine beside it.
 
 *Rejected:* a Rust reader. A tuned one might match DuckDB, but only by redoing work DuckDB already
 does, and every install would need its build.
@@ -91,13 +91,14 @@ twice, and a log Glue is still appending to is downloaded again. One module make
 ## Spark's lz4 and snappy logs need two small decoders
 
 Spark writes a compressed log through its own `CompressionCodec`. Only zstd, Spark 4's default,
-writes standard frames that DuckDB opens directly. lz4 writes lz4-java's block stream, and snappy
+writes standard frames that DuckDB opens directly. Spark closes a frame on every flush, so one log
+is many frames, and DuckDB reads across them. lz4 writes lz4-java's block stream, and snappy
 writes snappy-java's stream. Neither is the standard framing for its codec.
 
 Both are length-prefixed block streams around a standard block codec. So sparkxray carries two
 small decoders over cramjam's raw block functions, and decodes those logs into the cache as plain
 JSON lines first. lzf is refused with an error that suggests zstd.
 
-A truncated final line is expected. Glue's periodic log backups and killed applications both
+A truncated final line is expected. Glue's periodic log backups and killed applications can both
 leave one. The reader drops it and records `truncated_tail` in the manifest. An unparsable line
 anywhere else is an error naming the file and line.
