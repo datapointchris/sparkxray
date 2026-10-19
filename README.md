@@ -57,6 +57,26 @@ zip -r sparkxray-0.1.0.gluewheels.zip wheels/
 Upload the zip, pass its `s3://` path to `--additional-python-modules`, and pass `--no-index` to
 `--python-modules-installer-option`. Glue then resolves every dependency from the zip.
 
+## Read a query's physical plan
+
+`sparkxray.plan` reads a plan from an event log, from `df.explain()` text in simple or formatted
+mode, or from a History Server's SQL graph. Every form reads into one tree of nodes.
+
+```python
+import json
+
+from sparkxray.plan import final_plans
+
+with open('eventlog.json') as log:
+    events = [json.loads(line) for line in log]
+for execution_id, plan in final_plans(events).items():
+    print(execution_id, plan.truncated, plan.operator_counts().most_common(3))
+```
+
+`final_plans` keeps each SQL execution's final plan, after adaptive query execution re-planned
+it. `parse_plan_text` reads `explain()` output, and `normalize_label` rewrites a node's ids, so
+two builds of one query compare equal.
+
 ## Layout
 
 | Directory | Holds |

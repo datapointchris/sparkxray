@@ -20,7 +20,8 @@ benchmarks/parse/ the parse benchmark, run by hand
   must never pull them in.
 - **A library dependency lands on every consumer's cluster.** Add one only if it ships a cp311
   wheel and the library cannot do without it. It arrives in the change that first imports it, with
-  a floor measured against that code.
+  a floor measured against that code. The library's `dev` group holds what only its tests import,
+  and never reaches a consumer.
 - **The CLI holds no logic.** A command parses its arguments, calls one library function and
   renders the result. Anything worth testing lives in the library.
 - **The member `pyproject.toml` files carry packaging only.** ruff, mypy and pytest read their
@@ -40,7 +41,7 @@ Glue 5.0 and 5.1 run Python 3.11. So nothing under `library/` may use what arriv
 ```bash
 uv venv --python 3.11 /tmp/sparkxray-311
 uv pip install --python /tmp/sparkxray-311 --resolution lowest-direct ./library
-uv pip install --python /tmp/sparkxray-311 pytest
+uv pip install --python /tmp/sparkxray-311 pytest --group library/pyproject.toml:dev
 /tmp/sparkxray-311/bin/python -m compileall -q library/src
 uv run --only-group dev mypy --python-version 3.11 --python-executable /tmp/sparkxray-311/bin/python library/src
 /tmp/sparkxray-311/bin/python -m pytest library
@@ -57,6 +58,7 @@ there.
 uv sync                                  # both members editable, at 3.13
 uv run sparkxray --help
 uv run mypy .
+uv run pytest library                    # the library's tests, over the committed fixtures
 uv build --package sparkxray --out-dir dist
 uv build --package sparkxray-cli --out-dir dist
 fixtures/regenerate.sh [VARIANT...]      # rewrite fixtures/logs from Spark runs in docker

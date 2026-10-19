@@ -7,4 +7,4 @@ was tried and rejected.
 | --- | --- |
 | [architecture.md](architecture.md) | the path from a log location to findings; why two distributions, DuckDB, no JVM, and a local copy of S3 logs |
 | [rule-design.md](rule-design.md) | why every ratio carries an absolute floor, how severity and impact are graded, and where each threshold came from |
-| [plan-model.md](plan-model.md) | how four plan forms read into one tree, which AQE plan is final, and how plan nodes reach the stages that ran them |
+| [plan-model.md](plan-model.md) | how four plan forms read into one tree, how text trees are read by column, which AQE plan is final, how truncation is flagged, and how plan nodes reach the stages that ran them |
