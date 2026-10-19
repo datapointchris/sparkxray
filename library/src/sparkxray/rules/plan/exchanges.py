@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from sparkxray.rules.plan.node_reading import copies_counted_elsewhere
+from sparkxray.rules.plan.node_reading import counted_nodes
 from sparkxray.rules.plan.node_reading import field
 from sparkxray.rules.plan.node_reading import metric
 from sparkxray.rules.plan.node_reading import rows_produced
@@ -15,12 +17,15 @@ from sparkxray.rules.rule import Threshold
 WINDOW_OPERATORS = frozenset({'Window', 'WindowInPandas', 'ArrowWindowPython'})
 # Between a window and the exchange feeding it: the sort it needs, AQE's wrappers, and other windows over the same rows.
 _WINDOW_INPUTS = frozenset({'Sort', 'AQEShuffleRead', 'ShuffleQueryStage', 'WindowGroupLimit', *WINDOW_OPERATORS})
+_MIB = 2**20
 
 
 def _many_exchanges(context: RuleContext) -> Iterator[dict[str, Any]]:
     minimum = context.thresholds['min_exchanges']
+    elsewhere = copies_counted_elsewhere(context)
     for execution_id, nodes in context.numbered.items():
-        exchanges = tuple(numbered.number for numbered in nodes if numbered.node.operator == 'Exchange')
+        skipped = elsewhere.get(execution_id, frozenset())
+        exchanges = tuple(numbered.number for numbered in nodes if numbered.node.operator == 'Exchange' and numbered.number not in skipped)
         if len(exchanges) < minimum:
             continue
         yield {
@@ -77,28 +82,34 @@ MANY_EXCHANGES = Rule(
 
 
 def _window_single_partition(context: RuleContext) -> Iterator[dict[str, Any]]:
-    for execution_id, nodes in context.numbered.items():
-        for numbered in nodes:
-            if numbered.node.operator not in WINDOW_OPERATORS or len(numbered.children) != 1:
-                continue
-            below = nodes[numbered.children[0]]
-            while below.node.operator in _WINDOW_INPUTS and len(below.children) == 1:
-                below = nodes[below.children[0]]
-            if below.node.operator != 'Exchange':
-                continue
-            partitioning = field(below.node, 'Arguments') or below.node.label.removeprefix('Exchange').strip()
-            if not partitioning.startswith('SinglePartition'):
-                continue
-            yield {
-                'sql_execution_id': execution_id,
-                'plan_node_id': numbered.number,
-                'severity': 'high',
-                'impact_seconds': None,
-                'window_operator': numbered.node.operator,
-                'exchange_node_id': below.number,
-                'single_partition_bytes': metric(context.metrics(execution_id, below.number), 'data size'),
-                'single_partition_rows': rows_produced(context, execution_id, nodes, numbered.children[0]),
-            }
+    min_bytes = context.thresholds['min_bytes']
+    for execution_id, nodes, numbered in counted_nodes(context):
+        if numbered.node.operator not in WINDOW_OPERATORS or len(numbered.children) != 1:
+            continue
+        below = nodes[numbered.children[0]]
+        stage_bytes = None
+        while below.node.operator in _WINDOW_INPUTS and len(below.children) == 1:
+            stats = below.node.runtime_stats
+            if below.node.operator == 'ShuffleQueryStage' and stats is not None and stats.size_bytes is not None:
+                stage_bytes = stats.size_bytes
+            below = nodes[below.children[0]]
+        if below.node.operator != 'Exchange':
+            continue
+        partitioning = field(below.node, 'Arguments') or below.node.label.removeprefix('Exchange').strip()
+        if not partitioning.startswith('SinglePartition'):
+            continue
+        size = metric(context.metrics(execution_id, below.number), 'data size')
+        size = stage_bytes if size is None else size
+        yield {
+            'sql_execution_id': execution_id,
+            'plan_node_id': numbered.number,
+            'severity': 'high' if size is not None and size >= min_bytes else 'info',
+            'impact_seconds': None,
+            'window_operator': numbered.node.operator,
+            'exchange_node_id': below.number,
+            'single_partition_bytes': size,
+            'single_partition_rows': rows_produced(context, execution_id, nodes, numbered.children[0]),
+        }
 
 
 _WINDOW_SINGLE_PARTITION_LESSON = """\
@@ -107,6 +118,11 @@ _WINDOW_SINGLE_PARTITION_LESSON = """\
 A `Window` whose input is shuffled to `SinglePartition`, which is what a window with an `orderBy`
 and no `partitionBy` asks for. Spark logs `No Partition Defined for Window operation! Moving all
 data to a single partition, this can cause serious performance degradation.`
+
+The finding is `high` where that partition holds at least 256 MiB, the size at which AQE's default
+`spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes` calls one partition skewed. Below it,
+or where nothing measured the exchange, the finding is `info`. A window over a few thousand
+aggregated rows runs in one task in moments.
 
 ## Why it costs time
 
@@ -132,8 +148,11 @@ WINDOW_SINGLE_PARTITION = Rule(
     title='{window_operator} moves every row into one partition, because the window has no partitionBy',
     signals=frozenset({'plan'}),
     scope='plan_node',
-    thresholds=(),
-    severity_ladder={'high': 'the window reads an Exchange into SinglePartition'},
+    thresholds=(Threshold('min_bytes', 256 * _MIB, 'bytes', 'AQE spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes'),),
+    severity_ladder={
+        'info': 'the window reads an Exchange into SinglePartition, under min_bytes or unmeasured',
+        'high': 'and the single partition holds at least min_bytes',
+    },
     remediation=(
         'add a partitionBy on a key the ranking can be done within',
         'number rows with monotonically_increasing_id() where gaps are fine',

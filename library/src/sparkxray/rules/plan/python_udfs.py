@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from sparkxray.rules.plan.node_reading import OUTPUT_ROWS
+from sparkxray.rules.plan.node_reading import counted_nodes
 from sparkxray.rules.plan.node_reading import metric
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import RuleContext
@@ -46,30 +47,29 @@ FROM tasks_effective
 
 def _python_nodes(operators: frozenset[str]) -> Callable[[RuleContext], Iterator[dict[str, Any]]]:
     def check(context: RuleContext) -> Iterator[dict[str, Any]]:
-        for execution_id, nodes in context.numbered.items():
-            for numbered in nodes:
-                if numbered.node.operator not in operators:
-                    continue
-                metrics = context.metrics(execution_id, numbered.number)
-                finding: dict[str, Any] = {
-                    'sql_execution_id': execution_id,
-                    'plan_node_id': numbered.number,
-                    'severity': 'info',
-                    'impact_seconds': None,
-                    'python_operator': numbered.node.operator,
-                    'output_rows': metric(metrics, OUTPUT_ROWS),
-                    'sent_to_python_bytes': metric(metrics, 'data sent to Python workers'),
-                    'returned_from_python_bytes': metric(metrics, 'data returned from Python workers'),
+        for execution_id, _, numbered in counted_nodes(context):
+            if numbered.node.operator not in operators:
+                continue
+            metrics = context.metrics(execution_id, numbered.number)
+            finding: dict[str, Any] = {
+                'sql_execution_id': execution_id,
+                'plan_node_id': numbered.number,
+                'severity': 'info',
+                'impact_seconds': None,
+                'python_operator': numbered.node.operator,
+                'output_rows': metric(metrics, OUTPUT_ROWS),
+                'sent_to_python_bytes': metric(metrics, 'data sent to Python workers'),
+                'returned_from_python_bytes': metric(metrics, 'data returned from Python workers'),
+            }
+            if context.tables is not None and execution_id is not None:
+                parameters = {'execution_id': execution_id, 'node_id': numbered.number}
+                stage_ids, share, peak = context.tables.query(_STAGES_SQL, parameters).fetchall()[0]
+                finding |= {
+                    'stage_ids': tuple(stage_ids or ()),
+                    'stage_run_time_share': share,
+                    'peak_python_rss_bytes': peak,
                 }
-                if context.tables is not None and execution_id is not None:
-                    parameters = {'execution_id': execution_id, 'node_id': numbered.number}
-                    stage_ids, share, peak = context.tables.query(_STAGES_SQL, parameters).fetchall()[0]
-                    finding |= {
-                        'stage_ids': tuple(stage_ids or ()),
-                        'stage_run_time_share': share,
-                        'peak_python_rss_bytes': peak,
-                    }
-                yield finding
+            yield finding
 
     return check
 

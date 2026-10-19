@@ -8,6 +8,7 @@ from typing import Any
 
 from sparkxray.plan import labels
 from sparkxray.rules.plan.node_reading import OUTPUT_ROWS
+from sparkxray.rules.plan.node_reading import counted_nodes
 from sparkxray.rules.plan.node_reading import field
 from sparkxray.rules.plan.node_reading import filter_condition
 from sparkxray.rules.plan.node_reading import is_cut
@@ -25,6 +26,7 @@ _SOURCE_COMBINATORS = frozenset({'And', 'Or', 'Not'})
 _NO_PRUNING = re.compile(r'isnotnull\([^()]*\)|dynamicpruningexpression\(true\)')
 # Between a filter and the scan it reads, only a conversion from columnar batches to rows.
 _ROW_CONVERSIONS = frozenset({'ColumnarToRow'})
+_MIB = 2**20
 
 
 def conjuncts(condition: str) -> list[str]:
@@ -116,34 +118,36 @@ def unpushed_conjuncts(condition: str, pushed_filters: str, partition_filters: s
 
 
 def _filter_not_pushed(context: RuleContext) -> Iterator[dict[str, Any]]:
-    for execution_id, nodes in context.numbered.items():
-        for numbered in nodes:
-            condition = filter_condition(numbered.node)
-            if condition is None or len(numbered.children) != 1:
-                continue
-            below = nodes[numbered.children[0]]
-            while below.node.operator in _ROW_CONVERSIONS and len(below.children) == 1:
-                below = nodes[below.children[0]]
-            location = scan_location(below.node)
-            pushed = field(below.node, 'PushedFilters')
-            partition_filters = field(below.node, 'PartitionFilters') or '[]'
-            if location is None or pushed is None or is_cut(pushed) or is_cut(partition_filters):
-                continue
-            unpushed = unpushed_conjuncts(condition, pushed, partition_filters)
-            if not unpushed:
-                continue
-            filter_metrics = context.metrics(execution_id, numbered.number)
-            yield {
-                'sql_execution_id': execution_id,
-                'plan_node_id': numbered.number,
-                'severity': 'medium',
-                'impact_seconds': None,
-                'unpushed_conditions': tuple(unpushed),
-                'pushed_filters': pushed,
-                'scan_location': location,
-                'scan_output_rows': metric(context.metrics(execution_id, below.number), OUTPUT_ROWS),
-                'filter_output_rows': metric(filter_metrics, OUTPUT_ROWS),
-            }
+    min_read_bytes = context.thresholds['min_read_bytes']
+    for execution_id, nodes, numbered in counted_nodes(context):
+        condition = filter_condition(numbered.node)
+        if condition is None or len(numbered.children) != 1:
+            continue
+        below = nodes[numbered.children[0]]
+        while below.node.operator in _ROW_CONVERSIONS and len(below.children) == 1:
+            below = nodes[below.children[0]]
+        location = scan_location(below.node)
+        pushed = field(below.node, 'PushedFilters')
+        partition_filters = field(below.node, 'PartitionFilters') or '[]'
+        if location is None or pushed is None or is_cut(pushed) or is_cut(partition_filters):
+            continue
+        unpushed = unpushed_conjuncts(condition, pushed, partition_filters)
+        if not unpushed:
+            continue
+        scan_metrics = context.metrics(execution_id, below.number)
+        read_bytes = metric(scan_metrics, 'size of files read')
+        yield {
+            'sql_execution_id': execution_id,
+            'plan_node_id': numbered.number,
+            'severity': 'medium' if read_bytes is not None and read_bytes >= min_read_bytes else 'info',
+            'impact_seconds': None,
+            'unpushed_conditions': tuple(unpushed),
+            'pushed_filters': pushed,
+            'scan_location': location,
+            'read_bytes': read_bytes,
+            'scan_output_rows': metric(scan_metrics, OUTPUT_ROWS),
+            'filter_output_rows': metric(context.metrics(execution_id, numbered.number), OUTPUT_ROWS),
+        }
 
 
 _FILTER_NOT_PUSHED_LESSON = """\
@@ -153,6 +157,11 @@ A `Filter` directly above a file scan, holding a condition the scan did not take
 each conjunct of a condition it can into one entry of the scan's `PushedFilters`, which the source
 uses to skip files and row groups. A conjunct with no entry, such as one over `cast(id as string)`,
 is checked on every row read.
+
+The finding is `medium` where the scan read at least 128 MiB, the default
+`spark.sql.files.maxPartitionBytes`, and `info` below it or where nothing measured the scan. A
+smaller read fits one task's split, so skipping row groups in it saves little. The floor is
+proposed here, because no tool publishes one.
 
 ## Why it costs time
 
@@ -180,8 +189,11 @@ FILTER_NOT_PUSHED = Rule(
     title='A filter over {scan_location} checks every row read, because the scan could not take it',
     signals=frozenset({'plan'}),
     scope='plan_node',
-    thresholds=(),
-    severity_ladder={'medium': "a conjunct of the filter has no entry in the scan's PushedFilters"},
+    thresholds=(Threshold('min_read_bytes', 128 * _MIB, 'bytes', 'proposed'),),
+    severity_ladder={
+        'info': "a conjunct of the filter has no entry in the scan's PushedFilters, over a read under min_read_bytes or unmeasured",
+        'medium': 'and the scan read at least min_read_bytes',
+    },
     remediation=(
         'compare the column as it is stored, without a cast or function on it',
         'store a normalized copy of the column where the query needs one',
@@ -194,27 +206,28 @@ FILTER_NOT_PUSHED = Rule(
 
 
 def _partition_not_pruned(context: RuleContext) -> Iterator[dict[str, Any]]:
-    for execution_id, nodes in context.numbered.items():
-        for numbered in nodes:
-            location = scan_location(numbered.node)
-            metrics = context.metrics(execution_id, numbered.number)
-            partitions = metric(metrics, 'number of partitions read')
-            partition_filters = field(numbered.node, 'PartitionFilters')
-            if location is None or not partitions or partition_filters is None or is_cut(partition_filters):
-                continue
-            if any(not _NO_PRUNING.fullmatch(entry) for entry in list_entries(partition_filters)):
-                continue
-            yield {
-                'sql_execution_id': execution_id,
-                'plan_node_id': numbered.number,
-                'severity': 'medium',
-                'impact_seconds': None,
-                'scan_location': location,
-                'partition_filters': partition_filters,
-                'partitions_read_count': partitions,
-                'files_read_count': metric(metrics, 'number of files read'),
-                'read_bytes': metric(metrics, 'size of files read'),
-            }
+    min_read_bytes = context.thresholds['min_read_bytes']
+    for execution_id, _, numbered in counted_nodes(context):
+        location = scan_location(numbered.node)
+        metrics = context.metrics(execution_id, numbered.number)
+        partitions = metric(metrics, 'number of partitions read')
+        partition_filters = field(numbered.node, 'PartitionFilters')
+        if location is None or not partitions or partition_filters is None or is_cut(partition_filters):
+            continue
+        if any(not _NO_PRUNING.fullmatch(entry) for entry in list_entries(partition_filters)):
+            continue
+        read_bytes = metric(metrics, 'size of files read')
+        yield {
+            'sql_execution_id': execution_id,
+            'plan_node_id': numbered.number,
+            'severity': 'medium' if read_bytes is not None and read_bytes >= min_read_bytes else 'info',
+            'impact_seconds': None,
+            'scan_location': location,
+            'partition_filters': partition_filters,
+            'partitions_read_count': partitions,
+            'files_read_count': metric(metrics, 'number of files read'),
+            'read_bytes': read_bytes,
+        }
 
 
 _PARTITION_NOT_PRUNED_LESSON = """\
@@ -223,6 +236,10 @@ _PARTITION_NOT_PRUNED_LESSON = """\
 A scan of a partitioned table whose `PartitionFilters` hold nothing beyond `isnotnull`, so it read
 every partition. An event log carries no catalog, so the scan's `number of partitions read`
 metric, which only a partitioned table reports, is the sign the table is partitioned.
+
+The finding is `medium` where the scan read at least 128 MiB, the default
+`spark.sql.files.maxPartitionBytes`, and `info` below it. A table that small fits one task's split,
+so pruning it saves little. The floor is proposed here, because no tool publishes one.
 
 ## Why it costs time
 
@@ -251,8 +268,11 @@ PARTITION_NOT_PRUNED = Rule(
     title='A scan of {scan_location} read all {partitions_read_count:,} partitions, pruning none',
     signals=frozenset({'plan', 'plan_metrics'}),
     scope='plan_node',
-    thresholds=(),
-    severity_ladder={'medium': 'a partitioned table was read with no partition filter'},
+    thresholds=(Threshold('min_read_bytes', 128 * _MIB, 'bytes', 'proposed'),),
+    severity_ladder={
+        'info': 'a partitioned table was read with no partition filter, and under min_read_bytes or unmeasured',
+        'medium': 'and the scan read at least min_read_bytes',
+    },
     remediation=(
         'filter on the partition column itself, against a value Spark can fold',
         'keep spark.sql.optimizer.dynamicPartitionPruning.enabled on for a join on the partition column',
@@ -265,18 +285,17 @@ PARTITION_NOT_PRUNED = Rule(
 
 def _long_filter(context: RuleContext) -> Iterator[dict[str, Any]]:
     max_characters = context.thresholds['max_characters']
-    for execution_id, nodes in context.numbered.items():
-        for numbered in nodes:
-            condition = filter_condition(numbered.node)
-            if condition is None or len(condition) <= max_characters:
-                continue
-            yield {
-                'sql_execution_id': execution_id,
-                'plan_node_id': numbered.number,
-                'severity': 'low',
-                'impact_seconds': None,
-                'condition_character_count': len(condition),
-            }
+    for execution_id, _, numbered in counted_nodes(context):
+        condition = filter_condition(numbered.node)
+        if condition is None or len(condition) <= max_characters:
+            continue
+        yield {
+            'sql_execution_id': execution_id,
+            'plan_node_id': numbered.number,
+            'severity': 'low',
+            'impact_seconds': None,
+            'condition_character_count': len(condition),
+        }
 
 
 _LONG_FILTER_LESSON = """\

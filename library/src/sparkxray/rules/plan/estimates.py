@@ -64,8 +64,9 @@ the estimates, and no event log carries them, so this rule runs through `analyze
 
 ## Why it costs time
 
-Without table statistics, Spark sizes each relation from its files, and estimates a join's output
-as the product of its inputs' sizes. So two small tables can join to an estimate of gigabytes. The
+With the cost-based optimizer off, as it is by default, Spark estimates a join's output as the
+product of its inputs' sizes. It sizes each relation without statistics from its files. So two
+small tables can join to an estimate of gigabytes. The
 estimate chooses the join strategy before anything has run: a side estimated large is never
 broadcast up front, and a cost-based join reorder works from the wrong sizes.
 
@@ -76,9 +77,10 @@ node's `Statistics(sizeInBytes=...)`.
 
 ## How to fix it
 
-- Compute statistics with `ANALYZE TABLE t COMPUTE STATISTICS FOR ALL COLUMNS`.
-- Turn on the cost-based optimizer with `spark.sql.cbo.enabled`, so a join is estimated from row
-  counts and column statistics rather than sizes.
+- Turn on the cost-based optimizer with `spark.sql.cbo.enabled`, and compute column statistics
+  with `ANALYZE TABLE t COMPUTE STATISTICS FOR ALL COLUMNS`. Together they estimate a join from
+  row counts and column statistics. Either alone leaves the estimate a product of sizes, because
+  with the optimizer off Spark multiplies the inputs' sizes whatever statistics the tables hold.
 - Keep AQE on with `spark.sql.adaptive.enabled`, which replans a join from measured sizes once its
   inputs have run.
 """
@@ -91,8 +93,7 @@ ESTIMATE_UNRELIABLE = Rule(
     thresholds=(Threshold('ratio', 100, 'x', 'proposed'),),
     severity_ladder={'info': "a node's estimate is over ratio times the relations under it"},
     remediation=(
-        'compute statistics with ANALYZE TABLE ... COMPUTE STATISTICS FOR ALL COLUMNS',
-        'turn on the cost-based optimizer with spark.sql.cbo.enabled',
+        'turn on spark.sql.cbo.enabled and run ANALYZE TABLE ... COMPUTE STATISTICS FOR ALL COLUMNS, together',
         'keep AQE on, so joins are replanned from measured sizes',
     ),
     docs=(

@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from sparkxray.rules.plan.node_reading import FILE_SCAN_OPERATORS
+from sparkxray.rules.plan.node_reading import counted_nodes
 from sparkxray.rules.plan.node_reading import metric
 from sparkxray.rules.plan.node_reading import scan_location
 from sparkxray.rules.rule import Rule
@@ -19,24 +20,23 @@ _MIB = 2**20
 
 def _small_files_read(context: RuleContext) -> Iterator[dict[str, Any]]:
     small, many = context.thresholds['small_file_bytes'], context.thresholds['many_files']
-    for execution_id, nodes in context.numbered.items():
-        for numbered in nodes:
-            if numbered.node.operator not in FILE_SCAN_OPERATORS:
-                continue
-            metrics = context.metrics(execution_id, numbered.number)
-            files, size = metric(metrics, 'number of files read'), metric(metrics, 'size of files read')
-            if not files or size is None or files <= many or size / files >= small:
-                continue
-            yield {
-                'sql_execution_id': execution_id,
-                'plan_node_id': numbered.number,
-                'severity': 'medium',
-                'impact_seconds': None,
-                'scan_location': scan_location(numbered.node),
-                'files_read_count': files,
-                'read_bytes': size,
-                'average_file_bytes': size / files,
-            }
+    for execution_id, _, numbered in counted_nodes(context):
+        if numbered.node.operator not in FILE_SCAN_OPERATORS:
+            continue
+        metrics = context.metrics(execution_id, numbered.number)
+        files, size = metric(metrics, 'number of files read'), metric(metrics, 'size of files read')
+        if not files or size is None or files <= many or size / files >= small:
+            continue
+        yield {
+            'sql_execution_id': execution_id,
+            'plan_node_id': numbered.number,
+            'severity': 'medium',
+            'impact_seconds': None,
+            'scan_location': scan_location(numbered.node),
+            'files_read_count': files,
+            'read_bytes': size,
+            'average_file_bytes': size / files,
+        }
 
 
 _SMALL_FILES_READ_LESSON = """\
@@ -87,23 +87,22 @@ SMALL_FILES_READ = Rule(
 
 def _small_files_written(context: RuleContext) -> Iterator[dict[str, Any]]:
     small, many, target = (context.thresholds[name] for name in ('small_file_bytes', 'many_files', 'target_file_bytes'))
-    for execution_id, nodes in context.numbered.items():
-        for numbered in nodes:
-            metrics = context.metrics(execution_id, numbered.number)
-            files, size = metric(metrics, 'number of written files'), metric(metrics, 'written output')
-            if not files or size is None or files <= many or size / files >= small:
-                continue
-            yield {
-                'sql_execution_id': execution_id,
-                'plan_node_id': numbered.number,
-                'severity': 'medium',
-                'impact_seconds': None,
-                'written_files_count': files,
-                'written_bytes': size,
-                'average_file_bytes': size / files,
-                'dynamic_partitions_count': metric(metrics, 'number of dynamic part'),
-                'suggested_file_count': max(1, math.ceil(size / target)),
-            }
+    for execution_id, _, numbered in counted_nodes(context):
+        metrics = context.metrics(execution_id, numbered.number)
+        files, size = metric(metrics, 'number of written files'), metric(metrics, 'written output')
+        if not files or size is None or files <= many or size / files >= small:
+            continue
+        yield {
+            'sql_execution_id': execution_id,
+            'plan_node_id': numbered.number,
+            'severity': 'medium',
+            'impact_seconds': None,
+            'written_files_count': files,
+            'written_bytes': size,
+            'average_file_bytes': size / files,
+            'dynamic_partitions_count': metric(metrics, 'number of dynamic part'),
+            'suggested_file_count': max(1, math.ceil(size / target)),
+        }
 
 
 _SMALL_FILES_WRITTEN_LESSON = """\
