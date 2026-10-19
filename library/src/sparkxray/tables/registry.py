@@ -221,21 +221,42 @@ _SHUFFLE_WRITE = '"Task Metrics"."Shuffle Write Metrics"'
 _PEAKS = '"Task Executor Metrics"'
 _REASON = '"Task End Reason"'
 
+_PARTITION = 'nullif("Task Info"."Partition ID", -1)'
+
 _TASKS = Table(
     name='tasks',
-    description='Every task attempt, in log order. A task still running when the log ends has no finish, reason or metrics.',
-    source="""
-        WITH ended AS (SELECT DISTINCT "Task Info"."Task ID" AS task_id FROM events WHERE kind = 'SparkListenerTaskEnd')
-        SELECT rowid AS position, * FROM events WHERE kind = 'SparkListenerTaskEnd'
-        UNION ALL
-        SELECT rowid AS position, * FROM events AS started WHERE kind = 'SparkListenerTaskStart'
-          AND NOT EXISTS (SELECT 1 FROM ended WHERE ended.task_id = started."Task Info"."Task ID")
+    description=(
+        'Every task attempt, in log order. A task still running when the log ends has no finish, reason or metrics. '
+        '`effective` marks the first success of each partition of each stage, which `tasks_effective` keeps.'
+    ),
+    # A stage retry reruns only the partitions it lost, and numbers its tasks' Index from 0 again.
+    # So a partition is read from Partition ID, which Spark writes from 3.3 on. An older log has
+    # only Index, which names a partition within one stage attempt and no further.
+    source=f"""
+        WITH ended AS (SELECT DISTINCT "Task Info"."Task ID" AS task_id FROM events WHERE kind = 'SparkListenerTaskEnd'),
+        attempts AS (
+          SELECT rowid AS position, * FROM events WHERE kind = 'SparkListenerTaskEnd'
+          UNION ALL
+          SELECT rowid AS position, * FROM events AS started WHERE kind = 'SparkListenerTaskStart'
+            AND NOT EXISTS (SELECT 1 FROM ended WHERE ended.task_id = started."Task Info"."Task ID")
+        ), keyed AS (
+          SELECT *, coalesce("Task End Reason"."Reason" = 'Success', false) AS succeeded,
+            coalesce({_PARTITION}, "Task Info"."Index") AS partition_key,
+            CASE WHEN {_PARTITION} IS NULL AND "Stage Attempt ID" > 0 THEN "Stage Attempt ID" END AS unnumbered_attempt
+          FROM attempts
+        )
+        SELECT *, succeeded AND row_number() OVER (
+            PARTITION BY "Stage ID", partition_key, unnumbered_attempt, succeeded
+            ORDER BY nullif("Task Info"."Finish Time", 0), "Task Info"."Task ID"
+          ) = 1 AS first_success
+        FROM keyed
     """,
     columns=_columns(
         ('stage_id', 'BIGINT', '"Stage ID"'),
         ('stage_attempt', 'BIGINT', '"Stage Attempt ID"'),
         ('task_id', 'BIGINT', '"Task Info"."Task ID"'),
         ('task_index', 'BIGINT', '"Task Info"."Index"'),
+        ('partition_id', 'BIGINT', _PARTITION),
         ('attempt', 'BIGINT', '"Task Info"."Attempt"'),
         ('executor_id', 'VARCHAR', '"Task Info"."Executor ID"'),
         ('host', 'VARCHAR', '"Task Info"."Host"'),
@@ -247,6 +268,7 @@ _TASKS = Table(
         ('getting_result_ms', 'BIGINT', _GETTING_RESULT),
         ('failed', 'BOOLEAN', 'coalesce("Task Info"."Failed", false)'),
         ('killed', 'BOOLEAN', 'coalesce("Task Info"."Killed", false)'),
+        ('effective', 'BOOLEAN', 'first_success'),
         ('end_reason', 'VARCHAR', f'{_REASON}."Reason"'),
         (
             'end_reason_detail',
@@ -448,12 +470,6 @@ TABLES: tuple[Table, ...] = (
     _NODE_STAGES,
 )
 
-# Each stage's highest attempt, and in it one success per task index, the first to finish. Retries
-# and speculative copies stay in `tasks`, where they show the work they wasted.
-TASKS_EFFECTIVE = """
-    CREATE VIEW tasks_effective AS
-    SELECT tasks.* FROM tasks
-    JOIN stages ON stages.stage_id = tasks.stage_id AND stages.attempt = tasks.stage_attempt AND stages.is_highest_attempt
-    WHERE tasks.end_reason = 'Success'
-    QUALIFY row_number() OVER (PARTITION BY tasks.stage_id, tasks.task_index ORDER BY tasks.finish_ms, tasks.task_id) = 1
-"""
+# Each partition of each stage once: its first success across the stage's attempts. Retries and
+# speculative copies stay in `tasks`, where they show the work they wasted.
+TASKS_EFFECTIVE = 'CREATE VIEW tasks_effective AS SELECT * FROM tasks WHERE effective'

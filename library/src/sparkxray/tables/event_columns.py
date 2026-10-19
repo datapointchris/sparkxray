@@ -10,7 +10,7 @@ from __future__ import annotations
 _ACCUMULABLE = 'STRUCT("ID" BIGINT, "Update" VARCHAR)'
 
 _TASK_INFO = (
-    'STRUCT("Task ID" BIGINT, "Index" BIGINT, "Attempt" BIGINT, "Launch Time" BIGINT, "Executor ID" VARCHAR, '
+    'STRUCT("Task ID" BIGINT, "Index" BIGINT, "Partition ID" BIGINT, "Attempt" BIGINT, "Launch Time" BIGINT, "Executor ID" VARCHAR, '
     '"Host" VARCHAR, "Locality" VARCHAR, "Speculative" BOOLEAN, "Getting Result Time" BIGINT, "Finish Time" BIGINT, '
     f'"Failed" BOOLEAN, "Killed" BOOLEAN, "Accumulables" {_ACCUMULABLE}[])'
 )

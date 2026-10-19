@@ -196,16 +196,26 @@ happened to hold.
 
 The build parses every field, each task's accumulator updates included, where the parse benchmark
 reads a few task fields. On the benchmark's input and machine, building every table takes
-1.8–2.0 s, against the benchmark's 0.3 s. Reopening the cached tables takes 0.02 s.
+2.0–2.2 s, against the benchmark's 0.3 s. Reopening the cached tables takes 0.02 s.
 
 A build writes into a directory of its own, then renames it into place. Two processes building one
 log never read each other's partial files, and the first rename wins. Tables built from an older
 version of the log are removed the next time its tables are read, once they have gone a day unused.
 So is a build a killed process left partway.
 
-`tasks_effective` is a view over `tasks` and `stages`. It keeps each stage's highest attempt and,
-within it, the first success of each task index. So a retried or speculative task is counted once,
-while `tasks` keeps every attempt for measuring what retries cost.
+`tasks.effective` marks the first success of each partition of each stage, across the stage's
+attempts. `tasks_effective` is `tasks` where it is true. So a retried or speculative task counts
+once, while `tasks` keeps every attempt for measuring what retries cost. The selection is a
+column, so a Parquet reader of `tasks.parquet` gets it without sparkxray.
+
+A stage retry reruns only the partitions it lost, and numbers its tasks from `Index` 0 again. So
+a partition is read from `Partition ID`, which Spark writes from 3.3 on. An older log has only
+`Index`, which names a partition within one stage attempt. There a partition a later attempt
+reran after it succeeded counts once per attempt.
+
+`plan_node_metrics` counts only each stage's highest attempt instead, because the SQL tab does.
+So after a stage retry, its totals can fall short of the same metric summed over
+`tasks_effective`.
 
 `manifest.json` names what the log was written without, because Spark's defaults leave it out:
 

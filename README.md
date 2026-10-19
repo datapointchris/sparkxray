@@ -139,8 +139,10 @@ print(tables.path)                               # the Parquet directory, for an
 | `plan_node_metrics` | metric a plan node declares, aggregated as the History Server's SQL tab does |
 | `node_stages` | stage a node of an execution's last plan ran in |
 
-Read task metrics through `tasks_effective`. It keeps the first success of each task index in each
-stage's highest attempt, so a retried or speculative task is counted once.
+Read task metrics through `tasks_effective`. It keeps the first success of each partition of each
+stage, so a retried or speculative task counts once, and a stage retry keeps the partitions it did
+not rerun. It is `tasks` where `effective` is true, so a Parquet reader filters on that column.
+`partition_id` names the partition a task computed, which a retry's `task_index` does not.
 
 A column holding a time or a size names its unit: `ms`, `ns`, `bytes` or `mib`. Spark reports CPU
 time in nanoseconds beside run time in milliseconds, and the names keep the two apart.

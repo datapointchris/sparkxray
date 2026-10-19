@@ -16,8 +16,8 @@ class Tables:
     """The tables built from one log, each a lazy DuckDB relation.
 
     `path` is the directory holding `<table>.parquet` and `manifest.json`, which DuckDB or any
-    Parquet reader can open without sparkxray. `tasks_effective` is a view over `tasks` and
-    `stages`, and every rule reads it rather than `tasks`.
+    Parquet reader can open without sparkxray. `tasks_effective` is `tasks` where `effective` is
+    true, and every rule reads it rather than `tasks`.
     """
 
     def __init__(self, path: Path) -> None:
