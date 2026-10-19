@@ -1,0 +1,49 @@
+[project]
+name = "sparkxray"
+dynamic = ["version"]
+description = "Read Spark event logs offline, with no JVM, and find why a run was slow: skew, spill, join choices, idle executors."
+authors = [{ name = "Chris Birch", email = "datapointchris@gmail.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+keywords = ["spark", "pyspark", "event-log", "performance", "duckdb", "glue"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Distributed Computing",
+    "Typing :: Typed",
+]
+
+# AWS Glue 5.0 and 5.1 run Python 3.11, and the library is imported inside Glue
+# jobs. Each dependency's floor is the oldest release the tests pass against, so
+# installing into a Glue job upgrades as little of its environment as it can.
+requires-python = ">=3.11"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/datapointchris/sparkxray"
+Issues = "https://github.com/datapointchris/sparkxray/issues"
+Changelog = "https://github.com/datapointchris/sparkxray/releases"
+
+# The release tag is the version. python-semantic-release finds no file to
+# stamp, so it tags the merge commit itself and writes no release commit.
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+style = "semver"
+
+# A new commit or tag changes the version, so it has to invalidate uv's cache.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
+
+# The published sdist holds the package and its metadata, and none of the
+# repo's tooling or tests.
+[tool.hatch.build.targets.sdist]
+only-include = ["src"]
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"

@@ -1,0 +1,83 @@
+name: Library on Python 3.11
+
+# The workspace resolves at one Python, the intersection of its members'
+# requires-python, so validate.yml runs the library at 3.13. The library
+# supports 3.11, the Python AWS Glue 5.0 and 5.1 run, and this is the only
+# workflow that runs it there.
+#
+# Each leg installs the library alone and unlocked, the way pip installs it:
+#   highest        every dependency at its newest release
+#   lowest-direct  every dependency at the floor the library declares, so a
+#                  test reaching code that outgrew a floor fails here
+#   glue-5.0/5.1   that Glue release's preinstalled modules first, from
+#                  .github/glue-preinstalled-modules/. The library's install
+#                  keeps each one that satisfies a floor, as pip does in a job.
+#
+# push is left out because release.yml calls this on every push to main.
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  library:
+    name: library on 3.11 (${{ matrix.environment }})
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [highest, lowest-direct, glue-5.0, glue-5.1]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.24"
+
+      # pytest goes in after the library, at its own newest release, so the
+      # lowest-direct leg never resolves the test runner to its floor.
+      - name: Install the library into a 3.11 environment
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+        run: |
+          uv venv --python 3.11 "$RUNNER_TEMP/library"
+          case $ENVIRONMENT in
+            glue-*)
+              uv pip install --python "$RUNNER_TEMP/library" -r ".github/glue-preinstalled-modules/${ENVIRONMENT#glue-}.txt"
+              uv pip install --python "$RUNNER_TEMP/library" ./library
+              ;;
+            *)
+              uv pip install --python "$RUNNER_TEMP/library" --resolution "$ENVIRONMENT" ./library
+              ;;
+          esac
+          uv pip install --python "$RUNNER_TEMP/library" pytest
+
+      # compileall parses every module with the 3.11 interpreter, so syntax from
+      # a later Python fails here even in a module no test imports.
+      - name: Compile every module with Python 3.11
+        run: '"$RUNNER_TEMP/library/bin/python" -m compileall -q library/src'
+
+      # mypy comes from the workspace's locked dev group and reads the root
+      # config. --python-executable points it at the 3.11 environment, so it
+      # checks against the dependency versions this leg installed.
+      - name: Type-check the library as 3.11
+        run: >-
+          uv run --frozen --only-group dev mypy
+          --python-version 3.11
+          --python-executable "$RUNNER_TEMP/library/bin/python"
+          library/src
+
+      # pytest exits 5 when it collects nothing, and an empty suite is not a
+      # failure. set +e lets the step read that code, where the runner's bash -e
+      # would end the step on it.
+      - name: Test the library on Python 3.11
+        run: |
+          set +e
+          "$RUNNER_TEMP/library/bin/python" -m pytest library
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ] || [ "$code" -eq 5 ]; then exit 0; fi
+          exit 1
