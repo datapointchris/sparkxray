@@ -85,25 +85,28 @@ class S3Location:
     def __init__(self, location: str, *, profile: str | None, region: str | None) -> None:
         from sparkxray.ingest import aws  # boto3 is imported only when a log is on S3
 
-        bucket, _, prefix = location.partition('://')[2].partition('/')
-        prefix = prefix.rstrip('/')
+        bucket, _, key = location.partition('://')[2].partition('/')
+        # A trailing slash names a directory, so only the keys below it are listed.
+        directory = key.endswith('/')
+        prefix = key.rstrip('/')
         parent, _, name = prefix.rpartition('/')
         # A file inside a rolling log's directory names the whole log.
         if parent and ROLLING_DIRECTORY.fullmatch(parent.rpartition('/')[2]) and not ROLLING_DIRECTORY.fullmatch(name):
             prefix = parent
+            directory = True
         self._bucket = bucket
         self._prefix = prefix
-        self.uri = f's3://{bucket}/{prefix}'
+        self._directory = directory and bool(prefix)
+        self.uri = f's3://{bucket}/{prefix}/' if self._directory else f's3://{bucket}/{prefix}'
         self._client = aws.S3(profile=profile, region=region)
 
     def list(self) -> tuple[list[ListedFile], ListedFile | None]:
         prefix = self._prefix
         base = prefix.rpartition('/')[0]
         listing = []
-        for item in self._client.list_objects(self._bucket, prefix):
+        for item in self._client.list_objects(self._bucket, f'{prefix}/' if self._directory else prefix):
             key = str(item['Key'])
-            # `logs/app-1` holds `logs/app-1`, `logs/app-1.inprogress` and `logs/app-1/…`, never `logs/app-10`.
-            if key.endswith('/') or (prefix and key != prefix and key[len(prefix)] not in './'):
+            if key.endswith('/') or not _below(key, prefix):
                 continue
             parts = tuple(key[len(base) + 1 :].split('/') if base else key.split('/'))
             if any(ignored(part) for part in parts[1:-1]):
@@ -134,3 +137,15 @@ class S3Location:
 
     def _key(self, listed: ListedFile) -> str:
         return listed.uri.removeprefix(f's3://{self._bucket}/')
+
+
+def _below(key: str, prefix: str) -> bool:
+    """Whether a key is the object `prefix` names, a file beside it named for it, or a key in it.
+
+    `logs/app-1` holds `logs/app-1`, `logs/app-1.inprogress` and `logs/app-1/…`. It never holds
+    `logs/app-10`, or `logs/app-1.bak/…`, which is another directory.
+    """
+    if not prefix or key == prefix:
+        return True
+    rest = key[len(prefix) :]
+    return rest.startswith('/') or (rest.startswith('.') and '/' not in rest)

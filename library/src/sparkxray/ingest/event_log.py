@@ -120,7 +120,7 @@ def _resolve(source: Location) -> layouts.Candidate:
     confirmed = [candidate for candidate, rejection in zip(candidates, rejections, strict=True) if rejection is None]
     if not confirmed:
         # The location named one log, so the refusal is about that log rather than what a directory holds.
-        if len(candidates) == 1 and candidates[0].uri == source.uri and rejections[0] is not None:
+        if len(candidates) == 1 and candidates[0].uri == source.uri.rstrip('/') and rejections[0] is not None:
             raise rejections[0].error
         rejected = [
             f'{"/".join(candidate.files[0].listed.parts)} ({rejection.reason})'
