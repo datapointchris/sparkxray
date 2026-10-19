@@ -6,9 +6,10 @@ import dataclasses as dc
 import re
 from typing import Literal
 
+# The units Spark's Utils.bytesToString and Utils.msDurationToString write.
 _BYTES = {'B': 1, 'KiB': 2**10, 'MiB': 2**20, 'GiB': 2**30, 'TiB': 2**40, 'PiB': 2**50, 'EiB': 2**60}
-_MILLISECONDS = {'ms': 1, 's': 1000, 'min': 60_000, 'h': 3_600_000}
-_VALUE = r'-?[\d,]+(?:\.\d+)?(?: (?:B|KiB|MiB|GiB|TiB|PiB|EiB|ms|s|min|h))?'
+_MILLISECONDS = {'ms': 1, 's': 1000, 'm': 60_000, 'h': 3_600_000}
+_VALUE = r'-?[\d,]+(?:\.\d+)?(?: (?:B|KiB|MiB|GiB|TiB|PiB|EiB|ms|s|m|h))?'
 _DISPLAY = re.compile(
     rf'(?P<total>{_VALUE})?\s*'
     rf'(?:\((?P<min>{_VALUE}), (?P<median>{_VALUE}), (?P<max>{_VALUE}) '
