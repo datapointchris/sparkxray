@@ -74,7 +74,7 @@ def list_findings(
     if as_json:
         render.emit_json({**listed.to_json(), 'gate': gate.to_json()})
     else:
-        _print_findings(listed, _show_command(log, threshold, thresholds))
+        _print_findings(listed, len(analysis.findings), _show_command(log, threshold, thresholds))
     for skipped in analysis.skipped:
         render.note(f'skipped {skipped.rule_id}: the log holds no {", ".join(skipped.missing_signals)}')
     if not gate.passed:
@@ -135,24 +135,27 @@ def _analysis(log: str, rules: list[str] | None, flags: list[str] | None, file: 
         return event_log.analyze(rules=rules or None, threshold_file=file, threshold_flags=flags or ())
 
 
-def _print_findings(analysis: Analysis, show_command: list[str]) -> None:
-    if not analysis.findings:
+def _print_findings(listed: Analysis, found: int, show_command: list[str]) -> None:
+    if not found:
         render.none_found('findings')
         return
-    table = render.table()
-    for column in ('severity', 'finding_id', 'scope', 'title'):
-        table.add_column(render.header(column), overflow='fold', no_wrap=render.is_handle(column))
-    table.add_column(render.header('impact_seconds'), justify='right')
-    for finding in analysis.findings:
-        table.add_row(
-            render.severity_text(finding.severity),
-            Text(finding.finding_id),
-            Text(finding.scope.describe()),
-            Text(finding.title),
-            Text(render.shown('impact_seconds', finding.impact_seconds)),
-        )
-    render.stdout.print(table)
-    render.note(f'one in full: {shlex.join([*show_command[:4], analysis.findings[0].finding_id, *show_command[4:]])}')
+    if not listed.findings:
+        render.note(f'none listed; {found} finding{"s fall" if found > 1 else " falls"} below --min-severity or past --limit')
+        return
+    render.print_records(
+        [
+            {
+                'severity': finding.severity,
+                'finding_id': finding.finding_id,
+                'scope': finding.scope.describe(),
+                'title': finding.title,
+                'impact_seconds': finding.impact_seconds,
+            }
+            for finding in listed.findings
+        ],
+        ('severity', 'finding_id', 'scope', 'title', 'impact_seconds'),
+    )
+    render.note(f'one in full: {shlex.join([*show_command[:4], listed.findings[0].finding_id, *show_command[4:]])}')
 
 
 def _show_command(log: str, flags: list[str] | None, file: Path | None) -> list[str]:

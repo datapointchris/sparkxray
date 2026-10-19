@@ -76,6 +76,10 @@ A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and
 prints the raw numbers instead, each under a name ending in its unit, and an empty list as `[]`.
 Progress and notes go to stderr, so stdout holds only the data.
 
+A list keeps each row on one line. On a narrow terminal its longest text ends in `…`, and
+narrower still each row prints as a block of field and value. A `show` command and `--json`
+print every value whole.
+
 `findings list` exits 3 when a finding is at or above `--fail-on`, which defaults to `high`. It
 exits 2 on a usage error and 0 otherwise. So a CI step gates on the severity it names:
 

@@ -9,13 +9,16 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import json
+import sys
 from collections.abc import Iterator
 from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
+from typing import Literal
 
 from rich import box
 from rich.console import Console
+from rich.console import JustifyMethod
 from rich.table import Table
 from rich.text import Text
 from sparkxray.errors import SparkxrayError
@@ -81,8 +84,17 @@ def shown_in(unit: str | None, value: Any) -> str:
 
 
 def table(*, title: str | None = None, show_header: bool = True) -> Table:
-    """A table with no vertical rules, which leaves the width to the values."""
-    return Table(title=title, title_justify='left', title_style='bold', show_header=show_header, box=box.SIMPLE_HEAD, pad_edge=False)
+    """A table with no vertical rules and two spaces between columns, which leaves the width to the values."""
+    return Table(
+        title=title,
+        title_justify='left',
+        title_style='bold',
+        show_header=show_header,
+        box=box.SIMPLE_HEAD,
+        show_edge=False,
+        padding=(0, 1, 0, 0),
+        pad_edge=False,
+    )
 
 
 def header(column: str) -> str:
@@ -101,14 +113,77 @@ def print_rows(rows: Rows, columns: Sequence[str] | None = None, *, title: str |
 
 
 def print_records(records: Sequence[Mapping[str, Any]], columns: Sequence[str], *, title: str | None = None) -> None:
-    """Print mappings as a table of the named columns, numbers right-aligned."""
+    """Print mappings as a table of the named columns, numbers right-aligned, every row one line.
+
+    A table wider than the terminal is laid out again. A number, a handle or a short one-word
+    value then keeps its width, and only its header wraps, between words. A column of longer text
+    gives up the rest of the width, and each of its cells ends in an ellipsis rather than
+    wrapping. Where that would leave a text column under `_TEXT_FLOOR` characters, each record
+    prints as its own block of field and value instead, as psql's expanded display does.
+
+    Every cell is a `Text`, so a bracket in a value, as in a plan's `Project [id#0L]`, prints
+    as written rather than being read as a style.
+    """
+    cells = {column: [_cell(column, record.get(column)) for record in records] for column in columns}
+    numeric = {column: any(_is_number(record.get(column)) for record in records) for column in columns}
+    natural = _records_table(columns, cells, numeric, title, 'natural')
+    if not records or _natural_width(natural) <= stdout.width:
+        print_table(natural)
+    elif _natural_width(_records_table(columns, cells, numeric, title, 'floored')) <= stdout.width:
+        print_table(_records_table(columns, cells, numeric, title, 'fitted'))
+    else:
+        if title:
+            stdout.print(Text(title, style='bold'))
+        for record in records:
+            print_record(record, columns)
+
+
+# A one-word value up to this long keeps its width in a fitted table, as a status or a host does.
+_KEPT_WORD_LENGTH = 20
+# The fewest characters of a text column a fitted table shows, enough for a stage name's action.
+_TEXT_FLOOR = 12
+
+_Layout = Literal['natural', 'floored', 'fitted']
+
+
+def _cell(column: str, value: Any) -> Text:
+    """One line of a value as a person reads it."""
+    return Text(shown(column, value), style=_style(column, value), no_wrap=True, overflow='ellipsis')
+
+
+def _style(column: str, value: Any) -> str:
+    """A severity prints in its level's color, and every other value plain."""
+    return SEVERITY_STYLES.get(value, '') if column == 'severity' else ''
+
+
+def _records_table(
+    columns: Sequence[str], cells: Mapping[str, Sequence[Text]], numeric: Mapping[str, bool], title: str | None, layout: _Layout
+) -> Table:
     printed = table(title=title)
     for column in columns:
-        numeric = any(isinstance(record.get(column), int | float) and not isinstance(record.get(column), bool) for record in records)
-        printed.add_column(header(column), justify='right' if numeric else 'left', overflow='fold', no_wrap=is_handle(column))
-    for record in records:
-        printed.add_row(*(Text(shown(column, record.get(column))) for column in columns))
-    stdout.print(printed)
+        justify: JustifyMethod = 'right' if numeric[column] else 'left'
+        values = cells[column]
+        if layout == 'natural':
+            printed.add_column(header(column), justify=justify, no_wrap=True)
+            continue
+        heading = Text(header(column), no_wrap=False, overflow='fold')
+        if numeric[column] or is_handle(column) or all(cell.cell_len <= _KEPT_WORD_LENGTH and ' ' not in cell.plain for cell in values):
+            width = max([len(word) for word in header(column).split()] + [cell.cell_len for cell in values])
+            printed.add_column(heading, justify=justify, no_wrap=True, max_width=width)
+        else:
+            printed.add_column(heading, justify=justify, max_width=_TEXT_FLOOR if layout == 'floored' else None)
+    for row in zip(*(cells[column] for column in columns), strict=True):
+        printed.add_row(*row)
+    return printed
+
+
+def _natural_width(printed: Table) -> int:
+    """How wide a table prints with no terminal to fit, since a measure at the terminal's width stops at it."""
+    return stdout.measure(printed, options=stdout.options.update_width(sys.maxsize)).maximum
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def print_record(record: Mapping[str, Any], keys: Sequence[str] | None = None, *, title: str | None = None) -> None:
@@ -118,28 +193,32 @@ def print_record(record: Mapping[str, Any], keys: Sequence[str] | None = None, *
     printed.add_column('value', overflow='fold')
     for key in keys or list(record):
         if key in record:
-            printed.add_row(key, Text(shown(key, record[key])))
+            printed.add_row(Text(key), Text(shown(key, record[key]), style=_style(key, record[key])))
+    print_table(printed)
+
+
+def print_table(printed: Table) -> None:
+    """Print a table and a blank line after it, which sets it apart from the next section."""
     stdout.print(printed)
+    stdout.print()
 
 
 def print_list(title: str, items: Sequence[str]) -> None:
-    """Print a titled bullet list, nothing when it is empty."""
+    """Print a titled bullet list and a blank line after it, nothing when it is empty."""
     if items:
         stdout.print(Text(title, style='bold'))
         for item in items:
             stdout.print(Text(f'- {item}'))
+        stdout.print()
 
 
 def print_links(links: Sequence[str]) -> None:
     """Print each URL on its own line, never wrapped, so a terminal that links URLs links them whole."""
     if links:
         stdout.print(Text('Read more', style='bold'))
-    for link in links:
-        stdout.print(Text(link, style=f'link {link}'), soft_wrap=True)
-
-
-def severity_text(severity: Severity) -> Text:
-    return Text(severity, style=SEVERITY_STYLES[severity])
+        for link in links:
+            stdout.print(Text(link, style=f'link {link}'), soft_wrap=True)
+        stdout.print()
 
 
 def note(message: str) -> None:

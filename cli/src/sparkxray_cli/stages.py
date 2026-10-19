@@ -75,4 +75,4 @@ def show(
         table.add_column(label, justify='right')
     for position, metric in enumerate(quantiles.columns[1:], start=1):
         table.add_row(metric, *(Text(render.shown(metric, row[position])) for row in quantiles.values))
-    render.stdout.print(table)
+    render.print_table(table)

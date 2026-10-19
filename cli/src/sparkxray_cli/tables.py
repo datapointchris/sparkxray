@@ -29,7 +29,7 @@ def list_tables(log: LogArgument, as_json: JsonOption = False) -> None:
     for entry in listed:
         columns = ', '.join(f'{column.name} ({column.unit})' if column.unit else column.name for column in entry.columns)
         table.add_row(entry.name, f'{entry.row_count:,}', Text.assemble(entry.description, '\n', (columns, 'dim')))
-    render.stdout.print(table)
+    render.print_table(table)
 
 
 @app.command('query')
