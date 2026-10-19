@@ -1,47 +1,31 @@
 """The plan parsers agree across sources, and normalization rewrites only ids."""
 
-import gzip
 import json
-import pathlib
 from collections import Counter
 from collections.abc import Iterator
 from typing import Any
 
 import cramjam
 import pytest
+from fixture_logs import FIXTURES
+from fixture_logs import plain_lines
+from fixture_logs import rolled_files
 from sparkxray.plan import last_plans
 from sparkxray.plan import normalize_label
 from sparkxray.plan import parse_plan_text
 from sparkxray.plan import parse_rest_graph
 
-FIXTURES = pathlib.Path(__file__).resolve().parents[2] / 'fixtures'
 PLAN_EVENTS = ('SparkListenerSQLExecutionStart', 'SparkListenerSQLAdaptiveExecutionUpdate')
-
-
-def _plain_lines(path: pathlib.Path) -> list[bytes]:
-    # lz4 and snappy logs are read from the plain lines Spark decoded them to.
-    if path.suffix in ('.lz4', '.snappy'):
-        path = FIXTURES / 'decoded-by-spark' / path.parent.name / f'{path.name}.jsonl.zstd'
-    data = path.read_bytes()
-    name = path.name.removesuffix('.inprogress')
-    if name.endswith('.gz'):
-        data = gzip.decompress(data)
-    elif name.endswith('.zstd'):
-        data = bytes(cramjam.zstd.decompress(data))
-    return data.splitlines()
 
 
 def _applications() -> Iterator[tuple[str, list[dict[str, Any]], list[dict[str, Any]]]]:
     """Each fixture application's plan events, and its History Server SQL graphs where captured."""
     for variant in sorted((FIXTURES / 'logs').iterdir()):
         for entry in sorted(variant.iterdir()):
-            if entry.is_dir():
-                parts = sorted(entry.glob('events_*'), key=lambda part: int(part.name.split('_')[1]))
-            else:
-                parts = [entry]
+            parts = rolled_files(entry) if entry.is_dir() else [entry]
             events = []
             for part in parts:
-                for line in _plain_lines(part):
+                for line in plain_lines(part):
                     try:
                         event = json.loads(line)
                     except ValueError:

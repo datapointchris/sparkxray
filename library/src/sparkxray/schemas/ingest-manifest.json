@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sparkxray ingest manifest",
+  "description": "One Spark application's event log after ingest: where it came from, which files were read, and how far the log can be trusted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source", "app_id", "layout", "files", "compacted", "in_progress", "truncated_tail", "spark_version", "platform"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "source": {"type": "string", "description": "The location ingested, as a file:// or s3:// URI."},
+    "app_id": {"type": "string", "description": "The App ID SparkListenerApplicationStart carries, or the one the log's name holds when that event is missing."},
+    "layout": {"enum": ["single_file", "rolling"]},
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The log's files in read order. A rolling log's files are ordered by N as an integer.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uri", "etag", "mtime_ns", "size_bytes", "codec", "read_path", "read_codec"],
+        "properties": {
+          "uri": {"type": "string", "pattern": "^(file|s3)://"},
+          "etag": {"type": ["string", "null"], "description": "The S3 object's ETag; null for a local file."},
+          "mtime_ns": {"type": ["integer", "null"], "description": "A local file's modification time in nanoseconds since the epoch; null for an S3 object."},
+          "size_bytes": {"type": "integer", "minimum": 0},
+          "codec": {"enum": ["none", "zstd", "gzip", "lz4", "snappy"], "description": "The codec the file was written in."},
+          "read_path": {"type": "string", "description": "The local file holding this file's events: the file itself, or a copy in the cache."},
+          "read_codec": {"enum": ["none", "zstd", "gzip"], "description": "The codec read_path is compressed with."}
+        }
+      }
+    },
+    "compacted": {"type": "boolean", "description": "A History Server compacted the rolling log, which drops finished tasks."},
+    "in_progress": {"type": "boolean", "description": "Spark had not finished writing the log."},
+    "truncated_tail": {"type": "boolean", "description": "The log's last line was cut partway and dropped."},
+    "spark_version": {"type": ["string", "null"], "description": "The Spark Version SparkListenerLogStart carries."},
+    "platform": {"enum": ["glue", "emr-serverless", "emr-ec2", "databricks", "local", "other"]}
+  }
+}
