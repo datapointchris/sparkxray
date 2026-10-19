@@ -29,8 +29,9 @@ class IngestedFile:
 
     `read_path` is the local file holding its events, which `read_codec` compresses. That is the
     file itself when it is local and readable as it stands. Otherwise it is a copy in the cache:
-    the downloaded object, or its events decoded to plain lines when its codec has no standard
-    framing, or when its last line was cut and dropped.
+    the downloaded object, or its whole lines as plain text. A file gets that copy when its codec
+    has no standard framing, when its end was cut, or when it is the last file of a local log
+    Spark is still writing, which grows after it is opened.
     """
 
     uri: str
@@ -46,10 +47,11 @@ class IngestedFile:
 class IngestManifest:
     """One application's log after ingest.
 
-    `in_progress` is set when Spark had not finished the log: a `.inprogress` name, or a rolling
-    log whose `appstatus` marker is still `.inprogress`. `truncated_tail` is set when the log's
-    last line was cut partway and dropped. `compacted` is set when a History Server compacted the
-    rolling log, which drops finished tasks.
+    `in_progress` is set when Spark had not finished the log: an `.inprogress` name, before or
+    after a codec's suffix, or a rolling log whose `appstatus` marker is still `.inprogress`.
+    `truncated_tail` is set when the log's last file ends partway through a line, a compressed
+    block or a frame, and what followed its last whole line was dropped. `compacted` is set when
+    a History Server compacted the rolling log, which drops finished tasks.
     """
 
     source: str

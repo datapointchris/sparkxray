@@ -24,14 +24,14 @@
           "mtime_ns": {"type": ["integer", "null"], "description": "A local file's modification time in nanoseconds since the epoch; null for an S3 object."},
           "size_bytes": {"type": "integer", "minimum": 0},
           "codec": {"enum": ["none", "zstd", "gzip", "lz4", "snappy"], "description": "The codec the file was written in."},
-          "read_path": {"type": "string", "description": "The local file holding this file's events: the file itself, or a copy in the cache."},
+          "read_path": {"type": "string", "description": "The local file holding this file's events: the file itself, the downloaded object, or a copy of its whole lines in the cache."},
           "read_codec": {"enum": ["none", "zstd", "gzip"], "description": "The codec read_path is compressed with."}
         }
       }
     },
     "compacted": {"type": "boolean", "description": "A History Server compacted the rolling log, which drops finished tasks."},
-    "in_progress": {"type": "boolean", "description": "Spark had not finished writing the log."},
-    "truncated_tail": {"type": "boolean", "description": "The log's last line was cut partway and dropped."},
+    "in_progress": {"type": "boolean", "description": "Spark had not finished writing the log, by its .inprogress name or its rolling appstatus marker."},
+    "truncated_tail": {"type": "boolean", "description": "The log's last file ends partway through a line, a compressed block or a frame, and what followed its last whole line was dropped."},
     "spark_version": {"type": ["string", "null"], "description": "The Spark Version SparkListenerLogStart carries."},
     "platform": {"enum": ["glue", "emr-serverless", "emr-ec2", "databricks", "local", "other"]}
   }

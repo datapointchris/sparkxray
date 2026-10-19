@@ -97,6 +97,10 @@ $XDG_CACHE_HOME/sparkxray/logs/
 A local file that DuckDB can read as it stands is never copied. The manifest records, per file,
 the `read_path` holding its events and the `read_codec` it is compressed with.
 
+An entry for an older version of a file is removed by a later open, once it has gone a day
+unused. An `EventLog` opened before the file changed still reads its copy. So nothing is removed
+the moment a newer version lands.
+
 ## The resolver finds a log by Spark's names, and confirms it by its first line
 
 No platform's folder layout is written into the code. Glue, EMR and a local run each write one of
@@ -140,16 +144,25 @@ small decoders over cramjam's raw block functions, and decodes those logs into t
 JSON lines first. lzf is refused with an error that suggests zstd.
 
 zstd is decoded with `zstandard` rather than cramjam. cramjam decodes a zstd buffer whole, and
-fails on a frame cut short. `zstandard` streams across frames and returns every byte a cut frame
-holds, which a log Spark is still writing needs.
+fails on a frame cut short. `zstandard` decodes one frame at a time and returns every whole block
+a cut frame holds. It also reports whether each frame ended, which is how a cut frame is found.
 
-A truncated final line is expected. Glue's periodic log backups and killed applications can both
-leave one. DuckDB fails on it with `Malformed JSON … unexpected end of data`. A compressed file
-cannot be read from its end, so checking its last line means decoding all of it. So a log Spark
-has not finished, by its `.inprogress` name or its `appstatus` marker, has its last file decoded
-into the cache, and DuckDB reads those lines. The reader drops a final line that does not parse
-and records `truncated_tail` in the manifest.
+A cut end is expected. Glue's periodic log backups, killed applications and copies interrupted
+partway can each leave one. DuckDB fails on a cut last line with `Malformed JSON … unexpected end
+of data`. So every file's end is checked before anything reads it:
 
-A cut anywhere but the last file is `E-INGEST-006`, as is a block that does not decode. Ingest
-parses only a log's first events and its last line. The table build parses every line, once, and
-names the file and line of one that does not parse.
+- a plain file from its last bytes;
+- a compressed file by decoding all of it, once per version, with the answer kept in the cache.
+
+A zstd frame or gzip member that never ends is a cut, and so is a last line that does not parse.
+A cut last file is decoded or trimmed into the cache without its partial line, and the manifest
+records `truncated_tail`. A cut in any other file is `E-INGEST-006`, as is a block that does not
+decode.
+
+A local log Spark is still writing, by its `.inprogress` name or its `appstatus` marker, grows
+after it is opened. So its last file is copied into the cache, a plain one at the size it was
+listed with. The reader and the table build both read that copy, so neither sees a line Spark
+appended later.
+
+Ingest parses only a log's first events and the end of each file. The table build parses every
+line, once, and names the file and line of one that does not parse.

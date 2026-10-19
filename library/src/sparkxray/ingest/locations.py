@@ -2,7 +2,8 @@
 
 An S3 object is downloaded into the cache once per ETag and size, under
 `logs/s3/<bucket>/<key>/<etag>-<size>`. So an unchanged object is never downloaded twice, and a
-log still being appended to is downloaded again.
+log still being appended to is downloaded again. The copy of an older version stays until it has
+gone a day unused, because a log opened before the object changed still reads it.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ import re
 from pathlib import Path
 from typing import Protocol
 
+from sparkxray.cache_directory import remove_superseded
+from sparkxray.cache_directory import used
 from sparkxray.errors import NoEventLogError
 from sparkxray.ingest.layouts import ROLLING_DIRECTORY
 from sparkxray.ingest.layouts import ListedFile
@@ -23,6 +26,8 @@ _UNSAFE_SEGMENTS = {'': '%2F', '.': '%2E', '..': '%2E%2E'}
 
 class Location(Protocol):
     uri: str
+    # Whether a file `local_path` returns can still grow, as a log Spark is writing does.
+    files_may_grow: bool
 
     def list(self) -> tuple[list[ListedFile], ListedFile | None]:
         """Every file under the location, and the file itself when the location names one."""
@@ -41,6 +46,8 @@ def location_for(location: str, *, profile: str | None, region: str | None) -> L
 
 
 class LocalLocation:
+    files_may_grow = True
+
     def __init__(self, path: Path) -> None:
         path = path.expanduser().resolve()
         # A file inside a rolling log's directory names the whole log.
@@ -82,6 +89,8 @@ class LocalLocation:
 
 
 class S3Location:
+    files_may_grow = False  # every file is a downloaded copy
+
     def __init__(self, location: str, *, profile: str | None, region: str | None) -> None:
         from sparkxray.ingest import aws  # boto3 is imported only when a log is on S3
 
@@ -125,13 +134,10 @@ class S3Location:
         key = self._key(listed)
         directory = cache.joinpath('logs', 's3', self._bucket, *(_UNSAFE_SEGMENTS.get(part, part) for part in key.split('/')))
         target = directory / f'{re.sub(r"[^A-Za-z0-9-]", "_", listed.etag or "")}-{listed.size_bytes}'
+        remove_superseded(directory, target.name)
         if target.is_file():
+            used(target)
             return target
-        if directory.is_dir():
-            for stale in directory.iterdir():
-                # A `.part-<pid>` file is another process's download still in flight.
-                if stale.is_file() and '.part-' not in stale.name:
-                    stale.unlink(missing_ok=True)
         self._client.download(self._bucket, key, target)
         return target
 

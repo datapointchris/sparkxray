@@ -11,10 +11,12 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import BinaryIO
 from typing import TypeVar
 
 from sparkxray.cache_directory import cache_root
+from sparkxray.cache_directory import remove_superseded
+from sparkxray.cache_directory import used
 from sparkxray.errors import AmbiguousLocationError
 from sparkxray.errors import CorruptLogError
 from sparkxray.errors import NoEventLogError
@@ -38,6 +40,7 @@ _HEAD_EVENTS = 1000
 _FOUND_SHOWN = 10
 # Concurrent S3 reads for one ingest: first lines, and the files of a rolling log.
 _THREADS = 8
+_COPY_BLOCK = 1 << 20
 
 _Item = TypeVar('_Item')
 _Result = TypeVar('_Result')
@@ -71,8 +74,14 @@ class EventLog:
         files = []
         truncated_tail = False
         for position, (log_file, local) in enumerate(zip(candidate.files, local_paths, strict=True)):
-            is_last = position == len(candidate.files) - 1
-            read_path, read_codec, cut = _readable(local, log_file, cache, is_last=is_last, in_progress=candidate.in_progress)
+            read_path, read_codec, cut = _readable(
+                local,
+                log_file,
+                cache,
+                is_last=position == len(candidate.files) - 1,
+                in_progress=candidate.in_progress,
+                may_grow=source.files_may_grow,
+            )
             truncated_tail = truncated_tail or cut
             listed = log_file.listed
             files.append(
@@ -102,7 +111,15 @@ class EventLog:
         for file in self.manifest.files:
             with open(file.read_path, 'rb') as raw:
                 split = decoders.Lines(decoders.decoded_chunks(raw, file.read_codec))
-                yield from split
+                try:
+                    yield from split
+                except (decoders.StreamCut, decoders.StreamCorrupt) as error:
+                    # `open` decoded this file whole, so it changed since.
+                    raise CorruptLogError(
+                        f'{file.read_path} no longer decodes as it did when the log was opened: {error}',
+                        field='location',
+                        hint='open the log again',
+                    ) from error
                 if split.tail:
                     yield split.tail
 
@@ -240,104 +257,159 @@ def _found(paths: Sequence[str]) -> str:
     return f'It holds {_shown(paths)}.' if paths else 'It holds no files.'
 
 
-def _readable(local: Path, log_file: layouts.LogFile, cache: Path, *, is_last: bool, in_progress: bool) -> tuple[Path, ReadCodec, bool]:
-    """The local file to read one log file's events from, its codec, and whether its tail was cut.
+def _readable(
+    local: Path, log_file: layouts.LogFile, cache: Path, *, is_last: bool, in_progress: bool, may_grow: bool
+) -> tuple[Path, ReadCodec, bool]:
+    """The local file to read one log file's events from, its codec, and whether its end was cut.
 
     lz4 and snappy have no standard framing, so they decode into the cache as plain lines. So
-    does the last file of a log Spark is still writing, whose end may be cut. A plain last file is
-    checked from its end, and copied only when its last line is cut.
+    does the last file of a log Spark is still writing, when that file can still grow. A plain
+    one is copied at the size it was listed with. Every other file is read in place once its
+    end is checked. A compressed file's end is found by decoding all of it, once per version.
+
+    A cut end is dropped from a copy when the file is the log's last, and refused otherwise.
     """
     codec = log_file.codec
-    if codec in ('lz4', 'snappy') or (is_last and in_progress and codec in ('zstd', 'gzip')):
-        path, cut = _decoded_copy(local, log_file, cache, is_last=is_last)
-        return path, 'none', cut
-    if codec == 'none' and is_last:
-        whole_end = _end_of_whole_lines(local)
-        if whole_end is not None:
-            return _trimmed_copy(local, log_file, cache, whole_end), 'none', True
+    version = _Version.of(log_file, cache)
+    growing = is_last and in_progress and may_grow
+    if codec == 'none':
+        size = min(log_file.listed.size_bytes, local.stat().st_size)
+        end = _whole_lines_end(local, size)
+        cut = end < size
+        if cut and not is_last:
+            raise _cut_before_last(log_file)
+        if cut or growing:
+            return _plain_copy(local, version, end, cut=cut), 'none', cut
         return local, 'none', False
-    if codec == 'none' or codec == 'zstd' or codec == 'gzip':
-        return local, codec, False
+    if codec in ('lz4', 'snappy') or growing:
+        cut = _decoded_copy(local, log_file, version)
+        if cut and not is_last:
+            raise _cut_before_last(log_file)
+        return version.copy, 'none', cut
+    if codec == 'zstd' or codec == 'gzip':
+        recorded = version.recorded_cut()
+        if recorded is None:
+            cut = _decode(local, log_file, None)
+            version.record_cut(cut)
+        else:
+            cut = recorded
+        if not cut:
+            return local, codec, False
+        if not is_last:
+            raise _cut_before_last(log_file)
+        return version.copy, 'none', _decoded_copy(local, log_file, version)
     raise ValueError(f'no reader for {codec}')
 
 
-def _cache_paths(log_file: layouts.LogFile, cache: Path, kind: str) -> tuple[Path, Path]:
-    """The decoded copy and its record for one version of a file. Older versions' copies are removed."""
-    listed = log_file.listed
-    directory = cache / 'logs' / 'decoded' / hashlib.sha256(listed.uri.encode()).hexdigest()[:32]
-    identity = [listed.uri, listed.etag, listed.mtime_ns, listed.size_bytes, decoders.DECODER_VERSION, kind]
-    stem = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:32]
-    if directory.is_dir():
-        for stale in directory.iterdir():
-            # A `.part-<pid>` file is another process's copy still being written.
-            if not stale.name.startswith(stem) and '.part-' not in stale.name:
-                stale.unlink(missing_ok=True)
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory / f'{stem}.jsonl', directory / f'{stem}.json'
+def _cut_before_last(log_file: layouts.LogFile) -> CorruptLogError:
+    return CorruptLogError(
+        f"{log_file.listed.uri} ends partway through a block, a frame or a line, which only a log's last file may", field='location'
+    )
 
 
-def _cached(copy: Path, record: Path) -> bool | None:
-    """The recorded cut of a finished copy, or None when there is no finished copy."""
-    if copy.is_file() and record.is_file():
-        cut: bool = json.loads(record.read_text())['truncated_tail']
-        return cut
-    return None
+@dc.dataclass(frozen=True, slots=True)
+class _Version:
+    """The cache's entries for one version of one file: a copy of its whole lines, and whether its end was cut.
 
+    A version is the file's URI, ETag, modification time and size. Entries for older versions
+    of the file are removed once they go a day unused.
+    """
 
-def _finish(copy: Path, record: Path, partial: Path, cut: bool) -> None:
-    partial.replace(copy)
-    record_partial = record.with_name(f'{record.name}.part-{os.getpid()}')
-    record_partial.write_text(json.dumps({'truncated_tail': cut}))
-    record_partial.replace(record)
+    copy: Path
+    record: Path
 
+    @classmethod
+    def of(cls, log_file: layouts.LogFile, cache: Path) -> _Version:
+        listed = log_file.listed
+        directory = cache / 'logs' / 'decoded' / hashlib.sha256(listed.uri.encode()).hexdigest()[:32]
+        identity = [listed.uri, listed.etag, listed.mtime_ns, listed.size_bytes, decoders.DECODER_VERSION]
+        stem = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:32]
+        remove_superseded(directory, stem)
+        return cls(directory / f'{stem}.jsonl', directory / f'{stem}.json')
 
-def _decoded_copy(local: Path, log_file: layouts.LogFile, cache: Path, *, is_last: bool) -> tuple[Path, bool]:
-    copy, record = _cache_paths(log_file, cache, 'last' if is_last else 'decoded')
-    if (cached := _cached(copy, record)) is not None:
-        return copy, cached
-    uri = log_file.listed.uri
-    partial = copy.with_name(f'{copy.name}.part-{os.getpid()}')
-    stream_cut = False
-
-    def chunks(raw: Any) -> Iterator[bytes]:
-        nonlocal stream_cut
+    def recorded_cut(self) -> bool | None:
+        """Whether this version's end was cut, or None when it was never checked."""
         try:
-            yield from decoders.decoded_chunks(raw, log_file.codec)
-        except decoders.StreamCut:
-            stream_cut = True
+            cut: bool = json.loads(self.record.read_text())['cut']
+        except FileNotFoundError:
+            return None
+        used(self.record)
+        return cut
 
+    def copied_cut(self) -> bool | None:
+        """Whether this version's end was cut, or None when its copy was never made."""
+        if not self.copy.is_file():
+            return None
+        cut = self.recorded_cut()
+        if cut is not None:
+            used(self.copy)
+        return cut
+
+    def record_cut(self, cut: bool) -> None:
+        self.record.parent.mkdir(parents=True, exist_ok=True)
+        partial = self.record.with_name(f'{self.record.name}.part-{os.getpid()}')
+        partial.write_text(json.dumps({'cut': cut}))
+        partial.replace(self.record)
+
+    def partial_copy(self) -> Path:
+        """Where this process writes the copy before it is whole."""
+        self.copy.parent.mkdir(parents=True, exist_ok=True)
+        return self.copy.with_name(f'{self.copy.name}.part-{os.getpid()}')
+
+
+def _decoded_copy(local: Path, log_file: layouts.LogFile, version: _Version) -> bool:
+    """Decode a file's whole lines into its version's copy, and return whether its end was cut."""
+    if (cut := version.copied_cut()) is not None:
+        return cut
+    partial = version.partial_copy()
     try:
-        with local.open('rb') as raw, partial.open('wb') as out:
-            lines = decoders.Lines(chunks(raw))
-            for line in lines:
-                out.write(line)
-                out.write(b'\n')
-            line_cut = bool(lines.tail) and not decoders.is_complete_line(lines.tail)
-            if lines.tail and not line_cut:
-                out.write(lines.tail)
-                out.write(b'\n')
-        cut = stream_cut or line_cut
-        if cut and not is_last:
-            raise CorruptLogError(f"{uri} ends partway through a block or a line, which only a log's last file may", field='location')
-        _finish(copy, record, partial, cut)
-    except decoders.StreamCorrupt as error:
-        raise CorruptLogError(f'{uri}: {error}', field='location') from error
+        with partial.open('wb') as out:
+            cut = _decode(local, log_file, out)
+        partial.replace(version.copy)
+        version.record_cut(cut)
     finally:
         partial.unlink(missing_ok=True)
-    return copy, cut
+    return cut
 
 
-def _end_of_whole_lines(path: Path) -> int | None:
-    """Where the last whole line of a plain file ends, or None when the file ends on a whole line.
+def _decode(local: Path, log_file: layouts.LogFile, out: BinaryIO | None) -> bool:
+    """Decode a file, writing its whole lines to `out` when given. True when it ends partway through a block, a frame or a line."""
+    stream_cut = False
+    tail = bytearray()
+    try:
+        with local.open('rb') as raw:
+            try:
+                for chunk in decoders.decoded_chunks(raw, log_file.codec):
+                    newline = chunk.rfind(b'\n')
+                    if newline == -1:
+                        tail += chunk
+                        continue
+                    if out is not None:
+                        out.write(tail)
+                        out.write(memoryview(chunk)[: newline + 1])
+                    tail[:] = memoryview(chunk)[newline + 1 :]
+            except decoders.StreamCut:
+                stream_cut = True
+    except decoders.StreamCorrupt as error:
+        raise CorruptLogError(f'{log_file.listed.uri}: {error}', field='location') from error
+    line_cut = bool(tail) and not decoders.is_complete_line(bytes(tail))
+    if out is not None and tail and not line_cut:
+        out.write(tail)
+        out.write(b'\n')
+    return stream_cut or line_cut
+
+
+def _whole_lines_end(path: Path, size: int) -> int:
+    """Where the whole lines among a plain file's first `size` bytes end, which is `size` when its end is whole.
 
     A last line with no newline after it is whole when it parses, as in logs Spark finished
     without a final newline.
     """
-    position = path.stat().st_size
+    position = size
     later: list[bytes] = []
     with path.open('rb') as file:
         while position > 0:
-            start = max(0, position - (1 << 20))
+            start = max(0, position - _COPY_BLOCK)
             file.seek(start)
             block = file.read(position - start)
             newline = block.rfind(b'\n')
@@ -350,29 +422,25 @@ def _end_of_whole_lines(path: Path) -> int | None:
         else:
             tail = b''.join(reversed(later))
             end = 0
-    if not tail or decoders.is_complete_line(tail):
-        return None
-    return end
+    return size if not tail or decoders.is_complete_line(tail) else end
 
 
-def _trimmed_copy(local: Path, log_file: layouts.LogFile, cache: Path, end: int) -> Path:
-    copy, record = _cache_paths(log_file, cache, 'trimmed')
-    if _cached(copy, record) is not None:
-        return copy
-    partial = copy.with_name(f'{copy.name}.part-{os.getpid()}')
+def _plain_copy(local: Path, version: _Version, end: int, *, cut: bool) -> Path:
+    """Copy a plain file's first `end` bytes, its whole lines, into its version's copy."""
+    if version.copied_cut() is not None:
+        return version.copy
+    partial = version.partial_copy()
     try:
         with local.open('rb') as source, partial.open('wb') as out:
             remaining = end
-            while remaining > 0:
-                block = source.read(min(remaining, 1 << 20))
-                if not block:
-                    break
+            while remaining > 0 and (block := source.read(min(remaining, _COPY_BLOCK))):
                 out.write(block)
                 remaining -= len(block)
-        _finish(copy, record, partial, True)
+        partial.replace(version.copy)
+        version.record_cut(cut)
     finally:
         partial.unlink(missing_ok=True)
-    return copy
+    return version.copy
 
 
 @dc.dataclass(slots=True)

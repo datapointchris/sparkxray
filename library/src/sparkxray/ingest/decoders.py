@@ -24,7 +24,7 @@ import zstandard
 Codec = Literal['none', 'zstd', 'gzip', 'lz4', 'snappy', 'lzf']
 
 # Bumped whenever a decoder's output changes, so a decoded copy in the cache is rebuilt.
-DECODER_VERSION = 1
+DECODER_VERSION = 2
 
 _CHUNK = 1 << 20
 
@@ -42,7 +42,7 @@ _SNAPPY_HEADER_SIZE = 16
 
 
 class StreamCut(Exception):
-    """The stream ended partway through a block. Every whole block before `offset` was decoded."""
+    """The stream ended partway through a block, a gzip member or a zstd frame. Everything before `offset` was decoded."""
 
     def __init__(self, offset: int) -> None:
         super().__init__(f'the stream ends partway through the block at byte {offset}')
@@ -60,8 +60,7 @@ class StreamCorrupt(Exception):
 def decoded_chunks(stream: BinaryIO, codec: Codec) -> Iterator[bytes]:
     """Yield the decoded bytes of `stream`, raising StreamCut or StreamCorrupt where decoding stops.
 
-    zstd never raises StreamCut. A frame cut short decodes to the bytes it holds, so a cut shows
-    only as a partial last line.
+    StreamCut comes after every byte the stream holds before its cut has been yielded.
     """
     if codec == 'none':
         yield from iter(lambda: stream.read(_CHUNK), b'')
@@ -138,11 +137,28 @@ def _read_exact(stream: BinaryIO, size: int) -> bytes:
 
 
 def _zstd(stream: BinaryIO) -> Iterator[bytes]:
-    try:
-        with zstandard.ZstdDecompressor().stream_reader(stream, read_across_frames=True, closefd=False) as reader:
-            yield from iter(lambda: reader.read(_CHUNK), b'')
-    except zstandard.ZstdError as error:
-        raise StreamCorrupt(stream.tell(), str(error)) from error
+    # One decompressor per frame, because only a frame's own decompressor reports whether it ended.
+    decompressor = zstandard.ZstdDecompressor().decompressobj()
+    in_frame = False
+    offset = 0
+    while chunk := stream.read(_CHUNK):
+        data = chunk
+        while data:
+            in_frame = True
+            try:
+                decoded = decompressor.decompress(data)
+            except zstandard.ZstdError as error:
+                raise StreamCorrupt(offset, str(error)) from error
+            if decoded:
+                yield decoded
+            if not decompressor.eof:
+                break
+            data = decompressor.unused_data
+            decompressor = zstandard.ZstdDecompressor().decompressobj()
+            in_frame = False
+        offset += len(chunk)
+    if in_frame:
+        raise StreamCut(offset)
 
 
 def _gzip(stream: BinaryIO) -> Iterator[bytes]:

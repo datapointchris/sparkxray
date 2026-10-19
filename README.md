@@ -72,12 +72,16 @@ for line in log.lines():
 ```
 
 It reads uncompressed logs and Spark's zstd, lz4 and snappy, plus gzip. Spark's lzf is refused.
-A log Spark is still writing, or a killed run's, often ends partway through a line. That line is
-left out, and `truncated_tail` says so.
+A log Spark is still writing, a killed run's, or a copy cut short can end partway through a line.
+What follows the last whole line is left out, and `truncated_tail` says so. A file before the
+last one that ends that way is refused. A local log Spark is still writing reads as it stood when
+it was opened.
 
 S3 objects are downloaded once into `$XDG_CACHE_HOME/sparkxray/`, or into `cache_dir=`. A second
 open of an unchanged object downloads nothing. Credentials come from boto3's default chain, which
 `profile=` and `region=` narrow. An S3-compatible store is reached through `AWS_ENDPOINT_URL_S3`.
+A copy of an older version of a file stays a day after its last use, so a log opened before the
+file changed still reads.
 
 A refusal raises a `sparkxray.errors.SparkxrayError` subclass, whose `code` never changes meaning.
 Printed, it gives its message, the values that would have worked, and a hint. `E-INGEST-005`, for

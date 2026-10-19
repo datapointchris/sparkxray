@@ -74,7 +74,9 @@ A test pins a fixture number from `stage_totals.py`, never from sparkxray's own 
 
 Everything goes under `$XDG_CACHE_HOME/sparkxray/`, or the `cache_dir` a caller passes. Downloaded
 objects go under `logs/s3/`, decoded copies under `logs/decoded/`, and Parquet tables under
-`tables/<key>/`. Nothing is ever written beside a user's log.
+`tables/<key>/`. Nothing is ever written beside a user's log. An entry for an older version of a
+file is removed by a later open once it has gone a day unused, because an `EventLog` opened
+earlier still reads it.
 
 DuckDB never reads a URL. Ingest copies S3 objects into the cache with boto3 first, because
 DuckDB's `httpfs` extension downloads itself at first use and locked-down networks block that.

@@ -19,7 +19,8 @@ Layout = Literal['single_file', 'rolling']
 
 _CODEC_SUFFIXES: dict[str, Codec] = {'zstd': 'zstd', 'lz4': 'lz4', 'snappy': 'snappy', 'lzf': 'lzf', 'gz': 'gzip'}
 _CODEC = r'(?:\.(?P<codec>zstd|lz4|snappy|lzf|gz))?'
-_SINGLE_FILE = re.compile(rf'(?P<app>[^._][^.]*){_CODEC}(?P<in_progress>\.inprogress)?')
+# Matched against a name with its `.inprogress` removed.
+_SINGLE_FILE = re.compile(rf'(?P<app>[^._][^.]*){_CODEC}')
 ROLLING_DIRECTORY = re.compile(r'eventlog_v2_(?P<app>[^.]+)')
 _ROLLED_FILE = re.compile(rf'events_(?P<index>\d+)_(?P<app>[^.]+){_CODEC}(?P<compact>\.compact)?')
 _APP_STATUS = re.compile(r'appstatus_(?P<app>[^.]+)(?P<in_progress>\.inprogress)?')
@@ -63,22 +64,37 @@ def ignored(name: str) -> bool:
     return name.startswith(('.', '_')) or name.endswith('.crc')
 
 
+def without_in_progress(name: str) -> tuple[str, bool]:
+    """A file's name with Spark's `.inprogress` removed, and whether it was there.
+
+    Spark puts `.inprogress` last. A person compressing a running log afterwards puts the
+    codec's suffix after it, as `gzip local-1.inprogress` writes `local-1.inprogress.gz`.
+    """
+    if name.endswith('.inprogress'):
+        return name.removesuffix('.inprogress'), True
+    stem, _, suffix = name.rpartition('.')
+    if stem.endswith('.inprogress') and suffix in _CODEC_SUFFIXES:
+        return f'{stem.removesuffix(".inprogress")}.{suffix}', True
+    return name, False
+
+
 def codec_of(name: str) -> Codec:
     """The codec a file's name declares, `.inprogress` and `.compact` aside, or none."""
-    stem = name.removesuffix('.inprogress').removesuffix('.compact')
+    stem = without_in_progress(name)[0].removesuffix('.compact')
     return _CODEC_SUFFIXES.get(stem.rpartition('.')[2], 'none') if '.' in stem else 'none'
 
 
 def named_file(listed: ListedFile) -> Candidate:
     """A file the caller named, read as a single-file log whatever its name."""
-    match = _SINGLE_FILE.fullmatch(listed.name)
+    stem, in_progress = without_in_progress(listed.name)
+    match = _SINGLE_FILE.fullmatch(stem)
     app_id = match['app'] if match else listed.name.partition('.')[0]
     return Candidate(
         uri=listed.uri,
         app_id=app_id,
         layout='single_file',
         files=(LogFile(listed, codec_of(listed.name)),),
-        in_progress=listed.name.endswith('.inprogress'),
+        in_progress=in_progress,
         compacted=False,
     )
 
@@ -101,12 +117,11 @@ def group(listing: Sequence[ListedFile]) -> tuple[list[Candidate], list[str]]:
             continue
         if any(ROLLING_DIRECTORY.fullmatch(part) for part in directory):
             continue
-        match = _SINGLE_FILE.fullmatch(listed.name)
-        if match is None:
+        stem, in_progress = without_in_progress(listed.name)
+        if _SINGLE_FILE.fullmatch(stem) is None:
             unrecognized.append('/'.join(listed.parts))
             continue
-        stem = listed.name.removesuffix('.inprogress')
-        singles.setdefault((directory, stem), []).append((listed, match['in_progress'] is not None))
+        singles.setdefault((directory, stem), []).append((listed, in_progress))
 
     candidates = []
     for versions in singles.values():
