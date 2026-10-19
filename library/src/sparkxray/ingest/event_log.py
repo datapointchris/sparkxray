@@ -15,10 +15,10 @@ from typing import Any
 from typing import TypeVar
 
 from sparkxray.cache_directory import cache_root
+from sparkxray.errors import AmbiguousLocationError
 from sparkxray.errors import CorruptLogError
 from sparkxray.errors import NoEventLogError
 from sparkxray.errors import NotAnEventLogError
-from sparkxray.errors import SeveralApplicationsError
 from sparkxray.errors import SparkxrayError
 from sparkxray.errors import UnsupportedCodecError
 from sparkxray.ingest import decoders
@@ -30,8 +30,9 @@ from sparkxray.ingest.manifest import IngestManifest
 from sparkxray.ingest.manifest import ReadCodec
 from sparkxray.ingest.platforms import infer_platform
 
-# Enough of a file to decode its first block under any codec Spark writes.
-_HEAD_BYTES = 1 << 20
+# How much of a file is read for its first line. Spark's own blocks fit the first size, and the
+# second holds the 128 KiB block the zstd tool writes.
+_HEAD_BYTES = (64 << 10, 1 << 20)
 # The events to read for the app id, Spark version and environment, which Spark writes first.
 _HEAD_EVENTS = 1000
 _FOUND_SHOWN = 10
@@ -116,26 +117,32 @@ def _resolve(source: Location) -> layouts.Candidate:
     if not candidates:
         raise NoEventLogError(f'{source.uri} holds no Spark event log. {_found(unrecognized)}', field='location')
 
-    rejections = _in_parallel(lambda candidate: _rejection(source, candidate), candidates)
-    confirmed = [candidate for candidate, rejection in zip(candidates, rejections, strict=True) if rejection is None]
+    confirmed, rejected, unchecked = _confirm(source, candidates)
     if not confirmed:
         # The location named one log, so the refusal is about that log rather than what a directory holds.
-        if len(candidates) == 1 and candidates[0].uri == source.uri.rstrip('/') and rejections[0] is not None:
-            raise rejections[0].error
-        rejected = [
-            f'{"/".join(candidate.files[0].listed.parts)} ({rejection.reason})'
-            for candidate, rejection in zip(candidates, rejections, strict=True)
-            if rejection is not None
-        ]
-        raise NoEventLogError(f'{source.uri} holds no Spark event log. {_found(rejected + unrecognized)}', field='location')
+        if len(candidates) == 1 and candidates[0].uri == source.uri.rstrip('/'):
+            raise rejected[0][1].error
+        passed_over = [f'{_path(candidate)} ({rejection.reason})' for candidate, rejection in rejected]
+        raise NoEventLogError(f'{source.uri} holds no Spark event log. {_found(passed_over + unrecognized)}', field='location')
     if len(confirmed) > 1:
-        raise SeveralApplicationsError(
-            f"{source.uri} holds {len(confirmed)} applications' logs, and ingest reads one",
+        logs = confirmed + unchecked
+        by_name = f' {len(unchecked)} of them are known only by their names.' if unchecked else ''
+        raise AmbiguousLocationError(
+            f'{source.uri} holds {len(logs)} logs, and ingest reads one.{by_name}',
             field='location',
-            valid=[candidate.uri for candidate in confirmed],
+            valid=[candidate.uri for candidate in logs],
             hint='pass one of the listed locations',
         )
     candidate = confirmed[0]
+    pieces = [_path(piece) for piece, rejection in rejected if rejection.first_event is not None]
+    if pieces:
+        raise AmbiguousLocationError(
+            f'{source.uri} holds a log and {len(pieces)} files of Spark events that start no log, which may be pieces of it: '
+            f'{_shown(pieces)}. sparkxray reads a log whole and cannot order pieces',
+            field='location',
+            valid=[candidate.uri],
+            hint='pass the log alone to read it without them',
+        )
     if any(log_file.codec == 'lzf' for log_file in candidate.files):
         raise UnsupportedCodecError(
             f'{candidate.uri} is lzf-compressed, which sparkxray cannot decode',
@@ -143,6 +150,28 @@ def _resolve(source: Location) -> layouts.Candidate:
             hint='run the job with spark.eventLog.compression.codec=zstd',
         )
     return candidate
+
+
+def _confirm(
+    source: Location, candidates: Sequence[layouts.Candidate]
+) -> tuple[list[layouts.Candidate], list[tuple[layouts.Candidate, _Rejection]], list[layouts.Candidate]]:
+    """The candidates that start with SparkListenerLogStart, those that do not with why, and those left unchecked.
+
+    Candidates are checked a batch at a time, and checking stops at a second log, which is
+    enough to refuse the location. So a prefix holding every run of a job reads one batch.
+    """
+    confirmed: list[layouts.Candidate] = []
+    rejected: list[tuple[layouts.Candidate, _Rejection]] = []
+    for start in range(0, len(candidates), _THREADS):
+        batch = candidates[start : start + _THREADS]
+        for candidate, rejection in zip(batch, _in_parallel(lambda candidate: _rejection(source, candidate), batch), strict=True):
+            if rejection is None:
+                confirmed.append(candidate)
+            else:
+                rejected.append((candidate, rejection))
+        if len(confirmed) > 1:
+            return confirmed, rejected, list(candidates[start + _THREADS :])
+    return confirmed, rejected, []
 
 
 def _in_parallel(function: Callable[[_Item], _Result], items: Sequence[_Item]) -> list[_Result]:
@@ -157,6 +186,8 @@ def _in_parallel(function: Callable[[_Item], _Result], items: Sequence[_Item]) -
 class _Rejection:
     reason: str
     error: SparkxrayError
+    # The kind of the Spark event the file starts with, when it starts with one.
+    first_event: str | None = None
 
 
 def _rejection(source: Location, candidate: layouts.Candidate) -> _Rejection | None:
@@ -166,30 +197,47 @@ def _rejection(source: Location, candidate: layouts.Candidate) -> _Rejection | N
         return None  # unreadable, so the codec refusal names it rather than this check
     uri = first.listed.uri
     try:
-        line = decoders.first_line(source.leading_bytes(first.listed, _HEAD_BYTES), first.codec)
+        line = _first_line(source, first)
     except decoders.StreamCorrupt as error:
         return _Rejection(f'its first {first.codec} block does not decode', CorruptLogError(f'{uri}: {error}', field='location'))
     try:
         event = json.loads(line)
     except ValueError:
         event = None
-    if isinstance(event, dict) and str(event.get('Event', '')).rpartition('.')[2] == 'SparkListenerLogStart':
+    kind = None
+    if isinstance(event, dict) and 'Event' in event:
+        kind = str(event['Event']).rpartition('.')[2] or None
+    if kind == 'SparkListenerLogStart':
         return None
     shown = line[:80].decode('utf-8', 'replace')
-    return _Rejection(
-        'no SparkListenerLogStart',
-        NotAnEventLogError(
-            f'{uri} is not a Spark event log: its first line is {shown!r}, where Spark writes SparkListenerLogStart', field='location'
-        ),
+    refusal = NotAnEventLogError(
+        f'{uri} is not a Spark event log: its first line is {shown!r}, where Spark writes SparkListenerLogStart', field='location'
     )
+    if kind is None:
+        return _Rejection('its first line is not a Spark event', refusal)
+    return _Rejection(f'its first event is {kind}, not SparkListenerLogStart', refusal, kind)
 
 
-def _found(paths: list[str]) -> str:
-    if not paths:
-        return 'It holds no files.'
-    shown = ', '.join(paths[:_FOUND_SHOWN])
+def _first_line(source: Location, log_file: layouts.LogFile) -> bytes:
+    for size in _HEAD_BYTES:
+        head = source.leading_bytes(log_file.listed, size)
+        line, ended = decoders.first_line(head, log_file.codec)
+        if ended or len(head) < size:
+            break
+    return line
+
+
+def _path(candidate: layouts.Candidate) -> str:
+    return '/'.join(candidate.files[0].listed.parts)
+
+
+def _shown(paths: Sequence[str]) -> str:
     more = f', and {len(paths) - _FOUND_SHOWN} more' if len(paths) > _FOUND_SHOWN else ''
-    return f'It holds {shown}{more}.'
+    return ', '.join(paths[:_FOUND_SHOWN]) + more
+
+
+def _found(paths: Sequence[str]) -> str:
+    return f'It holds {_shown(paths)}.' if paths else 'It holds no files.'
 
 
 def _readable(local: Path, log_file: layouts.LogFile, cache: Path, *, is_last: bool, in_progress: bool) -> tuple[Path, ReadCodec, bool]:

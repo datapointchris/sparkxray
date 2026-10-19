@@ -79,9 +79,9 @@ class UnsupportedCodecError(SparkxrayError):
     exit_code = 3
 
 
-class SeveralApplicationsError(SparkxrayError):
+class AmbiguousLocationError(SparkxrayError):
     code = 'E-INGEST-005'
-    raised_when = 'the location holds more than one application; lists each one'
+    raised_when = 'the location holds more than one log, or a log beside files of Spark events that start no log; lists them'
     exit_code = 2
 
 

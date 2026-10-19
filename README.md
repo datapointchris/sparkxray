@@ -80,7 +80,8 @@ open of an unchanged object downloads nothing. Credentials come from boto3's def
 `profile=` and `region=` narrow. An S3-compatible store is reached through `AWS_ENDPOINT_URL_S3`.
 
 A refusal raises a `sparkxray.errors.SparkxrayError` subclass, whose `code` never changes meaning.
-`E-INGEST-001`, for one, is a location holding no event log, and its message lists what it holds.
+Printed, it gives its message, the values that would have worked, and a hint. `E-INGEST-005`, for
+one, is a location holding more than one log, and it lists each.
 
 ## Read a query's physical plan
 

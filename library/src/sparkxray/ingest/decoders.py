@@ -77,8 +77,8 @@ def decoded_chunks(stream: BinaryIO, codec: Codec) -> Iterator[bytes]:
         raise ValueError(f'no decoder for {codec}')
 
 
-def first_line(head: bytes, codec: Codec) -> bytes:
-    """The first line of a log whose leading bytes are `head`, decoded.
+def first_line(head: bytes, codec: Codec) -> tuple[bytes, bool]:
+    """The decoded first line of a log whose leading bytes are `head`, and whether a newline ended it.
 
     `head` is cut wherever the read stopped, so a cut is expected. A block that does not decode
     raises StreamCorrupt.
@@ -91,7 +91,8 @@ def first_line(head: bytes, codec: Codec) -> bytes:
                 break
     except StreamCut:
         pass
-    return bytes(found.split(b'\n', 1)[0])
+    line, newline, _rest = bytes(found).partition(b'\n')
+    return line, bool(newline)
 
 
 def is_complete_line(line: bytes) -> bool:

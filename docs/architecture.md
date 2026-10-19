@@ -110,7 +110,10 @@ A rolling log is its files in order of `N` as an integer, so `events_10` follows
 leaves the `.inprogress` copy beside the finished log, and the finished one is read.
 
 A name only proposes a log. Its decoded first line must be `SparkListenerLogStart`, which Spark
-writes first in every log. So a `LICENSE` beside a log is passed over.
+writes first in every log. So a `LICENSE` beside a log is passed over. The first line comes from
+a file's first 64 KiB, or its first MiB when that holds no whole line. Candidates are checked
+eight at a time, and checking stops once two are logs. So a Glue prefix holding every run of a
+job costs one batch of reads.
 
 A History Server can compact a rolling log, replacing its early files with one
 `events_<N>_<appId>.<codec>.compact`. Spark's compactor copies every kept line of files 1 to N
@@ -119,8 +122,11 @@ compacted file, and the manifest records `compacted`, because finished tasks wer
 
 A location naming one log that is not a log is `E-INGEST-003`. A directory or prefix holding no
 log is `E-INGEST-001`, which lists what it does hold and why each file was passed over. One
-holding several applications is `E-INGEST-005`, listing each. The caller picks; the resolver never
-guesses.
+holding several logs is `E-INGEST-005`, listing each.
+
+A log beside files that start with some other Spark event is `E-INGEST-005` too. Those files are
+likely pieces of a log split across several, which sparkxray cannot order. Reading the log alone
+would drop them without a word. The caller picks; the resolver never guesses.
 
 ## Spark's lz4 and snappy logs need two small decoders, and zstd a streaming one
 
