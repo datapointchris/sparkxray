@@ -146,7 +146,7 @@ class QueryError(SparkxrayError):
 
 class NotInRunError(SparkxrayError):
     code = 'E-QUERY-002'
-    raised_when = 'a stage, SQL execution or finding named is not in the run; lists those it holds'
+    raised_when = 'a stage, SQL execution, plan version or finding named is not in the run; lists those it holds'
     exit_code = 2
 
 

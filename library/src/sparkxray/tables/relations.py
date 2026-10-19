@@ -10,6 +10,7 @@ from typing import Any
 import duckdb
 
 from sparkxray.errors import NotAnalyzedError
+from sparkxray.errors import NotInRunError
 from sparkxray.errors import QueryError
 from sparkxray.plan.last_plans import plan_for_event
 from sparkxray.plan.tree import Plan
@@ -132,6 +133,32 @@ class Tables:
             if plan is not None:
                 plans[execution_id] = plan
         return plans
+
+    def plan(self, execution_id: int, version: int | None = None) -> Plan:
+        """One version of an execution's plan, read from the event that logged it: the last version where `version` is None.
+
+        An execution, or a version of it, that the run holds no plan for raises `NotInRunError`.
+        """
+        held = self.connection.execute(
+            'SELECT plan_version, plan_json, plan_text FROM plan_versions WHERE execution_id = ? ORDER BY plan_version', [execution_id]
+        ).fetchall()
+        if not held:
+            executions = self.connection.execute('SELECT DISTINCT execution_id FROM plan_versions ORDER BY execution_id').fetchall()
+            raise NotInRunError(
+                f'the run holds no plan for SQL execution {execution_id}', field='execution_id', valid=[str(row[0]) for row in executions]
+            )
+        chosen = held[-1] if version is None else next((row for row in held if row[0] == version), None)
+        plan = None
+        if chosen is not None:
+            plan_version, info, text = chosen
+            event = {'sparkPlanInfo': json.loads(info) if info is not None else None, 'physicalPlanDescription': text}
+            plan = plan_for_event(event, execution_id, plan_version)
+        if plan is None:
+            missing = held[-1][0] if version is None else version
+            raise NotInRunError(
+                f'SQL execution {execution_id} has no plan version {missing}', field='version', valid=[str(row[0]) for row in held]
+            )
+        return plan
 
     @property
     def application(self) -> duckdb.DuckDBPyRelation:

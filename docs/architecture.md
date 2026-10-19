@@ -267,7 +267,8 @@ measured, and the table does not pass that off as a measurement.
 ## Rules read the tables, and a plan alone needs neither DuckDB nor pyarrow
 
 `analyze` reads everything from the tables, plans included. `sql_executions.final_plan_json` holds
-each execution's last `sparkPlanInfo`, which `Tables.last_plans()` reads back into a `Plan`. So
+each execution's last `sparkPlanInfo`, which `Tables.last_plans()` reads back into a `Plan`.
+`plan_versions` holds every version's, and `Tables.plan(execution_id, version)` reads one back. So
 analyzing a cached log parses no event line. The findings go into the table directory as
 `findings.parquet`, through a `.part-` file renamed into place.
 

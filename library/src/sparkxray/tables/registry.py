@@ -390,6 +390,32 @@ _SQL_EXECUTIONS = Table(
     order_by='execution_id',
 )
 
+_PLAN_VERSIONS = Table(
+    name='plan_versions',
+    description=(
+        "Every version of every SQL execution's plan, as the event that logged it: version 0 from its start, "
+        'and one more for each AQE update, in log order. `Tables.plan` reads a version back into a Plan.'
+    ),
+    source=f"""
+        WITH plan_events AS (
+          SELECT executionId AS execution_id, row_number() OVER (PARTITION BY executionId ORDER BY rowid) - 1 AS plan_version,
+            CAST(sparkPlanInfo AS VARCHAR) AS plan_info, physicalPlanDescription AS plan_text
+          FROM events WHERE kind IN {_PLAN_EVENTS} AND executionId IS NOT NULL
+        )
+        SELECT plan_events.*, plan_version_rows.is_final, plan_version_rows.truncated
+        FROM plan_events LEFT JOIN plan_version_rows USING (execution_id, plan_version)
+    """,
+    columns=_columns(
+        ('execution_id', 'BIGINT', 'execution_id'),
+        ('plan_version', 'BIGINT', 'plan_version'),
+        ('is_final', 'BOOLEAN', 'is_final'),
+        ('truncated', 'BOOLEAN', 'truncated'),
+        ('plan_json', 'VARCHAR', 'plan_info'),
+        ('plan_text', 'VARCHAR', 'plan_text'),
+    ),
+    order_by='execution_id, plan_version',
+)
+
 _PLAN_NODES = Table(
     name='plan_nodes',
     description=(
@@ -494,6 +520,7 @@ TABLES: tuple[Table, ...] = (
     _STAGES,
     _TASKS,
     _SQL_EXECUTIONS,
+    _PLAN_VERSIONS,
     _PLAN_NODES,
     _PLAN_NODE_METRICS,
     _NODE_STAGES,

@@ -164,6 +164,7 @@ print(skew.fetchall())
 tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
 print(tables.path)                               # the Parquet directory, for any Parquet reader
 plans = tables.last_plans()                      # each execution's last Plan, without the log
+initial = tables.plan(0, version=0)              # one version of one execution's plan
 rows = tables.rows('select * from stages')       # plain Python values, with columns and types
 tables.listing()                                 # every table and view, with rows and column units
 ```
@@ -177,6 +178,7 @@ tables.listing()                                 # every table and view, with ro
 | `stages` | stage attempt |
 | `tasks` | task attempt, failed, killed and still running included |
 | `sql_executions` | SQL execution |
+| `plan_versions` | version of an execution's plan, as the event that logged it |
 | `plan_nodes` | node of every plan version of every SQL execution |
 | `plan_node_metrics` | metric a plan node declares, aggregated as the History Server's SQL tab does |
 | `node_stages` | stage a node of an execution's last plan ran in |
