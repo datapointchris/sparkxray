@@ -99,7 +99,7 @@ Either returns one mapping per finding, and the engine sorts its keys three ways
 - every other key is evidence.
 
 A numeric evidence key must end in its unit, such as `_bytes`, `_ms`, `_records`, `_rows`,
-`_count`, `_share` or `_ratio`. A list of plan node ids ends in `_ids`. The engine refuses a finding that breaks this, and the findings
+`_count`, `_share` or `_ratio`. A list of node or stage ids ends in `_ids`. The engine refuses a finding that breaks this, and the findings
 schema does too. So a rule registered by other code is held to the same shape. A malformed rule,
 a taken id, or a finding that breaks the contract is `E-RULE-004`, naming the rule.
 
