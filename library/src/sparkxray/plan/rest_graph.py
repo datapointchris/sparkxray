@@ -54,7 +54,10 @@ def parse_rest_graph(obj: Mapping[str, Any]) -> tree.Plan:
                     continue
                 seen.add(child_id)
                 below = sorted(children_of.get(child_id, []))
-                node.hosted.append(tree.RawSubquery(subquery_id=None, root=build(below[0]) if below else None, is_final=True))
+                subquery_root = build(below[0]) if below else None
+                if subquery_root is not None:
+                    subquery_root.metrics.extend(_metrics(nodes[child_id]))
+                node.hosted.append(tree.RawSubquery(subquery_id=None, root=subquery_root, is_final=True))
             elif child_id in seen:
                 node.children.append(tree.RawNode(label='ReusedExchange', operator='ReusedExchange'))
             else:

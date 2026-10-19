@@ -37,6 +37,11 @@ The JSON tree holds wrappers the text never shows, and the text holds lines JSON
   `hosting_node_id` of the node that runs it. JSON holds a subquery as an extra child of that node.
   Simple text draws it beneath the node, and formatted text lists it after the tree, under
   `===== Subqueries =====`.
+- The `Subquery` or `SubqueryBroadcast` node wrapping a subquery is removed, as formatted text
+  removes it. Its metrics, the result's `data size` and its `time to collect`, move to the
+  subquery's root. That root is an `AdaptiveSparkPlan` under AQE, which declares no metrics of its
+  own. With AQE off, a `SubqueryBroadcast` sits over the reused `BroadcastExchange`, which declares
+  both names too. That node then lists each name twice, told apart by accumulator id.
 
 With those folded, one plan read from JSON and from formatted text gives equal operator counts.
 Without them, one plan read two ways reports `FileScan +1, Scan -1`.
