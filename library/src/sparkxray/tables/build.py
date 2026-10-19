@@ -164,13 +164,20 @@ _WORKING_TABLES = (
       CASE WHEN task_maxima.task_maximum = summaries.maximum THEN task_maxima.task_id END AS max_task_id
     FROM summaries LEFT JOIN task_maxima USING (execution_id, accumulator_id)
     """,
+    # An executor JVM's RSS is above 0 whenever Spark measured the process tree at all.
+    """
+    CREATE TEMP TABLE process_tree AS
+    SELECT count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd' AND "Task Executor Metrics"."ProcessTreeJVMRSSMemory" > 0) > 0
+      AS measured
+    FROM events
+    """,
 )
 
 _LACKS = """
     SELECT
       count(*) FILTER (WHERE kind = 'SparkListenerStageExecutorMetrics') = 0,
       count(*) FILTER (WHERE kind = 'SparkListenerBlockUpdated') = 0,
-      count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd' AND "Task Executor Metrics"."ProcessTreeJVMRSSMemory" > 0) = 0
+      NOT (SELECT measured FROM process_tree)
     FROM events
 """
 _LACK_ORDER: tuple[Lack, ...] = ('stage_executor_metrics', 'block_updates', 'process_tree_metrics')

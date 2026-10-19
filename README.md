@@ -150,7 +150,8 @@ time in nanoseconds beside run time in milliseconds, and the names keep the two 
 row's unit.
 
 `tables.manifest.lacks` names what the log was written without, because Spark leaves it out by
-default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`.
+default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`. A column only
+those settings fill, such as `peak_python_rss_bytes`, is null in a log written without them.
 
 ## Layout
 

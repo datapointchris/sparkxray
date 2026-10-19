@@ -16,7 +16,7 @@
     "lacks": {
       "type": "array",
       "uniqueItems": true,
-      "description": "What Spark wrote only when asked, and this log was written without. stage_executor_metrics: spark.eventLog.logStageExecutorMetrics was off, so the per-task peaks are the only memory figures. block_updates: spark.eventLog.logBlockUpdates.enabled was off. process_tree_metrics: spark.executor.processTreeMetrics.enabled was off, so peak_python_rss_bytes is zero.",
+      "description": "What Spark wrote only when asked, and this log was written without. stage_executor_metrics: spark.eventLog.logStageExecutorMetrics was off, so the per-task peaks are the only memory figures. block_updates: spark.eventLog.logBlockUpdates.enabled was off. process_tree_metrics: spark.executor.processTreeMetrics.enabled was off, so peak_python_rss_bytes is null.",
       "items": {"enum": ["stage_executor_metrics", "block_updates", "process_tree_metrics"]}
     },
     "ingest": {"$ref": "ingest-manifest.json", "description": "The ingest manifest of the log the tables were built from."}

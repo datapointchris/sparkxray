@@ -7,7 +7,7 @@ working tables, which `build.py` creates:
 - `events`, every event line in log order, with `kind` its event class's short name;
 - `ingest_facts`, the ingest manifest's one row;
 - `plan_node_rows`, `plan_metric_refs` and `plan_version_rows`, read from every plan version;
-- `highest_attempts`, `execution_stages` and `metric_aggregates`.
+- `highest_attempts`, `execution_stages`, `metric_aggregates` and `process_tree`.
 """
 
 from __future__ import annotations
@@ -303,7 +303,12 @@ _TASKS = Table(
         ('scheduler_delay_ms', 'BIGINT', _SCHEDULER_DELAY),
         ('peak_jvm_heap_bytes', 'BIGINT', f'{_PEAKS}."JVMHeapMemory"'),
         ('peak_jvm_offheap_bytes', 'BIGINT', f'{_PEAKS}."JVMOffHeapMemory"'),
-        ('peak_python_rss_bytes', 'BIGINT', f'{_PEAKS}."ProcessTreePythonRSSMemory"'),
+        # Spark writes 0 for every process-tree metric when it measures none, which is no measurement.
+        (
+            'peak_python_rss_bytes',
+            'BIGINT',
+            f'CASE WHEN (SELECT measured FROM process_tree) THEN {_PEAKS}."ProcessTreePythonRSSMemory" END',
+        ),
         ('major_gc_count', 'BIGINT', f'{_PEAKS}."MajorGCCount"'),
         ('major_gc_time_ms', 'BIGINT', f'{_PEAKS}."MajorGCTime"'),
     ),

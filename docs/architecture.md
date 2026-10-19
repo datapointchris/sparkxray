@@ -226,4 +226,5 @@ So after a stage retry, its totals can fall short of the same metric summed over
 | `process_tree_metrics` | `spark.executor.processTreeMetrics.enabled` |
 
 Without stage executor metrics, each task's peaks are the log's only memory figures. Without
-process-tree metrics, `peak_python_rss_bytes` is zero rather than measured.
+process-tree metrics, `peak_python_rss_bytes` is null. Spark writes 0 for a metric it never
+measured, and the table does not pass that off as a measurement.
