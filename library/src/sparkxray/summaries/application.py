@@ -11,7 +11,7 @@ from sparkxray.tables.relations import Tables
 from sparkxray.tables.rows import rows_of
 
 _APPLICATION_SQL = f"""
-SELECT application.*, run.end_ms - run.start_ms AS duration_ms
+SELECT application.*, run.end_epoch_ms - run.start_epoch_ms AS duration_ms
 FROM application, ({RUN_SPAN_SQL}) AS run
 """
 

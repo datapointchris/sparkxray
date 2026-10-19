@@ -18,8 +18,18 @@ app = typer.Typer(
     help='Read a log into the cache, list the logs it holds, and show one. A cached log opens by its app id.',
 )
 
-_LIST_COLUMNS = ('app_id', 'app_name', 'spark_version', 'platform', 'log_size_bytes', 'cached_ms', 'location')
-_APPLICATION_KEYS = ('app_id', 'attempt_id', 'app_name', 'user', 'spark_version', 'platform', 'start_ms', 'end_ms', 'duration_ms')
+_LIST_COLUMNS = ('app_id', 'app_name', 'spark_version', 'platform', 'log_size_bytes', 'cached_epoch_ms', 'location')
+_APPLICATION_KEYS = (
+    'app_id',
+    'attempt_id',
+    'app_name',
+    'user',
+    'spark_version',
+    'platform',
+    'start_epoch_ms',
+    'end_epoch_ms',
+    'duration_ms',
+)
 
 
 @app.command('ingest')

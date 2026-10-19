@@ -19,9 +19,11 @@ STAGE_SUMMARIES_SQL = f"""
 WITH walls AS (
   SELECT id AS stage_id, wall_ms, share AS wall_share FROM ({WALL_SHARES_SQL}) WHERE level = 'stage'
 ), attempts AS (
-  SELECT stage_id, max(name) AS name, count(*) AS attempt_count, min(submit_ms) AS submit_ms,
-    arg_max(CASE WHEN failure_reason IS NOT NULL THEN 'failed' WHEN complete_ms IS NOT NULL THEN 'complete' ELSE 'active' END, attempt)
-      AS status
+  SELECT stage_id, max(name) AS name, count(*) AS attempt_count, min(submit_epoch_ms) AS submit_epoch_ms,
+    arg_max(
+      CASE WHEN failure_reason IS NOT NULL THEN 'failed' WHEN complete_epoch_ms IS NOT NULL THEN 'complete' ELSE 'active' END,
+      attempt
+    ) AS status
   FROM stages GROUP BY stage_id
 ), task_attempts AS (
   SELECT stage_id, count(*) AS task_count, count(*) FILTER (WHERE failed) AS failed_task_count FROM tasks GROUP BY stage_id
@@ -39,7 +41,7 @@ WITH walls AS (
 )
 SELECT attempts.stage_id, attempts.name, attempts.status, attempts.attempt_count,
   coalesce(task_attempts.task_count, 0) AS task_count, coalesce(task_attempts.failed_task_count, 0) AS failed_task_count,
-  attempts.submit_ms, walls.wall_ms, walls.wall_share,
+  attempts.submit_epoch_ms, walls.wall_ms, walls.wall_share,
   effective.durations[len(effective.durations) // 2 + 1] AS median_task_duration_ms,
   list_max(effective.durations) AS max_task_duration_ms,
   effective.input_bytes, effective.output_bytes, effective.shuffle_read_bytes, effective.shuffle_write_bytes,

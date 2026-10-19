@@ -57,7 +57,7 @@ SELECT
   (SELECT count(*) FROM tasks_effective) > 0 AS tasks,
   (SELECT count(*) FROM executors) > 0 AS executors,
   (SELECT count(*) FROM environment) > 0 AS environment,
-  (SELECT count(*) FROM stages WHERE submit_ms IS NOT NULL) > 0 AS timeline
+  (SELECT count(*) FROM stages WHERE submit_epoch_ms IS NOT NULL) > 0 AS timeline
 """
 
 # Each node's metric totals in its execution's last plan. A name a node lists twice keeps its first accumulator.

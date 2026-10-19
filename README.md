@@ -180,10 +180,9 @@ not rerun. It is `tasks` where `effective` is true, so a Parquet reader filters 
 
 A numeric column's name ends in its unit: `_ms`, `_ns`, `_bytes`, `_records` or `_count`. Spark
 reports CPU time in nanoseconds beside run time in milliseconds, and the names keep the two apart.
-`start_ms`, `end_ms`, `submit_ms`, `complete_ms`, `add_ms`, `remove_ms`, `launch_ms` and
-`finish_ms` are instants in epoch milliseconds, and every other `_ms` column is a duration.
-`plan_node_metrics` holds every kind of metric in the same columns, so its `unit` column names each
-row's unit.
+An instant ends in `_epoch_ms`, milliseconds since the epoch. So `launch_epoch_ms` is when a task
+started, and `duration_ms` is how long it ran. `plan_node_metrics` holds every kind of metric in
+the same columns, so its `unit` column names each row's unit.
 
 `tables.manifest.lacks` names what the log was written without, because Spark leaves it out by
 default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`. A column only

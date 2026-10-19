@@ -34,7 +34,7 @@ _SHOW_KEYS = (
     'description',
     'status',
     'error',
-    'start_ms',
+    'start_epoch_ms',
     'duration_ms',
     'wall_share',
     'job_count',

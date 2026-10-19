@@ -1,8 +1,8 @@
 """Every table the build writes: what it holds, its columns and their types, and the SQL that computes each column.
 
-A numeric column's name ends in its unit, which `column_unit` reads back. The `_ms` columns named
-in `EPOCH_MS_COLUMNS` are instants in epoch milliseconds, and every other `_ms` column is a
-duration. Each table's `source` reads the build's working tables, which `build.py` creates:
+A numeric column's name ends in its unit, which `column_unit` reads back. An instant ends in
+`_epoch_ms`, milliseconds since the epoch, and a duration in `_ms`. Each table's `source` reads
+the build's working tables, which `build.py` creates:
 
 - `events`, every event line in log order, with `kind` its event class's short name;
 - `ingest_facts`, the ingest manifest's one row;
@@ -53,8 +53,8 @@ _APPLICATION = Table(
         ('app_name', 'VARCHAR', 'app_name'),
         ('user', 'VARCHAR', 'app_user'),
         ('spark_version', 'VARCHAR', 'coalesce(logged_spark_version, spark_version)'),
-        ('start_ms', 'BIGINT', 'started_at'),
-        ('end_ms', 'BIGINT', 'ended_at'),
+        ('start_epoch_ms', 'BIGINT', 'started_at'),
+        ('end_epoch_ms', 'BIGINT', 'ended_at'),
         ('platform', 'VARCHAR', 'platform'),
         ('log_source', 'VARCHAR', 'source'),
         ('compacted', 'BOOLEAN', 'compacted'),
@@ -129,8 +129,8 @@ _EXECUTORS = Table(
         # A resource profile holds memory in MiB. The driver's is spark.driver.memory, which no profile holds.
         ('executor_memory_bytes', 'BIGINT', "CASE WHEN executor_id = 'driver' THEN NULL ELSE memory_mib * 1048576 END"),
         ('max_storage_memory_bytes', 'BIGINT', 'maximum_memory'),
-        ('add_ms', 'BIGINT', 'coalesce(added_at, registered_at)'),
-        ('remove_ms', 'BIGINT', 'removed_at'),
+        ('add_epoch_ms', 'BIGINT', 'coalesce(added_at, registered_at)'),
+        ('remove_epoch_ms', 'BIGINT', 'removed_at'),
         ('remove_reason', 'VARCHAR', 'removed_reason'),
         ('is_driver', 'BOOLEAN', "executor_id = 'driver'"),
     ),
@@ -163,8 +163,8 @@ _JOBS = Table(
             'ELSE string_split(properties."spark.job.tags", \',\') END',
         ),
         ('description', 'VARCHAR', 'properties."spark.job.description"'),
-        ('submit_ms', 'BIGINT', 'submitted_at'),
-        ('end_ms', 'BIGINT', 'completed_at'),
+        ('submit_epoch_ms', 'BIGINT', 'submitted_at'),
+        ('end_epoch_ms', 'BIGINT', 'completed_at'),
         ('result', 'VARCHAR', 'job_result."Result"'),
         ('failure_reason', 'VARCHAR', 'job_result."Exception"."Message"'),
         ('stage_ids', 'BIGINT[]', 'job_stage_ids'),
@@ -196,8 +196,8 @@ _STAGES = Table(
         ('task_count', 'BIGINT', 'info."Number of Tasks"'),
         ('parent_ids', 'BIGINT[]', 'info."Parent IDs"'),
         ('resource_profile_id', 'BIGINT', 'info."Resource Profile Id"'),
-        ('submit_ms', 'BIGINT', 'info."Submission Time"'),
-        ('complete_ms', 'BIGINT', 'info."Completion Time"'),
+        ('submit_epoch_ms', 'BIGINT', 'info."Submission Time"'),
+        ('complete_epoch_ms', 'BIGINT', 'info."Completion Time"'),
         ('failure_reason', 'VARCHAR', 'info."Failure Reason"'),
         ('is_highest_attempt', 'BOOLEAN', 'attempt = highest_attempt'),
     ),
@@ -262,8 +262,8 @@ _TASKS = Table(
         ('host', 'VARCHAR', '"Task Info"."Host"'),
         ('locality', 'VARCHAR', '"Task Info"."Locality"'),
         ('speculative', 'BOOLEAN', '"Task Info"."Speculative"'),
-        ('launch_ms', 'BIGINT', '"Task Info"."Launch Time"'),
-        ('finish_ms', 'BIGINT', _FINISH),
+        ('launch_epoch_ms', 'BIGINT', '"Task Info"."Launch Time"'),
+        ('finish_epoch_ms', 'BIGINT', _FINISH),
         ('duration_ms', 'BIGINT', _DURATION),
         ('getting_result_ms', 'BIGINT', _GETTING_RESULT),
         ('failed', 'BOOLEAN', 'coalesce("Task Info"."Failed", false)'),
@@ -358,8 +358,8 @@ _SQL_EXECUTIONS = Table(
         ('description', 'VARCHAR', 'description'),
         ('details', 'VARCHAR', 'details'),
         ('job_tags', 'VARCHAR[]', 'jobTags'),
-        ('start_ms', 'BIGINT', 'started_at'),
-        ('end_ms', 'BIGINT', 'ended_at'),
+        ('start_epoch_ms', 'BIGINT', 'started_at'),
+        ('end_epoch_ms', 'BIGINT', 'ended_at'),
         ('error', 'VARCHAR', "nullif(errorMessage, '')"),
         ('modified_configs', 'MAP(VARCHAR, VARCHAR)', 'modifiedConfigs'),
         ('plan_version_count', 'BIGINT', 'versions'),
@@ -487,9 +487,9 @@ TASKS_EFFECTIVE = 'CREATE VIEW tasks_effective AS SELECT * FROM tasks WHERE effe
 
 # When the run started and ended. A run still going when its log ended ends at the last thing the log saw finish.
 RUN_SPAN_SQL = """
-SELECT start_ms, coalesce(end_ms, greatest(
-  (SELECT max(finish_ms) FROM tasks), (SELECT max(complete_ms) FROM stages),
-  (SELECT max(end_ms) FROM jobs), (SELECT max(end_ms) FROM sql_executions))) AS end_ms
+SELECT start_epoch_ms, coalesce(end_epoch_ms, greatest(
+  (SELECT max(finish_epoch_ms) FROM tasks), (SELECT max(complete_epoch_ms) FROM stages),
+  (SELECT max(end_epoch_ms) FROM jobs), (SELECT max(end_epoch_ms) FROM sql_executions))) AS end_epoch_ms
 FROM application
 """
 
@@ -498,24 +498,23 @@ FROM application
 # completed. An execution still running when the log ended runs to the run's end.
 WALL_SHARES_SQL = f"""
 WITH run AS ({RUN_SPAN_SQL}), task_ends AS (
-  SELECT stage_id, max(finish_ms) AS finish_ms FROM tasks GROUP BY stage_id
+  SELECT stage_id, max(finish_epoch_ms) AS finish_epoch_ms FROM tasks GROUP BY stage_id
 ), walls AS (
-  SELECT 'stage' AS level, stage_id AS id, coalesce(max(complete_ms), max(task_ends.finish_ms)) - min(submit_ms) AS wall_ms
+  SELECT 'stage' AS level, stage_id AS id,
+    coalesce(max(complete_epoch_ms), max(task_ends.finish_epoch_ms)) - min(submit_epoch_ms) AS wall_ms
   FROM stages LEFT JOIN task_ends USING (stage_id) GROUP BY stage_id
   UNION ALL
-  SELECT 'sql_execution', execution_id, coalesce(end_ms, (SELECT end_ms FROM run)) - start_ms FROM sql_executions
+  SELECT 'sql_execution', execution_id, coalesce(end_epoch_ms, (SELECT end_epoch_ms FROM run)) - start_epoch_ms FROM sql_executions
 )
 SELECT walls.level, walls.id, walls.wall_ms,
-  CASE WHEN run.end_ms > run.start_ms THEN round(walls.wall_ms / (run.end_ms - run.start_ms), 4) END AS share
+  CASE WHEN run.end_epoch_ms > run.start_epoch_ms THEN round(walls.wall_ms / (run.end_epoch_ms - run.start_epoch_ms), 4) END AS share
 FROM walls, run
 WHERE walls.wall_ms IS NOT NULL
 """
 
-# The `_ms` names that are instants, in epoch milliseconds.
-EPOCH_MS_COLUMNS = frozenset(
-    {'start_ms', 'end_ms', 'submit_ms', 'complete_ms', 'add_ms', 'remove_ms', 'launch_ms', 'finish_ms', 'cached_ms'}
-)
+# An instant's suffix comes before a duration's, because `_epoch_ms` also ends in `_ms`.
 _SUFFIX_UNITS = (
+    ('_epoch_ms', 'epoch_ms'),
     ('_ms', 'ms'),
     ('_ns', 'ns'),
     ('_bytes', 'bytes'),
@@ -532,6 +531,4 @@ _SUFFIX_UNITS = (
 
 def column_unit(name: str) -> str | None:
     """The unit a column's name ends in: `epoch_ms` for an instant, `ms` for a duration, and so on. None where it names none."""
-    if name in EPOCH_MS_COLUMNS:
-        return 'epoch_ms'
     return next((unit for suffix, unit in _SUFFIX_UNITS if name.endswith(suffix)), None)

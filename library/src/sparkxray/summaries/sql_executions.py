@@ -35,9 +35,9 @@ WITH walls AS (
   GROUP BY 1
 )
 SELECT sql_executions.execution_id, sql_executions.description,
-  CASE WHEN sql_executions.error IS NOT NULL THEN 'failed' WHEN sql_executions.end_ms IS NOT NULL THEN 'complete' ELSE 'running' END
+  CASE WHEN sql_executions.error IS NOT NULL THEN 'failed' WHEN sql_executions.end_epoch_ms IS NOT NULL THEN 'complete' ELSE 'running' END
     AS status,
-  sql_executions.start_ms, walls.wall_ms AS duration_ms, walls.wall_share,
+  sql_executions.start_epoch_ms, walls.wall_ms AS duration_ms, walls.wall_share,
   coalesce(job_totals.job_count, 0) AS job_count, coalesce(stage_totals.stage_count, 0) AS stage_count,
   sql_executions.plan_version_count,
   coalesce(last_plans.node_count, 0) AS node_count, coalesce(last_plans.exchange_count, 0) AS exchange_count,
@@ -57,7 +57,7 @@ WHERE execution_id = $execution_id
 """
 
 _JOBS_SQL = """
-SELECT job_id, result, submit_ms, end_ms, end_ms - submit_ms AS duration_ms, stage_ids, job_group, failure_reason
+SELECT job_id, result, submit_epoch_ms, end_epoch_ms, end_epoch_ms - submit_epoch_ms AS duration_ms, stage_ids, job_group, failure_reason
 FROM jobs WHERE sql_execution_id = $execution_id ORDER BY job_id
 """
 

@@ -15,10 +15,10 @@ WITH run AS ({RUN_SPAN_SQL}), task_totals AS (
     sum(duration_ms)::BIGINT AS task_time_ms, max(peak_jvm_heap_bytes) AS peak_jvm_heap_bytes
   FROM tasks GROUP BY executor_id
 ), lifetimes AS (
-  SELECT executors.*, coalesce(executors.remove_ms, run.end_ms) - executors.add_ms AS lifetime_ms FROM executors, run
+  SELECT executors.*, coalesce(executors.remove_epoch_ms, run.end_epoch_ms) - executors.add_epoch_ms AS lifetime_ms FROM executors, run
 )
 SELECT lifetimes.executor_id, lifetimes.host, lifetimes.is_driver, lifetimes.core_count, lifetimes.executor_memory_bytes,
-  lifetimes.add_ms, lifetimes.remove_ms, lifetimes.lifetime_ms,
+  lifetimes.add_epoch_ms, lifetimes.remove_epoch_ms, lifetimes.lifetime_ms,
   coalesce(task_totals.task_count, 0) AS task_count, coalesce(task_totals.failed_task_count, 0) AS failed_task_count,
   task_totals.task_time_ms,
   CASE WHEN lifetimes.core_count > 0 AND lifetimes.lifetime_ms > 0

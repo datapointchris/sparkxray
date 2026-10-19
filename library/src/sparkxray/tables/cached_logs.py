@@ -26,7 +26,7 @@ class CachedLog:
     """One log the cache holds tables for, which opens by its app id.
 
     `location` is what `EventLog.open` takes to read the log from its source again, as it stands
-    now: a path, or an S3 URI. `cached_ms` is when its newest tables were built, and
+    now: a path, or an S3 URI. `cached_epoch_ms` is when its newest tables were built, and
     `tables_path` their directory. An earlier sparkxray may have built them, and then the next
     open builds them again.
     """
@@ -37,7 +37,7 @@ class CachedLog:
     platform: str
     location: str
     log_size_bytes: int
-    cached_ms: int
+    cached_epoch_ms: int
     tables_path: str
 
     @classmethod
@@ -56,7 +56,7 @@ class CachedLog:
             platform=ingest.platform,
             location=location,
             log_size_bytes=sum(file.size_bytes for file in ingest.files),
-            cached_ms=int((directory / 'manifest.json').stat().st_mtime * 1000),
+            cached_epoch_ms=int((directory / 'manifest.json').stat().st_mtime * 1000),
             tables_path=str(directory),
         )
 
