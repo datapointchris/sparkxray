@@ -17,46 +17,86 @@ FINDINGS_SCHEMA = jsonschema.Draft202012Validator(
 )
 
 
-def _listed(description: str) -> set[str]:
-    """The plan rules a fixture query's description says fire: `fires=a,b; silent=c; what the query does`."""
-    return {rule for rule in description.split('; ', 1)[0].removeprefix('fires=').split(',') if rule.startswith('plan.')}
+APPLICATION_PROPERTY = 'spark.sparkxray.fixture.application'
 
 
-def _plan_firings(path: pathlib.Path, cache_dir: pathlib.Path) -> list[tuple[str, set[str]]]:
-    """Each query's description beside the plan rules that fired on it, from a log or from captured cost-mode text."""
+def _expected(description: str) -> tuple[set[str], set[str]]:
+    """The rules a fixture description says fire and stay silent, from `fires=a,b; silent=c; what it does`."""
+    if not description.startswith('fires='):
+        return set(), set()
+    fires, silent, _ = description.split('; ', 2)
+    return {rule for rule in fires.removeprefix('fires=').split(',') if rule}, {
+        rule for rule in silent.removeprefix('silent=').split(',') if rule
+    }
+
+
+def _firings(path: pathlib.Path, cache_dir: pathlib.Path) -> tuple[dict[str, set[str]], str, set[str]]:
+    """The rules that fired under each job or query description, then the run's own description and the rules fired on the run.
+
+    A finding scoped to a job counts under the job's description, one scoped to a SQL execution under the execution's,
+    and any other under the run, whose description is the `spark.sparkxray.fixture.application` property.
+    """
     if path.suffix == '.json':
-        captured = []
+        captured = {}
         for capture in json.loads(path.read_text()):
             plan_only = analyze_plan(parse_plan_text(capture['text']))
             FINDINGS_SCHEMA.validate(plan_only.to_json())
-            captured.append((capture['description'], {finding.rule_id for finding in plan_only.findings}))
-        return captured
+            captured[capture['description']] = {finding.rule_id for finding in plan_only.findings}
+        return captured, '', set()
     log = EventLog.open(path, cache_dir=cache_dir)
     analysis = log.analyze()
     FINDINGS_SCHEMA.validate(analysis.to_json())
-    fired: dict[int, set[str]] = {}
+    jobs = dict(log.tables.query("SELECT job_id, coalesce(description, '') FROM jobs").fetchall())
+    executions = dict(log.tables.query("SELECT execution_id, coalesce(description, '') FROM sql_executions").fetchall())
+    declared = log.tables.query(
+        "SELECT value FROM environment WHERE section = 'spark' AND key = $key", {'key': APPLICATION_PROPERTY}
+    ).fetchone()
+    fired: dict[str, set[str]] = {description: set() for description in (*jobs.values(), *executions.values())}
+    on_run = set()
     for finding in analysis.findings:
-        if finding.rule_id.startswith('plan.') and finding.scope.sql_execution_id is not None:
-            fired.setdefault(finding.scope.sql_execution_id, set()).add(finding.rule_id)
-    executions = log.tables.query('SELECT execution_id, description FROM sql_executions ORDER BY execution_id').fetchall()
-    return [(description or '', fired.get(execution_id, set())) for execution_id, description in executions]
+        if finding.scope.job_id is not None:
+            fired[jobs[finding.scope.job_id]].add(finding.rule_id)
+        elif finding.scope.sql_execution_id is not None:
+            fired[executions[finding.scope.sql_execution_id]].add(finding.rule_id)
+        else:
+            on_run.add(finding.rule_id)
+    return fired, declared[0] if declared else '', on_run
 
 
+def _misfired(description: str, fired: set[str], families: tuple[str, ...]) -> tuple[list[str], list[str]]:
+    """The rules a description lists as firing that did not, then those that fired unwanted.
+
+    A rule fired unwanted where the description lists it silent, or where it is of one of `families` and not listed.
+    """
+    fires, silent = _expected(description)
+    unwanted = (fired & silent) | {rule for rule in fired - fires if rule.startswith(families)}
+    return sorted(fires - fired), sorted(unwanted)
+
+
+# Each source holds every rule of the families beside it to its descriptions' lists, and every
+# other rule only to the rules a description names.
 @pytest.mark.parametrize(
-    'source',
+    ('source', 'families'),
     [
-        'logs/spark-3.5.9/local-1792406949080.zstd',
-        'logs/spark-4.2.0/eventlog_v2_local-1792407003364',
-        'logs/spark-3.5.9-plan-rules/local-1792441743480.zstd',
-        'logs/spark-4.2.0-plan-rules/local-1792441776528.zstd',
-        'explain/spark-3.5.9-plan-rules/cost-mode.json',
-        'explain/spark-4.2.0-plan-rules/cost-mode.json',
+        ('logs/spark-3.5.9/local-1792406949080.zstd', ('plan.',)),
+        ('logs/spark-4.2.0/eventlog_v2_local-1792407003364', ('plan.',)),
+        ('logs/spark-3.5.9-plan-rules/local-1792441743480.zstd', ('plan.',)),
+        ('logs/spark-4.2.0-plan-rules/local-1792441776528.zstd', ('plan.',)),
+        ('explain/spark-3.5.9-plan-rules/cost-mode.json', ('plan.',)),
+        ('explain/spark-4.2.0-plan-rules/cost-mode.json', ('plan.',)),
+        ('logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd', ('stage.', 'config.')),
+        ('logs/spark-4.2.0-stage-rules/eventlog_v2_app-20261019215829-0000', ('stage.', 'config.')),
     ],
 )
-def test_each_plan_rule_fires_on_the_fixture_queries_that_list_it_and_on_no_other(source: str, tmp_path: pathlib.Path) -> None:
-    fired = _plan_firings(FIXTURES / source, tmp_path)
+def test_each_rule_fires_where_a_fixture_lists_it_and_a_claimed_family_fires_nowhere_else(
+    source: str, families: tuple[str, ...], tmp_path: pathlib.Path
+) -> None:
+    fired, run_description, on_run = _firings(FIXTURES / source, tmp_path)
 
-    assert fired == [(description, _listed(description)) for description, _ in fired]
+    misfired = {description: _misfired(description, rules, families) for description, rules in fired.items()}
+    # The run's findings are held only to what its description names: an executor's memory peak depends on when it was polled.
+    misfired[f'the run: {run_description}'] = _misfired(run_description, on_run, ())
+    assert {description: wrong for description, wrong in misfired.items() if wrong != ([], [])} == {}
 
 
 def test_a_plan_without_metrics_runs_the_plan_rules_and_names_what_the_others_lack() -> None:
