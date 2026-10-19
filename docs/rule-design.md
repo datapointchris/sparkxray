@@ -33,6 +33,20 @@ A run still going when its log ended has no end time. It ends at the last task, 
 execution the log saw finish. A stage left open ends at its last task, and an execution left open
 ends with the run.
 
+## The gate judges every finding, whatever the listing shows
+
+`Analysis.gate(fail_on)` names each finding at or above a severity, by `finding_id`. `findings
+list` exits 3 when one is, 2 on a usage error, and 0 otherwise. So a CI job gates on the severity
+it names, and a scheduled report stays green while it lists medium findings.
+
+The gate is judged before `--min-severity` and `--limit` narrow the list. So `-n 0` prints no
+finding and still exits 3 on a high one. A gate judged after narrowing would pass a run by hiding
+what failed it.
+
+`--json` carries the gate beside the findings, as the findings schema's optional `gate`. A caller
+reads the verdict there rather than inferring it from the exit status. A severity outside the
+ladder is `E-RULE-006`, listing the five.
+
 ## `impact_seconds` is wall time a fix could recover, and null where nobody can say
 
 | Rule family | `impact_seconds` |

@@ -108,12 +108,19 @@ class EventLog:
         """Resolve `location` to one application's log and make every file of it readable.
 
         `location` is a log file, a directory, a rolling `eventlog_v2_*` directory, or an `s3://`
-        URI to any of those. It must hold exactly one application. `cache_dir` overrides
-        `$XDG_CACHE_HOME/sparkxray`. `profile` and `region` narrow boto3's credential chain.
+        URI to any of those. It must hold exactly one application. It may also be the app id of a
+        log the cache holds tables for, where it names no file, which opens those tables without
+        reading the log's source again. `cache_dir` overrides `$XDG_CACHE_HOME/sparkxray`.
+        `profile` and `region` narrow boto3's credential chain.
         """
-        source = location_for(os.fspath(location), profile=profile, region=region)
-        candidate = _resolve(source)
+        text = os.fspath(location)
         cache = cache_root(cache_dir)
+        if _may_be_app_id(text):
+            from sparkxray.tables.cached_logs import cached_ingest  # DuckDB is imported only when an app id is opened
+
+            return cls(cached_ingest(text, cache), cache)
+        source = location_for(text, profile=profile, region=region)
+        candidate = _resolve(source)
         local_paths = _in_parallel(lambda log_file: source.local_path(log_file.listed, cache), candidate.files)
         files = []
         truncated_tail = False
@@ -166,6 +173,12 @@ class EventLog:
                     ) from error
                 if split.tail:
                     yield split.tail
+
+
+def _may_be_app_id(text: str) -> bool:
+    """Whether a location could only be an app id: it holds no path separator, so no URI, and names nothing that exists."""
+    separators = [separator for separator in ('/', os.sep, os.altsep) if separator]
+    return bool(text) and not any(separator in text for separator in separators) and not Path(text).expanduser().exists()
 
 
 def _resolve(source: Location) -> layouts.Candidate:

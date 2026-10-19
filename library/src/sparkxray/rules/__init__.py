@@ -1,12 +1,14 @@
 """Heuristic rules over a Spark run, and the findings they report in a versioned shape."""
 
 from sparkxray.rules.analysis import Analysis
+from sparkxray.rules.analysis import Gate
 from sparkxray.rules.analysis import RuleRun
 from sparkxray.rules.analysis import SkippedRule
 from sparkxray.rules.analysis import analyze
 from sparkxray.rules.analysis import analyze_plan
 from sparkxray.rules.catalog import catalog
 from sparkxray.rules.catalog import register
+from sparkxray.rules.catalog import rule_by_id
 from sparkxray.rules.findings import AppliedThreshold
 from sparkxray.rules.findings import Finding
 from sparkxray.rules.findings import FindingScope
@@ -21,6 +23,7 @@ __all__ = [
     'AppliedThreshold',
     'Finding',
     'FindingScope',
+    'Gate',
     'Rule',
     'RuleContext',
     'RuleRun',
@@ -32,4 +35,5 @@ __all__ = [
     'analyze_plan',
     'catalog',
     'register',
+    'rule_by_id',
 ]

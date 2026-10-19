@@ -59,6 +59,21 @@ class FindingScope:
             return f's{_required(self.stage_id, "stage_id", level)}'
         return f'x{_required(self.executor_id, "executor_id", level)}'
 
+    def describe(self) -> str:
+        """The scope as a person reads it, widest part first: `SQL 0 › SortMergeJoin [k#2L], [k#10L], Inner › stage 4`."""
+        parts = []
+        if self.sql_execution_id is not None:
+            parts.append(f'SQL {self.sql_execution_id}')
+        if self.plan_node_label is not None:
+            parts.append(self.plan_node_label)
+        elif self.plan_node_id is not None:
+            parts.append(f'node {self.plan_node_id}')
+        if self.stage_id is not None:
+            parts.append(f'stage {self.stage_id}' if not self.stage_attempt else f'stage {self.stage_id} attempt {self.stage_attempt}')
+        if self.executor_id is not None:
+            parts.append(f'executor {self.executor_id}')
+        return ' › '.join(parts) or 'the application'
+
     def to_json(self) -> dict[str, Any]:
         return {**dc.asdict(self), 'worst_task_ids': list(self.worst_task_ids)}
 

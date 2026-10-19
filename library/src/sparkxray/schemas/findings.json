@@ -24,7 +24,18 @@
       "description": "Ordered by impact_seconds, largest first and null last, then by severity, then by finding_id.",
       "items": {"$ref": "#/$defs/finding"}
     },
-    "skipped": {"type": "array", "items": {"$ref": "#/$defs/skipped_rule"}}
+    "skipped": {"type": "array", "items": {"$ref": "#/$defs/skipped_rule"}},
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fail_on", "passed", "blocking"],
+      "description": "Present where the analysis was judged against a severity bar, as sparkxray findings list --fail-on judges it. It passes when no finding is at or above fail_on, and blocking names those that are, whether or not findings lists them.",
+      "properties": {
+        "fail_on": {"$ref": "#/$defs/severity"},
+        "passed": {"type": "boolean"},
+        "blocking": {"type": "array", "items": {"type": "string"}}
+      }
+    }
   },
   "$defs": {
     "signal": {

@@ -485,8 +485,36 @@ TABLES: tuple[Table, ...] = (
 # speculative copies stay in `tasks`, where they show the work they wasted.
 TASKS_EFFECTIVE = 'CREATE VIEW tasks_effective AS SELECT * FROM tasks WHERE effective'
 
+# When the run started and ended. A run still going when its log ended ends at the last thing the log saw finish.
+RUN_SPAN_SQL = """
+SELECT start_ms, coalesce(end_ms, greatest(
+  (SELECT max(finish_ms) FROM tasks), (SELECT max(complete_ms) FROM stages),
+  (SELECT max(end_ms) FROM jobs), (SELECT max(end_ms) FROM sql_executions))) AS end_ms
+FROM application
+"""
+
+# Each stage's and SQL execution's wall time, and its share of the run's. A stage runs from its
+# first attempt's submission to its last completion, or to its last task's finish where it never
+# completed. An execution still running when the log ended runs to the run's end.
+WALL_SHARES_SQL = f"""
+WITH run AS ({RUN_SPAN_SQL}), task_ends AS (
+  SELECT stage_id, max(finish_ms) AS finish_ms FROM tasks GROUP BY stage_id
+), walls AS (
+  SELECT 'stage' AS level, stage_id AS id, coalesce(max(complete_ms), max(task_ends.finish_ms)) - min(submit_ms) AS wall_ms
+  FROM stages LEFT JOIN task_ends USING (stage_id) GROUP BY stage_id
+  UNION ALL
+  SELECT 'sql_execution', execution_id, coalesce(end_ms, (SELECT end_ms FROM run)) - start_ms FROM sql_executions
+)
+SELECT walls.level, walls.id, walls.wall_ms,
+  CASE WHEN run.end_ms > run.start_ms THEN round(walls.wall_ms / (run.end_ms - run.start_ms), 4) END AS share
+FROM walls, run
+WHERE walls.wall_ms IS NOT NULL
+"""
+
 # The `_ms` names that are instants, in epoch milliseconds.
-EPOCH_MS_COLUMNS = frozenset({'start_ms', 'end_ms', 'submit_ms', 'complete_ms', 'add_ms', 'remove_ms', 'launch_ms', 'finish_ms'})
+EPOCH_MS_COLUMNS = frozenset(
+    {'start_ms', 'end_ms', 'submit_ms', 'complete_ms', 'add_ms', 'remove_ms', 'launch_ms', 'finish_ms', 'cached_ms'}
+)
 _SUFFIX_UNITS = (
     ('_ms', 'ms'),
     ('_ns', 'ns'),

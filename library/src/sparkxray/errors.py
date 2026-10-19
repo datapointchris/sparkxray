@@ -57,7 +57,10 @@ def registered() -> tuple[type[SparkxrayError], ...]:
 
 class NoEventLogError(SparkxrayError):
     code = 'E-INGEST-001'
-    raised_when = 'the path or prefix holds no event log; lists up to ten of the files it holds'
+    raised_when = (
+        'the path or prefix holds no event log, listing up to ten of the files it holds; '
+        "or it names neither a path nor a cached log's app id, listing the cached app ids"
+    )
     exit_code = 3
 
 
@@ -126,4 +129,28 @@ class InvalidRuleError(SparkxrayError):
 class NotAnalyzedError(SparkxrayError):
     code = 'E-RULE-005'
     raised_when = "a log's findings were read before any analysis of it wrote them"
+    exit_code = 2
+
+
+class UnknownSeverityError(SparkxrayError):
+    code = 'E-RULE-006'
+    raised_when = 'a severity is not one of info, low, medium, high or critical'
+    exit_code = 2
+
+
+class QueryError(SparkxrayError):
+    code = 'E-QUERY-001'
+    raised_when = "SQL over a log's tables failed; carries DuckDB's message"
+    exit_code = 2
+
+
+class NotInRunError(SparkxrayError):
+    code = 'E-QUERY-002'
+    raised_when = 'a stage, SQL execution or finding named is not in the run; lists those it holds'
+    exit_code = 2
+
+
+class UnknownColumnError(SparkxrayError):
+    code = 'E-QUERY-003'
+    raised_when = 'a list is sorted by a column it does not have; lists its columns'
     exit_code = 2
