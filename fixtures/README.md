@@ -57,49 +57,15 @@ test by cutting bytes off a fixture.
 
 ## Each job's description states what it seeds
 
-The fixture job sets each job's description to `fires=<rule ids>; silent=<rule ids>; <what it
+Each fixture job sets each job's description to `fires=<rule ids>; silent=<rule ids>; <what it
 does>`. Spark copies that description into every stage the job submits, so a test reads its
-expectation from the log itself.
+expectation from the log itself. The `describe(...)` calls in `job/eventlog_job.py` and
+`job/plan_rules_job.py` name, for each query, the rules that must fire on it and those that must
+stay silent. The cost-mode queries in `write_estimates` do the same, beside their text in
+`explain/`.
 
-| Job | Rule ids that must fire | Rule ids that must stay silent |
-| --- | --- | --- |
-| skewed sort-merge join | `stage.shuffle-skew`, `plan.smj-small-side` | |
-| wide sort | `stage.spill` | `stage.shuffle-skew` |
-| row-at-a-time Python UDF | `plan.python-udf-row-at-a-time` | |
-| sort-merge join with a 1,000-row side | `plan.smj-small-side` | |
-| 200-file write | `plan.small-files-written`, `stage.tiny-tasks` | `stage.task-skew` |
-| cached reuse | | `plan.repeated-subtree` |
-
-`glue-5.0` runs the same job under Glue's own defaults, which broadcast the 1,000-row side. Its
+`glue-5.0` runs the base job under Glue's own defaults, which broadcast the 1,000-row side. Its
 description still names `plan.smj-small-side`, so no test reads a plan firing from that log.
-
-The plan-rules job's queries, after the four that write the tables they read. The last two are
-the cost-mode captures in `explain/`:
-
-| Query | `plan.*` rules that must fire | `plan.*` rules that must stay silent |
-| --- | --- | --- |
-| sort-merge join of two sides too large to broadcast | | `smj-small-side`, `exploding-join` |
-| join on two keys, each matching thousands of rows on both sides | `exploding-join`, `smj-small-side` | |
-| cross join of two tables | `cartesian` | |
-| join on a range condition, broadcast as a nested loop | `cartesian` | `broadcast-too-large` |
-| broadcast join whose build side is over 1 GiB | `broadcast-too-large` | |
-| pandas UDF, run over Arrow batches | `python-udf-arrow` | `python-udf-row-at-a-time` |
-| window with no partitionBy | `window-single-partition` | |
-| window partitioned by group | | `window-single-partition` |
-| union of one table with itself, filtered the same way | `repeated-scan`, `repeated-subtree` | |
-| union of two tables written with one schema | | `repeated-scan`, `repeated-subtree` |
-| union of one aggregate with itself, with exchange reuse off | `missed-exchange-reuse`, `repeated-scan` | `repeated-subtree` |
-| union of one aggregate with itself, its exchange reused | | `missed-exchange-reuse`, `repeated-scan`, `repeated-subtree` |
-| repartition, two aggregations on different keys, then a sort | `many-exchanges` | |
-| filter on a column cast to a string | `filter-not-pushed` | |
-| filter Parquet takes as a pushed filter | | `filter-not-pushed` |
-| aggregate over every partition of a partitioned table | `partition-not-pruned` | |
-| read of one partition of a partitioned table | | `partition-not-pruned` |
-| filter comparing one column with 200 values | `long-filter` | `filter-not-pushed` |
-| write of 200 files of about 1 KiB each | `small-files-written` | |
-| read of 200 files of about 1 KiB each | `small-files-read` | |
-| join of two tables with no statistics, in cost mode | `estimate-unreliable` | |
-| aggregate of one table, in cost mode | | `estimate-unreliable` |
 
 The rules test holds every `plan.*` rule to each description, in both plan-rules logs, both base
 logs and both captures. A rule fires on exactly the queries naming it under `fires=`.
