@@ -22,6 +22,11 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = []
 
+# The tests read the committed fixture logs, most of them zstd, and Python's
+# standard library reads zstd only from 3.14.
+[dependency-groups]
+dev = ["cramjam>=2.8.0"]
+
 [project.urls]
 Repository = "https://github.com/datapointchris/sparkxray"
 Issues = "https://github.com/datapointchris/sparkxray/issues"

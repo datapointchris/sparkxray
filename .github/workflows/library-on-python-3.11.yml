@@ -37,8 +37,9 @@ jobs:
         with:
           version: "0.12.24"
 
-      # pytest goes in after the library, at its own newest release, so the
-      # lowest-direct leg never resolves the test runner to its floor.
+      # pytest and the library's test group go in after the library, at their
+      # newest releases, so the lowest-direct leg never resolves the test tools
+      # to their floors.
       - name: Install the library into a 3.11 environment
         env:
           ENVIRONMENT: ${{ matrix.environment }}
@@ -53,7 +54,7 @@ jobs:
               uv pip install --python "$RUNNER_TEMP/library" --resolution "$ENVIRONMENT" ./library
               ;;
           esac
-          uv pip install --python "$RUNNER_TEMP/library" pytest
+          uv pip install --python "$RUNNER_TEMP/library" pytest --group library/pyproject.toml:dev
 
       # compileall parses every module with the 3.11 interpreter, so syntax from
       # a later Python fails here even in a module no test imports.
