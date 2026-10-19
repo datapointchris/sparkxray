@@ -1,8 +1,8 @@
 """Every table the build writes: what it holds, its columns and their types, and the SQL that computes each column.
 
-A column's name carries its unit: `_ms` and `_ns` for times, `_bytes` and `_mib` for sizes. Times
-without one of those suffixes are epoch milliseconds. Each table's `source` reads the build's
-working tables, which `build.py` creates:
+A numeric column's name ends in its unit, which `column_unit` reads back. The `_ms` columns named
+in `EPOCH_MS_COLUMNS` are instants in epoch milliseconds, and every other `_ms` column is a
+duration. Each table's `source` reads the build's working tables, which `build.py` creates:
 
 - `events`, every event line in log order, with `kind` its event class's short name;
 - `ingest_facts`, the ingest manifest's one row;
@@ -124,10 +124,10 @@ _EXECUTORS = Table(
     columns=_columns(
         ('executor_id', 'VARCHAR', 'executor_id'),
         ('host', 'VARCHAR', 'coalesce(info."Host", block_manager_host)'),
-        ('total_cores', 'BIGINT', 'info."Total Cores"'),
+        ('core_count', 'BIGINT', 'info."Total Cores"'),
         ('resource_profile_id', 'BIGINT', 'info."Resource Profile Id"'),
-        # The driver's memory is spark.driver.memory, which no resource profile holds.
-        ('executor_memory_mib', 'BIGINT', "CASE WHEN executor_id = 'driver' THEN NULL ELSE memory_mib END"),
+        # A resource profile holds memory in MiB. The driver's is spark.driver.memory, which no profile holds.
+        ('executor_memory_bytes', 'BIGINT', "CASE WHEN executor_id = 'driver' THEN NULL ELSE memory_mib * 1048576 END"),
         ('max_storage_memory_bytes', 'BIGINT', 'maximum_memory'),
         ('add_ms', 'BIGINT', 'coalesce(added_at, registered_at)'),
         ('remove_ms', 'BIGINT', 'removed_at'),
@@ -193,7 +193,7 @@ _STAGES = Table(
         ('stage_id', 'BIGINT', 'stage_id'),
         ('attempt', 'BIGINT', 'attempt'),
         ('name', 'VARCHAR', 'info."Stage Name"'),
-        ('num_tasks', 'BIGINT', 'info."Number of Tasks"'),
+        ('task_count', 'BIGINT', 'info."Number of Tasks"'),
         ('parent_ids', 'BIGINT[]', 'info."Parent IDs"'),
         ('resource_profile_id', 'BIGINT', 'info."Resource Profile Id"'),
         ('submit_ms', 'BIGINT', 'info."Submission Time"'),
@@ -284,21 +284,21 @@ _TASKS = Table(
         ('jvm_gc_time_ms', 'BIGINT', '"Task Metrics"."JVM GC Time"'),
         ('result_size_bytes', 'BIGINT', '"Task Metrics"."Result Size"'),
         ('peak_execution_memory_bytes', 'BIGINT', '"Task Metrics"."Peak Execution Memory"'),
-        ('memory_bytes_spilled', 'BIGINT', '"Task Metrics"."Memory Bytes Spilled"'),
-        ('disk_bytes_spilled', 'BIGINT', '"Task Metrics"."Disk Bytes Spilled"'),
+        ('memory_spilled_bytes', 'BIGINT', '"Task Metrics"."Memory Bytes Spilled"'),
+        ('disk_spilled_bytes', 'BIGINT', '"Task Metrics"."Disk Bytes Spilled"'),
         ('input_bytes', 'BIGINT', '"Task Metrics"."Input Metrics"."Bytes Read"'),
         ('input_records', 'BIGINT', '"Task Metrics"."Input Metrics"."Records Read"'),
         ('output_bytes', 'BIGINT', '"Task Metrics"."Output Metrics"."Bytes Written"'),
         ('output_records', 'BIGINT', '"Task Metrics"."Output Metrics"."Records Written"'),
-        ('shuffle_remote_bytes_read', 'BIGINT', f'{_SHUFFLE_READ}."Remote Bytes Read"'),
-        ('shuffle_local_bytes_read', 'BIGINT', f'{_SHUFFLE_READ}."Local Bytes Read"'),
-        ('shuffle_remote_bytes_read_to_disk', 'BIGINT', f'{_SHUFFLE_READ}."Remote Bytes Read To Disk"'),
+        ('shuffle_remote_read_bytes', 'BIGINT', f'{_SHUFFLE_READ}."Remote Bytes Read"'),
+        ('shuffle_local_read_bytes', 'BIGINT', f'{_SHUFFLE_READ}."Local Bytes Read"'),
+        ('shuffle_remote_read_to_disk_bytes', 'BIGINT', f'{_SHUFFLE_READ}."Remote Bytes Read To Disk"'),
         ('shuffle_fetch_wait_time_ms', 'BIGINT', f'{_SHUFFLE_READ}."Fetch Wait Time"'),
-        ('shuffle_records_read', 'BIGINT', f'{_SHUFFLE_READ}."Total Records Read"'),
-        ('shuffle_remote_blocks_fetched', 'BIGINT', f'{_SHUFFLE_READ}."Remote Blocks Fetched"'),
-        ('shuffle_local_blocks_fetched', 'BIGINT', f'{_SHUFFLE_READ}."Local Blocks Fetched"'),
-        ('shuffle_bytes_written', 'BIGINT', f'{_SHUFFLE_WRITE}."Shuffle Bytes Written"'),
-        ('shuffle_records_written', 'BIGINT', f'{_SHUFFLE_WRITE}."Shuffle Records Written"'),
+        ('shuffle_read_records', 'BIGINT', f'{_SHUFFLE_READ}."Total Records Read"'),
+        ('shuffle_remote_blocks_fetched_count', 'BIGINT', f'{_SHUFFLE_READ}."Remote Blocks Fetched"'),
+        ('shuffle_local_blocks_fetched_count', 'BIGINT', f'{_SHUFFLE_READ}."Local Blocks Fetched"'),
+        ('shuffle_write_bytes', 'BIGINT', f'{_SHUFFLE_WRITE}."Shuffle Bytes Written"'),
+        ('shuffle_write_records', 'BIGINT', f'{_SHUFFLE_WRITE}."Shuffle Records Written"'),
         ('shuffle_write_time_ns', 'BIGINT', f'{_SHUFFLE_WRITE}."Shuffle Write Time"'),
         ('scheduler_delay_ms', 'BIGINT', _SCHEDULER_DELAY),
         ('peak_jvm_heap_bytes', 'BIGINT', f'{_PEAKS}."JVMHeapMemory"'),
@@ -362,7 +362,7 @@ _SQL_EXECUTIONS = Table(
         ('end_ms', 'BIGINT', 'ended_at'),
         ('error', 'VARCHAR', "nullif(errorMessage, '')"),
         ('modified_configs', 'MAP(VARCHAR, VARCHAR)', 'modifiedConfigs'),
-        ('plan_versions', 'BIGINT', 'versions'),
+        ('plan_version_count', 'BIGINT', 'versions'),
         ('initial_plan_text', 'VARCHAR', 'first_text'),
         ('final_plan_text', 'VARCHAR', 'last_text'),
         # The last plan event's sparkPlanInfo, which `Tables.last_plans` reads back into a Plan.
@@ -484,3 +484,26 @@ TABLES: tuple[Table, ...] = (
 # Each partition of each stage once: its first success across the stage's attempts. Retries and
 # speculative copies stay in `tasks`, where they show the work they wasted.
 TASKS_EFFECTIVE = 'CREATE VIEW tasks_effective AS SELECT * FROM tasks WHERE effective'
+
+# The `_ms` names that are instants, in epoch milliseconds.
+EPOCH_MS_COLUMNS = frozenset({'start_ms', 'end_ms', 'submit_ms', 'complete_ms', 'add_ms', 'remove_ms', 'launch_ms', 'finish_ms'})
+_SUFFIX_UNITS = (
+    ('_ms', 'ms'),
+    ('_ns', 'ns'),
+    ('_bytes', 'bytes'),
+    ('_records', 'records'),
+    ('_rows', 'rows'),
+    ('_count', 'count'),
+    ('_share', 'fraction'),
+    ('_ratio', 'x'),
+    ('_seconds', 's'),
+    ('_hours', 'h'),
+    ('_percent', 'percent'),
+)
+
+
+def column_unit(name: str) -> str | None:
+    """The unit a column's name ends in: `epoch_ms` for an instant, `ms` for a duration, and so on. None where it names none."""
+    if name in EPOCH_MS_COLUMNS:
+        return 'epoch_ms'
+    return next((unit for suffix, unit in _SUFFIX_UNITS if name.endswith(suffix)), None)

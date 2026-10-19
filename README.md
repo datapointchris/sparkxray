@@ -119,7 +119,7 @@ from sparkxray.ingest import EventLog
 
 tables = EventLog.open('eventlog.zstd').tables
 skew = tables.query(
-    'select stage_id, median(shuffle_records_read), max(shuffle_records_read) from tasks_effective group by all'
+    'select stage_id, median(shuffle_read_records), max(shuffle_read_records) from tasks_effective group by all'
 )
 print(skew.fetchall())
 tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
@@ -145,8 +145,10 @@ stage, so a retried or speculative task counts once, and a stage retry keeps the
 not rerun. It is `tasks` where `effective` is true, so a Parquet reader filters on that column.
 `partition_id` names the partition a task computed, which a retry's `task_index` does not.
 
-A column holding a time or a size names its unit: `ms`, `ns`, `bytes` or `mib`. Spark reports CPU
-time in nanoseconds beside run time in milliseconds, and the names keep the two apart.
+A numeric column's name ends in its unit: `_ms`, `_ns`, `_bytes`, `_records` or `_count`. Spark
+reports CPU time in nanoseconds beside run time in milliseconds, and the names keep the two apart.
+`start_ms`, `end_ms`, `submit_ms`, `complete_ms`, `add_ms`, `remove_ms`, `launch_ms` and
+`finish_ms` are instants in epoch milliseconds, and every other `_ms` column is a duration.
 `plan_node_metrics` holds every kind of metric in the same columns, so its `unit` column names each
 row's unit.
 

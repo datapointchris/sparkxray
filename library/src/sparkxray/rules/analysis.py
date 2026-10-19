@@ -82,7 +82,7 @@ WHERE walls.wall_ms IS NOT NULL AND app.end_ms > app.start_ms
 _NODE_METRICS_SQL = """
 SELECT metrics.execution_id, metrics.node_id, metrics.metric_name, arg_min(metrics.total, metrics.accumulator_id) AS total
 FROM plan_node_metrics AS metrics JOIN sql_executions USING (execution_id)
-WHERE metrics.plan_version = sql_executions.plan_versions - 1 AND metrics.total IS NOT NULL
+WHERE metrics.plan_version = sql_executions.plan_version_count - 1 AND metrics.total IS NOT NULL
 GROUP BY ALL
 """
 

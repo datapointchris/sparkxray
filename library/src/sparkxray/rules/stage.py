@@ -11,8 +11,8 @@ from sparkxray.rules.rule import Threshold
 # median and the size floor. So where most tasks read nothing, the median is 0 and the floor decides.
 _SHUFFLE_SKEW_SQL = """
 WITH stage_tasks AS (
-  SELECT stage_id, stage_attempt, task_id, duration_ms, coalesce(shuffle_records_read, 0) AS read_records,
-    coalesce(shuffle_remote_bytes_read, 0) + coalesce(shuffle_local_bytes_read, 0) AS read_bytes
+  SELECT stage_id, stage_attempt, task_id, duration_ms, coalesce(shuffle_read_records, 0) AS read_records,
+    coalesce(shuffle_remote_read_bytes, 0) + coalesce(shuffle_local_read_bytes, 0) AS read_bytes
   FROM tasks_effective
 ), stage_reads AS (
   SELECT stage_id, count(*) AS task_count,
@@ -45,7 +45,7 @@ WITH stage_tasks AS (
   FROM node_stages
   JOIN sql_executions USING (execution_id)
   JOIN plan_nodes ON plan_nodes.execution_id = node_stages.execution_id AND plan_nodes.node_id = node_stages.node_id
-    AND plan_nodes.plan_version = sql_executions.plan_versions - 1
+    AND plan_nodes.plan_version = sql_executions.plan_version_count - 1
   WHERE plan_nodes.operator IN ('SortMergeJoin', 'ShuffledHashJoin')
   GROUP BY node_stages.execution_id, node_stages.stage_id
 ), spark_settings AS (

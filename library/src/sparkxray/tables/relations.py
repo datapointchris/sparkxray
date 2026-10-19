@@ -49,8 +49,8 @@ class Tables:
     def last_plans(self) -> dict[int, Plan]:
         """Each SQL execution's last plan, read from the event that logged it as `sparkxray.plan.last_plans` reads it."""
         rows = self.connection.execute(
-            'SELECT execution_id, plan_versions - 1, final_plan_json, final_plan_text FROM sql_executions '
-            'WHERE plan_versions > 0 ORDER BY execution_id'
+            'SELECT execution_id, plan_version_count - 1, final_plan_json, final_plan_text FROM sql_executions '
+            'WHERE plan_version_count > 0 ORDER BY execution_id'
         ).fetchall()
         plans = {}
         for execution_id, version, info, text in rows:
