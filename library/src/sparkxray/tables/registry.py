@@ -329,9 +329,12 @@ _SQL_EXECUTIONS = Table(
           QUALIFY row_number() OVER (PARTITION BY executionId ORDER BY rowid DESC) = 1
         ), plan_texts AS (
           SELECT executionId, count(*) AS versions,
-            arg_min(physicalPlanDescription, rowid) FILTER (WHERE kind = 'SparkListenerSQLExecutionStart') AS first_text,
-            arg_max(physicalPlanDescription, rowid) AS last_text
+            arg_min(physicalPlanDescription, rowid) FILTER (WHERE kind = 'SparkListenerSQLExecutionStart') AS first_text
           FROM events WHERE kind IN {_PLAN_EVENTS} GROUP BY executionId
+        ), last_plans AS (
+          SELECT executionId, physicalPlanDescription AS last_text, CAST(sparkPlanInfo AS VARCHAR) AS last_info
+          FROM events WHERE kind IN {_PLAN_EVENTS}
+          QUALIFY row_number() OVER (PARTITION BY executionId ORDER BY rowid DESC) = 1
         ), last_truncation AS (
           SELECT execution_id AS executionId, arg_max(truncated, plan_version) AS last_truncated
           FROM plan_version_rows GROUP BY execution_id
@@ -340,11 +343,12 @@ _SQL_EXECUTIONS = Table(
         )
         SELECT ids.executionId AS id, starts.rootExecutionId, starts.description, starts.details, starts.jobTags,
           starts."time" AS started_at, finishes.ended_at, finishes.errorMessage, starts.modifiedConfigs,
-          plan_texts.versions, plan_texts.first_text, plan_texts.last_text, last_truncation.last_truncated
+          plan_texts.versions, plan_texts.first_text, last_plans.last_text, last_plans.last_info, last_truncation.last_truncated
         FROM ids
         LEFT JOIN starts USING (executionId)
         LEFT JOIN finishes USING (executionId)
         LEFT JOIN plan_texts USING (executionId)
+        LEFT JOIN last_plans USING (executionId)
         LEFT JOIN last_truncation USING (executionId)
     """,
     columns=_columns(
@@ -361,6 +365,8 @@ _SQL_EXECUTIONS = Table(
         ('plan_versions', 'BIGINT', 'versions'),
         ('initial_plan_text', 'VARCHAR', 'first_text'),
         ('final_plan_text', 'VARCHAR', 'last_text'),
+        # The last plan event's sparkPlanInfo, which `Tables.last_plans` reads back into a Plan.
+        ('final_plan_json', 'VARCHAR', 'last_info'),
         ('final_plan_truncated', 'BOOLEAN', 'last_truncated'),
     ),
     order_by='execution_id',

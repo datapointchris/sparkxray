@@ -7,6 +7,8 @@ from pathlib import Path
 
 import duckdb
 
+from sparkxray.plan.last_plans import plan_for_event
+from sparkxray.plan.tree import Plan
 from sparkxray.tables.manifest import TablesManifest
 from sparkxray.tables.registry import TABLES
 from sparkxray.tables.registry import TASKS_EFFECTIVE
@@ -31,6 +33,20 @@ class Tables:
     def query(self, sql: str, parameters: object = None) -> duckdb.DuckDBPyRelation:
         """A relation over any SQL that reads the tables, by their names, with `$name` or `?` parameters."""
         return self.connection.sql(sql, params=parameters)
+
+    def last_plans(self) -> dict[int, Plan]:
+        """Each SQL execution's last plan, read from the event that logged it as `sparkxray.plan.last_plans` reads it."""
+        rows = self.connection.execute(
+            'SELECT execution_id, plan_versions - 1, final_plan_json, final_plan_text FROM sql_executions '
+            'WHERE plan_versions > 0 ORDER BY execution_id'
+        ).fetchall()
+        plans = {}
+        for execution_id, version, info, text in rows:
+            event = {'sparkPlanInfo': json.loads(info) if info is not None else None, 'physicalPlanDescription': text}
+            plan = plan_for_event(event, execution_id, version)
+            if plan is not None:
+                plans[execution_id] = plan
+        return plans
 
     @property
     def application(self) -> duckdb.DuckDBPyRelation:

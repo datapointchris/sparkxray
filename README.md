@@ -124,6 +124,7 @@ skew = tables.query(
 print(skew.fetchall())
 tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
 print(tables.path)                               # the Parquet directory, for any Parquet reader
+plans = tables.last_plans()                      # each execution's last Plan, without the log
 ```
 
 | Table | One row per |
