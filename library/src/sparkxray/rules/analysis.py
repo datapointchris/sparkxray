@@ -51,6 +51,8 @@ _MINOR_SHARE = 0.05
 _MAJOR_SHARE = 0.5
 
 _COUNTED_SIGNALS = ('plan_metrics', 'tasks', 'executors', 'environment', 'timeline')
+# Only explain(mode='cost') text prints the optimizer's estimates, so no event log can feed a rule reading them.
+_LOG_SIGNALS: frozenset[Signal] = frozenset(SIGNALS) - {'plan_estimates'}
 _SIGNALS_SQL = """
 SELECT
   (SELECT count(*) FROM plan_node_metrics WHERE value_count > 0) > 0 AS plan_metrics,
@@ -195,13 +197,17 @@ def analyze(
 ) -> Analysis:
     """Run the rules over one log, and write its findings beside its tables as `findings.parquet`.
 
-    `rules` names the rule ids to run, and every catalog rule runs by default. `thresholds` sets
+    `rules` names the rule ids to run. By default every catalog rule runs that an event log can
+    feed, which leaves out those reading `plan_estimates`. A rule named here that reads them is
+    skipped. `thresholds` sets
     values by rule id and name, as in `{'stage.shuffle-skew': {'ratio': 8}}`. `threshold_file`
     is a TOML file of the same, and `threshold_flags` holds `<rule_id>.<name>=<value>` strings.
     A flag beats the SDK, the SDK beats the file, and the file beats the rule's default. Each
     applied value records the layer that set it.
     """
     selected, every_rule = _selected(rules)
+    if rules is None:
+        selected = [rule for rule in selected if rule.signals <= _LOG_SIGNALS]
     applied = resolve_thresholds(selected, every_rule, sdk=thresholds, file=threshold_file, flags=threshold_flags)
     tables = log.tables
     plans: dict[int | None, Plan] = {execution_id: plan for execution_id, plan in tables.last_plans().items()}
