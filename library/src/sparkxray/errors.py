@@ -87,5 +87,8 @@ class AmbiguousLocationError(SparkxrayError):
 
 class CorruptLogError(SparkxrayError):
     code = 'E-INGEST-006'
-    raised_when = "a compressed block does not decode, or a file other than the log's last ends partway through a block, a frame or a line"
+    raised_when = (
+        "a compressed block does not decode, a file other than the log's last ends partway through a block, a frame or a line, "
+        'or a line is not JSON; names the file and line'
+    )
     exit_code = 3

@@ -7,6 +7,7 @@ meaning bumps `SCHEMA_VERSION`, and an added field does not.
 from __future__ import annotations
 
 import dataclasses as dc
+from collections.abc import Mapping
 from typing import Any
 from typing import Literal
 
@@ -79,3 +80,20 @@ class IngestManifest:
             'spark_version': self.spark_version,
             'platform': self.platform,
         }
+
+    @classmethod
+    def from_json(cls, obj: Mapping[str, Any]) -> IngestManifest:
+        """The manifest `to_json` wrote."""
+        fields = {field.name for field in dc.fields(IngestedFile)}
+        return cls(
+            source=obj['source'],
+            app_id=obj['app_id'],
+            layout=obj['layout'],
+            files=tuple(IngestedFile(**{key: value for key, value in file.items() if key in fields}) for file in obj['files']),
+            compacted=obj['compacted'],
+            in_progress=obj['in_progress'],
+            truncated_tail=obj['truncated_tail'],
+            spark_version=obj['spark_version'],
+            platform=obj['platform'],
+            schema_version=obj['schema_version'],
+        )

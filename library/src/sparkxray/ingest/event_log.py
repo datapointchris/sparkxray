@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import functools
 import hashlib
 import json
 import os
@@ -11,6 +12,7 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import BinaryIO
 from typing import TypeVar
 
@@ -32,6 +34,9 @@ from sparkxray.ingest.manifest import IngestManifest
 from sparkxray.ingest.manifest import ReadCodec
 from sparkxray.ingest.platforms import infer_platform
 
+if TYPE_CHECKING:
+    from sparkxray.tables.relations import Tables
+
 # How much of a file is read for its first line. Spark's own blocks fit the first size, and the
 # second holds the 128 KiB block the zstd tool writes.
 _HEAD_BYTES = (64 << 10, 1 << 20)
@@ -46,11 +51,25 @@ _Item = TypeVar('_Item')
 _Result = TypeVar('_Result')
 
 
-@dc.dataclass(frozen=True, slots=True)
+@dc.dataclass(frozen=True)
 class EventLog:
-    """One application's event log, resolved, downloaded and decoded where it needed to be."""
+    """One application's event log, resolved, downloaded and decoded where it needed to be.
+
+    `cache_directory` holds its downloads, decoded copies and tables.
+    """
 
     manifest: IngestManifest
+    cache_directory: Path
+
+    @functools.cached_property
+    def tables(self) -> Tables:
+        """The log's events as Parquet tables, built on first use and kept in the cache.
+
+        A second open of an unchanged log reads the tables already built.
+        """
+        from sparkxray.tables.build import build_tables  # DuckDB is imported only when tables are read
+
+        return build_tables(self)
 
     @classmethod
     def open(
@@ -98,10 +117,10 @@ class EventLog:
             spark_version=None,
             platform='other',
         )
-        head = _head_facts(EventLog(provisional).lines())
+        head = _head_facts(EventLog(provisional, cache).lines())
         app_id = head.app_id or candidate.app_id
         platform = infer_platform(app_id, head.spark_version, head.properties, head.classpath)
-        return cls(dc.replace(provisional, app_id=app_id, spark_version=head.spark_version, platform=platform))
+        return cls(dc.replace(provisional, app_id=app_id, spark_version=head.spark_version, platform=platform), cache)
 
     def lines(self) -> Iterator[bytes]:
         """Every event line of the log in order, without its newline.

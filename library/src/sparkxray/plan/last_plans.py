@@ -38,13 +38,14 @@ def last_plans(events: Iterable[Mapping[str, Any]]) -> dict[int, tree.Plan]:
         latest[execution_id] = (version, event)
     plans = {}
     for execution_id, (version, event) in latest.items():
-        plan = _plan_for_event(event, execution_id, version)
+        plan = plan_for_event(event, execution_id, version)
         if plan is not None:
             plans[execution_id] = plan
     return plans
 
 
-def _plan_for_event(event: Mapping[str, Any], execution_id: int, version: int) -> tree.Plan | None:
+def plan_for_event(event: Mapping[str, Any], execution_id: int, version: int) -> tree.Plan | None:
+    """The plan one `SQLExecutionStart` or `SQLAdaptiveExecutionUpdate` carries, or None when it carries neither form."""
     info = event.get('sparkPlanInfo')
     text = event.get('physicalPlanDescription')
     if info is None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -29,7 +30,7 @@ def used(path: Path) -> None:
 
 
 def remove_superseded(directory: Path, current: str) -> None:
-    """Remove each file in `directory` whose name does not start with `current` and that went unused for a day."""
+    """Remove each entry in `directory`, a file or a directory, whose name does not start with `current` and that went unused for a day."""
     if not directory.is_dir():
         return
     horizon = time.time() - SUPERSEDED_KEPT_SECONDS
@@ -37,7 +38,11 @@ def remove_superseded(directory: Path, current: str) -> None:
         if entry.name.startswith(current):
             continue
         try:
-            if entry.is_file() and entry.stat().st_mtime < horizon:
+            if entry.stat().st_mtime >= horizon:
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
                 entry.unlink(missing_ok=True)
         except OSError:
             continue  # another process removed or replaced it first

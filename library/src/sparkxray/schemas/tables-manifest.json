@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sparkxray tables manifest",
+  "description": "The manifest.json beside one Spark application's Parquet tables: which files they were built from, how many rows each holds, and what the log was written without.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "key", "row_counts", "lacks", "ingest"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "key": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The SHA-256 naming the tables' directory, over each file's URI, ETag, modification time and size, and the versions of the decoders and the build."},
+    "row_counts": {
+      "type": "object",
+      "description": "Each table's row count, by table name. Each table is <name>.parquet beside this manifest.",
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "lacks": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "What Spark wrote only when asked, and this log was written without. stage_executor_metrics: spark.eventLog.logStageExecutorMetrics was off, so the per-task peaks are the only memory figures. block_updates: spark.eventLog.logBlockUpdates.enabled was off. process_tree_metrics: spark.executor.processTreeMetrics.enabled was off, so peak_python_rss_bytes is zero.",
+      "items": {"enum": ["stage_executor_metrics", "block_updates", "process_tree_metrics"]}
+    },
+    "ingest": {"$ref": "ingest-manifest.json", "description": "The ingest manifest of the log the tables were built from."}
+  }
+}

@@ -108,6 +108,47 @@ For an execution that never finished, as in a killed application, `is_final` is 
 `parse_plan_text` reads `explain()` output. `normalize_label` rewrites a node's ids, so two builds
 of one query compare equal.
 
+## Query a log's tables with SQL
+
+`log.tables` reads the log into Parquet tables with DuckDB, the first time it is asked. A later
+open of the unchanged log reads them from the cache.
+
+```python
+from sparkxray.ingest import EventLog
+
+tables = EventLog.open('eventlog.zstd').tables
+skew = tables.query(
+    'select stage_id, median(shuffle_records_read), max(shuffle_records_read) from tasks_effective group by all'
+)
+print(skew.fetchall())
+tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
+print(tables.path)                               # the Parquet directory, for any Parquet reader
+```
+
+| Table | One row per |
+| --- | --- |
+| `application` | the application |
+| `environment` | property, by section: `jvm`, `spark`, `hadoop`, `system`, `classpath`, `metrics` |
+| `executors` | executor, and the driver |
+| `jobs` | job |
+| `stages` | stage attempt |
+| `tasks` | task attempt, failed, killed and still running included |
+| `sql_executions` | SQL execution |
+| `plan_nodes` | node of every plan version of every SQL execution |
+| `plan_node_metrics` | metric a plan node declares, aggregated as the History Server's SQL tab does |
+| `node_stages` | stage a node of an execution's last plan ran in |
+
+Read task metrics through `tasks_effective`. It keeps the first success of each task index in each
+stage's highest attempt, so a retried or speculative task is counted once.
+
+A column holding a time or a size names its unit: `ms`, `ns`, `bytes` or `mib`. Spark reports CPU
+time in nanoseconds beside run time in milliseconds, and the names keep the two apart.
+`plan_node_metrics` holds every kind of metric in the same columns, so its `unit` column names each
+row's unit.
+
+`tables.manifest.lacks` names what the log was written without, because Spark leaves it out by
+default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`.
+
 ## Layout
 
 | Directory | Holds |
