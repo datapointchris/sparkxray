@@ -1,8 +1,9 @@
 """Operator names, id extraction and label normalization, shared by every plan parser.
 
 Every rewrite is anchored to the syntax that carries an id. A rule matching any bare number would
-turn `count(1)` into `count(N)` and change an expression, so literals, partition counts, range
-bounds and filter conditions all survive normalization.
+turn `count(1)` into `count(N)` and change an expression, so numeric literals, partition counts and
+range bounds survive normalization. Spark prints string literals unquoted, so a literal holding `#`
+and digits, such as `PR#42`, reads as an expression id.
 """
 
 from __future__ import annotations
@@ -30,8 +31,8 @@ _REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r'"jvmId"\s*:\s*"[^"]*"\s*,?\s*'), ''),
     (re.compile(r'Statistics\([^()]*\)'), 'Statistics(<stats>)'),
     (re.compile(r'\$\$Lambda(?:\$\d+)?(?:/0x[0-9a-f]+)?(?:@[0-9a-f]+)?'), '$$Lambda'),
-    (re.compile(r'(?<=[\w$])@[0-9a-f]{4,8}\b'), '@N'),
-    (re.compile(r'\b(?:file|s3[an]?|hdfs|abfss?|gs|wasbs?|dbfs|viewfs):[^\s,\]]*'), '<path>'),
+    (re.compile(r'(\.[A-Z][\w$]*)@[0-9a-f]{1,8}\b'), r'\1@N'),
+    (re.compile(r'\b(?:file|s3[an]?|hdfs|abfss?|gs|wasbs?|dbfs|viewfs):/[^\s,\])]*'), '<path>'),
     (re.compile(r'\[id=#\d+\]'), '[id=N]'),
     (re.compile(r'plan_id=\d+'), 'plan_id=N'),
     (re.compile(r'(?<![\w])(subquery)#\d+'), r'\1N'),
@@ -57,7 +58,8 @@ def normalize_label(text: str) -> str:
     Expression ids become `#N`, exchange ids `plan_id=N` and `[id=N]`, codegen stages `*(N)`,
     formatted node numbers `(N)`, query stage numbers `ShuffleQueryStage N`, subquery ids
     `subqueryN`, URIs `<path>`, statistics `Statistics(<stats>)`, and a JVM's lambda class and
-    object hash codes `$$Lambda` and `@N`. A `"jvmId"` key is dropped.
+    an object's identity hash after its class name, `$$Lambda` and `NoopWrite$@N`. A `"jvmId"`
+    key is dropped.
     """
     for pattern, replacement in _REWRITES:
         text = pattern.sub(replacement, text)
