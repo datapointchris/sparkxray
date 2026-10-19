@@ -20,8 +20,10 @@ holds no logic of its own.
 ```
 
 The tables are keyed by content. The key is a SHA-256 over each ingested file's URI, ETag,
-modification time and size, and the versions of the tables schema, the build and the decoders. So
-a second analysis of one run skips parsing, and an upgrade that changes the tables rebuilds them.
+modification time and size, the tables schema version and the installed sparkxray version. So a
+second analysis of one run skips parsing, and every upgrade rebuilds the tables. A version bumped
+by hand would rebuild less often, and a parser fix that forgot the bump would keep serving the old
+parse.
 
 ## The library and the command line are separate distributions
 
@@ -97,9 +99,13 @@ $XDG_CACHE_HOME/sparkxray/logs/
 A local file that DuckDB can read as it stands is never copied. The manifest records, per file,
 the `read_path` holding its events and the `read_codec` it is compressed with.
 
+A decoded file's version is its URI, ETag, modification time and size, under the installed
+sparkxray version. So an upgrade decodes each file again, and never downloads one again.
+
 An entry for an older version of a file is removed by a later open, once it has gone a day
 unused. An `EventLog` opened before the file changed still reads its copy. So nothing is removed
-the moment a newer version lands.
+the moment a newer version lands. A write goes to a `.part-` file first and is renamed into place.
+A partial file a killed process left behind is removed the same way.
 
 ## The resolver finds a log by Spark's names, and confirms it by its first line
 
@@ -195,6 +201,7 @@ reads a few task fields. On the benchmark's input and machine, building every ta
 A build writes into a directory of its own, then renames it into place. Two processes building one
 log never read each other's partial files, and the first rename wins. Tables built from an older
 version of the log are removed the next time its tables are read, once they have gone a day unused.
+So is a build a killed process left partway.
 
 `tasks_effective` is a view over `tasks` and `stages`. It keeps each stage's highest attempt and,
 within it, the first success of each task index. So a retried or speculative task is counted once,

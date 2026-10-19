@@ -7,7 +7,7 @@
   "required": ["schema_version", "key", "row_counts", "lacks", "ingest"],
   "properties": {
     "schema_version": {"const": 1},
-    "key": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The SHA-256 naming the tables' directory, over each file's URI, ETag, modification time and size, and the versions of the decoders and the build."},
+    "key": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The SHA-256 naming the tables' directory, over each file's URI, ETag, modification time and size, the tables schema version and the installed sparkxray version."},
     "row_counts": {
       "type": "object",
       "description": "Each table's row count, by table name. Each table is <name>.parquet beside this manifest.",

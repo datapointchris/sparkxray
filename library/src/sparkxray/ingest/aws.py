@@ -16,6 +16,7 @@ import boto3
 import botocore.exceptions
 from boto3.s3.transfer import TransferConfig
 
+from sparkxray.cache_directory import PARTIAL_MARK
 from sparkxray.errors import AwsDeniedError
 from sparkxray.errors import NoEventLogError
 
@@ -62,7 +63,7 @@ class S3:
     def download(self, bucket: str, key: str, destination: Path) -> None:
         """Copy an object to `destination`, whole or not at all."""
         destination.parent.mkdir(parents=True, exist_ok=True)
-        partial = destination.with_name(f'{destination.name}.part-{os.getpid()}')
+        partial = destination.with_name(f'{destination.name}{PARTIAL_MARK}{os.getpid()}')
         try:
             with _translated('s3:GetObject', f's3://{bucket}/{key}'):
                 self._client.download_file(bucket, key, str(partial), Config=_TRANSFER)

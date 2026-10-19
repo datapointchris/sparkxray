@@ -16,7 +16,9 @@ from typing import TYPE_CHECKING
 from typing import BinaryIO
 from typing import TypeVar
 
+from sparkxray.cache_directory import PARTIAL_MARK
 from sparkxray.cache_directory import cache_root
+from sparkxray.cache_directory import installed_version
 from sparkxray.cache_directory import remove_superseded
 from sparkxray.cache_directory import used
 from sparkxray.errors import AmbiguousLocationError
@@ -343,8 +345,8 @@ def _cut_before_last(log_file: layouts.LogFile) -> CorruptLogError:
 class _Version:
     """The cache's entries for one version of one file: a copy of its whole lines, and whether its end was cut.
 
-    A version is the file's URI, ETag, modification time and size. Entries for older versions
-    of the file are removed once they go a day unused.
+    A version is the file's URI, ETag, modification time and size, read by the installed
+    sparkxray. Entries for older versions of the file are removed once they go a day unused.
     """
 
     copy: Path
@@ -354,7 +356,7 @@ class _Version:
     def of(cls, log_file: layouts.LogFile, cache: Path) -> _Version:
         listed = log_file.listed
         directory = cache / 'logs' / 'decoded' / hashlib.sha256(listed.uri.encode()).hexdigest()[:32]
-        identity = [listed.uri, listed.etag, listed.mtime_ns, listed.size_bytes, decoders.DECODER_VERSION]
+        identity = [listed.uri, listed.etag, listed.mtime_ns, listed.size_bytes, installed_version()]
         stem = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:32]
         remove_superseded(directory, stem)
         return cls(directory / f'{stem}.jsonl', directory / f'{stem}.json')
@@ -379,14 +381,14 @@ class _Version:
 
     def record_cut(self, cut: bool) -> None:
         self.record.parent.mkdir(parents=True, exist_ok=True)
-        partial = self.record.with_name(f'{self.record.name}.part-{os.getpid()}')
+        partial = self.record.with_name(f'{self.record.name}{PARTIAL_MARK}{os.getpid()}')
         partial.write_text(json.dumps({'cut': cut}))
         partial.replace(self.record)
 
     def partial_copy(self) -> Path:
         """Where this process writes the copy before it is whole."""
         self.copy.parent.mkdir(parents=True, exist_ok=True)
-        return self.copy.with_name(f'{self.copy.name}.part-{os.getpid()}')
+        return self.copy.with_name(f'{self.copy.name}{PARTIAL_MARK}{os.getpid()}')
 
 
 def _decoded_copy(local: Path, log_file: layouts.LogFile, version: _Version) -> bool:

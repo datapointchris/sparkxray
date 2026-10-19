@@ -1,9 +1,9 @@
 """Build one log's Parquet tables in a single DuckDB pass over its events, and keep them in the cache.
 
-The tables go under `<cache>/tables/<source hash>/<key>/`. The key covers the log's files and the
-versions of the decoders and this build, so an unchanged log is parsed once, and an upgrade that
-changes the output rebuilds. Tables built for an older version of a log stay until they have gone a
-day unused, because a `Tables` opened before the log changed still reads them.
+The tables go under `<cache>/tables/<source hash>/<key>/`. The key covers the log's files, the
+tables schema version and the installed sparkxray version, so an unchanged log is parsed once, and
+any upgrade rebuilds. Tables built for an older version of a log stay until they have gone a day
+unused, because a `Tables` opened before the log changed still reads them.
 
 A plan node's metrics are aggregated the way Spark's `SQLAppStatusListener` aggregates them for
 the SQL tab:
@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING
 import duckdb
 import pyarrow as pa
 
+from sparkxray.cache_directory import PARTIAL_MARK
+from sparkxray.cache_directory import installed_version
 from sparkxray.cache_directory import remove_superseded
 from sparkxray.cache_directory import used
 from sparkxray.errors import CorruptLogError
@@ -47,10 +49,6 @@ from sparkxray.tables.relations import Tables
 
 if TYPE_CHECKING:
     from sparkxray.ingest import EventLog
-
-# Bumped whenever the build's output for one log changes, a plan parser's change included, so
-# tables already in the cache are rebuilt.
-BUILD_VERSION = 1
 
 # One SQLExecutionStart with a wide plan is larger than DuckDB's default object size.
 _MAXIMUM_OBJECT_SIZE = 64 << 20
@@ -188,7 +186,7 @@ def build_tables(log: EventLog) -> Tables:
     if (directory / 'manifest.json').is_file():
         used(directory)
         return Tables(directory)
-    partial = subject / f'{key}.part-{os.getpid()}-{secrets.token_hex(4)}'
+    partial = subject / f'{key}{PARTIAL_MARK}{os.getpid()}-{secrets.token_hex(4)}'
     partial.mkdir(parents=True)
     try:
         _build(manifest, key, partial)
@@ -204,9 +202,9 @@ def build_tables(log: EventLog) -> Tables:
 
 
 def tables_key(manifest: IngestManifest) -> str:
-    """The SHA-256 over the log's files and the versions of the decoders and the build."""
+    """The SHA-256 over the log's files, the tables schema version and the installed sparkxray version."""
     files = [[file.uri, file.etag, file.mtime_ns, file.size_bytes] for file in manifest.files]
-    identity = [files, SCHEMA_VERSION, BUILD_VERSION, decoders.DECODER_VERSION]
+    identity = [files, SCHEMA_VERSION, installed_version()]
     return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
 
@@ -284,7 +282,7 @@ def _malformed(message: str, manifest: IngestManifest) -> CorruptLogError | None
 def _unparsable_line(file: IngestedFile, reported: int) -> int | None:
     """The number of the first line from just before `reported` on that does not parse.
 
-    DuckDB 1.1.0 to 1.5.6 name the line after the one that fails, so the line before is tried too.
+    DuckDB can name the line after the one that fails, so the line before is tried too.
     """
     with open(file.read_path, 'rb') as raw:
         split = decoders.Lines(decoders.decoded_chunks(raw, file.read_codec))

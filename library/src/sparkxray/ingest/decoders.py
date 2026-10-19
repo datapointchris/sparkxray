@@ -23,9 +23,6 @@ import zstandard
 
 Codec = Literal['none', 'zstd', 'gzip', 'lz4', 'snappy', 'lzf']
 
-# Bumped whenever a decoder's output changes, so a decoded copy in the cache is rebuilt.
-DECODER_VERSION = 2
-
 _CHUNK = 1 << 20
 
 # lz4-java LZ4BlockOutputStream: magic, a token whose high nibble is the method, then the
