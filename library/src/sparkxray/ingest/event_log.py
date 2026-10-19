@@ -8,7 +8,9 @@ import hashlib
 import json
 import os
 from collections.abc import Callable
+from collections.abc import Iterable
 from collections.abc import Iterator
+from collections.abc import Mapping
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -37,6 +39,7 @@ from sparkxray.ingest.manifest import ReadCodec
 from sparkxray.ingest.platforms import infer_platform
 
 if TYPE_CHECKING:
+    from sparkxray.rules.analysis import Analysis
     from sparkxray.tables.relations import Tables
 
 # How much of a file is read for its first line. Spark's own blocks fit the first size, and the
@@ -79,6 +82,19 @@ class EventLog:
         from sparkxray.tables.build import build_tables  # DuckDB is imported only when tables are read
 
         return build_tables(self)
+
+    def analyze(
+        self,
+        *,
+        rules: Iterable[str] | None = None,
+        thresholds: Mapping[str, Mapping[str, object]] | None = None,
+        threshold_file: Path | None = None,
+        threshold_flags: Iterable[str] = (),
+    ) -> Analysis:
+        """Run the rules over this log, as `sparkxray.rules.analyze` runs them."""
+        from sparkxray.rules.analysis import analyze
+
+        return analyze(self, rules=rules, thresholds=thresholds, threshold_file=threshold_file, threshold_flags=threshold_flags)
 
     @classmethod
     def open(

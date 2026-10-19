@@ -92,3 +92,23 @@ class CorruptLogError(SparkxrayError):
         'or a line is not JSON; names the file and line'
     )
     exit_code = 3
+
+
+class UnknownRuleError(SparkxrayError):
+    code = 'E-RULE-001'
+    raised_when = 'a rule id is not in the catalog; lists the rule ids it holds'
+    exit_code = 2
+
+
+class UnknownThresholdError(SparkxrayError):
+    code = 'E-RULE-002'
+    raised_when = "a threshold name is not one of its rule's; lists the rule's thresholds"
+    exit_code = 2
+
+
+class ThresholdValueError(SparkxrayError):
+    code = 'E-RULE-003'
+    raised_when = (
+        "a threshold value does not parse or carries another unit than the threshold's, or the thresholds file is missing or not TOML"
+    )
+    exit_code = 2

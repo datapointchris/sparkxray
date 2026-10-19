@@ -13,13 +13,16 @@ from sparkxray.tables.manifest import TablesManifest
 from sparkxray.tables.registry import TABLES
 from sparkxray.tables.registry import TASKS_EFFECTIVE
 
+FINDINGS_FILE = 'findings.parquet'
+
 
 class Tables:
     """The tables built from one log, each a lazy DuckDB relation.
 
     `path` is the directory holding `<table>.parquet` and `manifest.json`, which DuckDB or any
     Parquet reader can open without sparkxray. `tasks_effective` is `tasks` where `effective` is
-    true, and every rule reads it rather than `tasks`.
+    true, and every rule reads it rather than `tasks`. `findings` exists once the log has been
+    analyzed, and holds the last analysis's findings.
     """
 
     def __init__(self, path: Path) -> None:
@@ -29,6 +32,12 @@ class Tables:
         for table in TABLES:
             self.connection.execute(f'CREATE VIEW {table.name} AS SELECT * FROM read_parquet({_literal(path / f"{table.name}.parquet")})')
         self.connection.execute(TASKS_EFFECTIVE)
+        if (path / FINDINGS_FILE).is_file():
+            self.register_findings()
+
+    def register_findings(self) -> None:
+        """Point the `findings` view at `findings.parquet`, which `analyze` calls after writing it."""
+        self.connection.execute(f'CREATE OR REPLACE VIEW findings AS SELECT * FROM read_parquet({_literal(self.path / FINDINGS_FILE)})')
 
     def query(self, sql: str, parameters: object = None) -> duckdb.DuckDBPyRelation:
         """A relation over any SQL that reads the tables, by their names, with `$name` or `?` parameters."""
@@ -91,6 +100,11 @@ class Tables:
     @property
     def node_stages(self) -> duckdb.DuckDBPyRelation:
         return self.connection.view('node_stages')
+
+    @property
+    def findings(self) -> duckdb.DuckDBPyRelation:
+        """The last analysis's findings. DuckDB raises a CatalogException before the log is analyzed."""
+        return self.connection.view('findings')
 
 
 def _literal(path: Path) -> str:
