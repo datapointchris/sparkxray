@@ -80,7 +80,7 @@ uri-ignore-words-list = "*"
 [tool.pytest.ini_options]
 verbosity_assertions = 2
 minversion = "8.0"
-testpaths = ["tests"]
+testpaths = ["library/tests", "cli/tests"]
 
 [tool.forge]
 # Keys the shared toolchain standard owns, written by its generator.
