@@ -18,7 +18,9 @@ least 30 s between the slowest and the median task, which keeps it silent on the
 ## Severity is the rule's grade, moved one step by the stage's share of the run
 
 The ladder is `info`, `low`, `medium`, `high`, `critical`. `info` is for rules that report
-presence only.
+presence only. A rule grading a plan shape by its size is `info` below its byte floor too, and
+wherever nothing measured the size. So a window over 30 aggregated rows reports without gating a
+run.
 
 Each rule's own ladder sets the base grade. The engine then lowers it one step when the scope
 takes under 5% of application wall time, and raises it one step above 50%. So a skewed 2-second
@@ -74,6 +76,9 @@ would have needed.
 
 `plan_estimates` is the optimizer's size estimates. Only `explain(mode='cost')` text prints them,
 and no event log carries them. So `plan.estimate-unreliable` runs through `analyze_plan` alone.
+`analyze` leaves it out of a log's default selection, so a log's analysis neither runs it nor
+lists it as skipped. Named with `rules=`, it is skipped, and `findings list` says it runs on
+cost-mode text only.
 
 Rule ids are dotted by the evidence they read:
 
@@ -131,6 +136,7 @@ A `Threshold` carries a `source` beside its default. Most defaults come from pub
 - DataFlint's alert reducers, for wasted cores, memory provisioning and partition size, and for
   join sides, broadcast size, file sizes and filter length;
 - Dr. Elephant's Spark heuristics, for the GC ladder and task failure rates;
+- Spark's own defaults, for the partition size at which AQE calls a partition skewed;
 - AWS Glue's observability docs, for the skewness score;
 - kubeflow's Spark tools, for spill and GC;
 - Sparklens, for the executor simulation.
@@ -200,15 +206,30 @@ sizes a join whose sides AQE had already run.
 
 A join side or a broadcast takes its bytes from the first measured size down its chain. That is a
 finished query stage's `sizeInBytes`, then an exchange's `data size`, then a scan's `size of files
-read`. The chain passes through the operators DataFlint's join alert passes through, such as
-`Sort`, `Filter` and `AQEShuffleRead`.
+read`. The chain passes through a sort, AQE's reads and a columnar conversion, which keep a side's
+size. A filter changes it, so a side measured only below a filter has no size.
+
+`plan.smj-small-side` weighs only a side Spark could broadcast for the join's type, as
+`canBuildBroadcastLeft` and `canBuildBroadcastRight` in Spark's optimizer decide. A full outer
+join has none. The rule also fires only where the other side passes an `Exchange`, because a
+broadcast saves that shuffle. A join of bucketed tables shuffles neither side.
 
 A plan printed before it ran measured nothing. So `plan.smj-small-side` finds no size in it, and
-the rules reading metrics are skipped. The optimizer's own estimate is no substitute. Without
-table statistics it sizes a join as the product of its inputs. In the plan-rules fixture, a
+the rules reading metrics are skipped. The optimizer's own estimate is no substitute. With the
+cost-based optimizer off, as it is by default, it sizes a join as the product of its inputs, whatever
+statistics the tables hold. In the plan-rules fixture, a
 396.5 KiB table joined to a 7.1 KiB one is estimated at 2.8 GiB. `plan.estimate-unreliable`
 reports that gap, from `explain(mode='cost')` text. A relation the optimizer could not size prints `8.0 EiB`, which is
 `Long.MaxValue`, and every estimate above it counts as unknown.
+
+## A cached plan counts once, at the copy that ran
+
+Spark prints a cached relation's plan under every `InMemoryTableScan` that reads it, and every
+copy shares the accumulators of the one run that filled the cache. So every plan rule counts each
+cached plan once: at its first copy whose metrics show it ran, or at its first copy in a plan with
+no metrics. Copies match by their accumulator ids. A plan read from text prints none, so there
+copies match by their hash and the locations their scans read. The scan that filled a cache is
+then reported once, however many queries read the cache.
 
 ## A repeat is confirmed by the files beneath it, and is a miss only once Spark could reuse it
 
