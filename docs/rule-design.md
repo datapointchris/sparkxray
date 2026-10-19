@@ -63,7 +63,7 @@ An exit 3 with no `gate` on stdout means the log was not read. A severity outsid
 | --- | --- |
 | `stage.task-skew` | the slowest task's run time minus the median task's |
 | `stage.shuffle-skew`, `stage.spill-skew` | the slowest task's duration minus the median task's |
-| `stage.spill` | the spilling tasks' run time ÷ concurrent slots, × disk spill ÷ (shuffle read + input) up to 1, capped at stage wall time |
+| `stage.spill` | the spilling tasks' run time ÷ concurrent slots, × disk spill ÷ (shuffle read + input) up to 1, capped at stage wall time, and null where the stage read nothing |
 | `stage.tiny-tasks` | the tasks' summed duration less their run time, ÷ the stage's concurrent slots |
 | `stage.scheduler-delay` | the summed scheduler delay ÷ concurrent slots |
 | `stage.deserialization` | the summed deserialization time ÷ concurrent slots |
