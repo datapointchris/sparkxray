@@ -17,7 +17,8 @@ docs/            the design pages
   are imported only under `cli/`. Code that imports the library, including inside AWS Glue jobs,
   must never pull them in.
 - **A library dependency lands on every consumer's cluster.** Add one only if it ships a cp311
-  wheel and the library cannot do without it.
+  wheel and the library cannot do without it. It arrives in the change that first imports it, with
+  a floor measured against that code.
 - **The CLI holds no logic.** A command parses its arguments, calls one library function and
   renders the result. Anything worth testing lives in the library.
 - **The member `pyproject.toml` files carry packaging only.** ruff, mypy and pytest read their
@@ -37,12 +38,16 @@ Glue 5.0 and 5.1 run Python 3.11. So nothing under `library/` may use what arriv
 ```bash
 uv venv --python 3.11 /tmp/sparkxray-311
 uv pip install --python /tmp/sparkxray-311 --resolution lowest-direct ./library
+uv pip install --python /tmp/sparkxray-311 pytest
 /tmp/sparkxray-311/bin/python -m compileall -q library/src
 uv run --only-group dev mypy --python-version 3.11 --python-executable /tmp/sparkxray-311/bin/python library/src
+/tmp/sparkxray-311/bin/python -m pytest library
 ```
 
-The floors in `library/pyproject.toml` are what that leg installs. Raising a floor is always
-safe. A floor the code has outgrown fails there.
+Its Glue legs install `.github/glue-preinstalled-modules/5.0.txt` or `5.1.txt` first, then
+`./library` with no `--resolution`. The floors in `library/pyproject.toml` are what the
+lowest-direct leg installs. Raising a floor is always safe. A floor the code has outgrown fails
+there.
 
 ## Commands
 

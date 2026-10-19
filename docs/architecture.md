@@ -39,8 +39,16 @@ together.
 A uv workspace resolves at one Python: the intersection of its members' `requires-python`. Here
 that is 3.13, so nothing in the workspace runs the library at its floor. The
 `library-on-python-3.11.yml` workflow does. It installs `./library` unlocked into a 3.11
-environment, the way Glue's pip does. It type-checks the library as 3.11 and runs its tests there,
-once at the highest dependency versions and once at the lowest the library declares.
+environment, the way Glue's pip does, then type-checks the library as 3.11 and runs its tests.
+Each run installs one of four dependency sets:
+
+- the highest versions;
+- the floors the library declares;
+- Glue 5.0's preinstalled modules, then the library over them;
+- Glue 5.1's, the same way.
+
+A Glue job keeps every preinstalled module that satisfies a floor. So Glue 5.0's numpy 1.26.4 and
+pyarrow 17.0.0 are what the library imports there, and neither of the first two sets holds them.
 
 *Rejected:* one distribution with the CLI's dependencies behind an extra. Every CLI install would
 have to name the extra, and the CLI would sit on the library's 3.11 floor.
