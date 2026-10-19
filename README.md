@@ -71,7 +71,8 @@ for line in log.lines():
     ...  # one JSON event per line, in the order Spark wrote them
 ```
 
-It reads uncompressed logs and Spark's zstd, lz4 and snappy, plus gzip. Spark's lzf is refused.
+It reads uncompressed logs and Spark's zstd, lz4 and snappy. A log compressed by hand reads too,
+under the suffix its tool gives it: `.gz` from gzip, `.zst` from zstd. Spark's lzf is refused.
 A log Spark is still writing, a killed run's, or a copy cut short can end partway through a line.
 What follows the last whole line is left out, and `truncated_tail` says so. A file before the
 last one that ends that way is refused. A local log Spark is still writing reads as it stood when

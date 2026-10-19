@@ -46,6 +46,13 @@ _FOUND_SHOWN = 10
 # Concurrent S3 reads for one ingest: first lines, and the files of a rolling log.
 _THREADS = 8
 _COPY_BLOCK = 1 << 20
+# How each compressed form a log arrives in starts, and the suffix that declares it.
+_COMPRESSED_STARTS = {
+    b'\x28\xb5\x2f\xfd': ('zstd', '.zstd'),
+    b'\x1f\x8b': ('gzip', '.gz'),
+    b'LZ4Block': ('lz4', '.lz4'),
+    b'\x82SNAPPY\x00': ('snappy', '.snappy'),
+}
 
 _Item = TypeVar('_Item')
 _Result = TypeVar('_Result')
@@ -245,6 +252,12 @@ def _rejection(source: Location, candidate: layouts.Candidate) -> _Rejection | N
         kind = str(event['Event']).rpartition('.')[2] or None
     if kind == 'SparkListenerLogStart':
         return None
+    if first.codec == 'none':
+        for start, (codec, suffix) in _COMPRESSED_STARTS.items():
+            if line.startswith(start):
+                hint = f'rename it to end in {suffix}, the suffix that declares {codec}'
+                compressed = NotAnEventLogError(f'{uri} is {codec}-compressed, but its name declares no codec', field='location', hint=hint)
+                return _Rejection(f'it is {codec}-compressed under a name that declares no codec', compressed)
     shown = line[:80].decode('utf-8', 'replace')
     refusal = NotAnEventLogError(
         f'{uri} is not a Spark event log: its first line is {shown!r}, where Spark writes SparkListenerLogStart', field='location'

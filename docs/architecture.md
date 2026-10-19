@@ -113,6 +113,9 @@ Spark's two layouts somewhere, and the resolver recognizes the layout:
 A rolling log is its files in order of `N` as an integer, so `events_10` follows `events_9`. Glue
 leaves the `.inprogress` copy beside the finished log, and the finished one is read.
 
+A log compressed by hand carries its tool's suffix, not Spark's. So `.gz` reads as gzip, and
+`.zst` as zstd beside Spark's `.zstd`.
+
 A name only proposes a log. Its decoded first line must be `SparkListenerLogStart`, which Spark
 writes first in every log. So a `LICENSE` beside a log is passed over. The first line comes from
 a file's first 64 KiB, or its first MiB when that holds no whole line. Candidates are checked
@@ -127,6 +130,10 @@ compacted file, and the manifest records `compacted`, because finished tasks wer
 A location naming one log that is not a log is `E-INGEST-003`. A directory or prefix holding no
 log is `E-INGEST-001`, which lists what it does hold and why each file was passed over. One
 holding several logs is `E-INGEST-005`, listing each.
+
+A compressed file under a name that declares no codec is passed over, with the codec its first
+bytes show as the reason. Named alone, it is `E-INGEST-003`, and the hint gives the suffix to
+rename it to.
 
 A log beside files that start with some other Spark event is `E-INGEST-005` too. Those files are
 likely pieces of a log split across several, which sparkxray cannot order. Reading the log alone
