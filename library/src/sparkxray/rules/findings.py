@@ -30,6 +30,7 @@ UNIT_SUFFIXES = ('_ms', '_ns', '_bytes', '_records', '_rows', '_count', '_share'
 ANALYSIS_METADATA_KEY = 'sparkxray.analysis'
 
 Evidence = bool | int | float | str | None | tuple[bool | int | float | str | None, ...]
+_LABEL_CHARACTERS = 100
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -63,12 +64,16 @@ class FindingScope:
         return f'x{_required(self.executor_id, "executor_id", level)}'
 
     def describe(self) -> str:
-        """The scope as a person reads it, widest part first: `SQL 0 › SortMergeJoin [k#2L], [k#10L], Inner › stage 4`."""
+        """The scope as a person reads it, widest part first: `SQL 0 › SortMergeJoin [k#2L], [k#10L], Inner › stage 4`.
+
+        A node label past 100 characters is cut to 100, ending in `...`, as Spark cuts a long plan field.
+        """
         parts = []
         if self.sql_execution_id is not None:
             parts.append(f'SQL {self.sql_execution_id}')
         if self.plan_node_label is not None:
-            parts.append(self.plan_node_label)
+            label = self.plan_node_label
+            parts.append(label if len(label) <= _LABEL_CHARACTERS else f'{label[: _LABEL_CHARACTERS - 3]}...')
         elif self.plan_node_id is not None:
             parts.append(f'node {self.plan_node_id}')
         if self.stage_id is not None:
