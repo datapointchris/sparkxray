@@ -1,0 +1,57 @@
+name: Library on Python 3.11
+
+# The workspace resolves at one Python, the intersection of its members'
+# requires-python, so validate.yml runs the library at 3.13. The library
+# supports 3.11, the Python AWS Glue 5.0 and 5.1 run, and this is the only
+# workflow that runs it there.
+#
+# The library installs alone and unlocked, the way pip installs it into a Glue
+# job. The lowest-direct leg installs every dependency at the floor the library
+# declares, so a floor the code has outgrown fails here rather than on a
+# consumer's cluster.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  library:
+    name: library on 3.11 (${{ matrix.resolution }})
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        resolution: [highest, lowest-direct]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.24"
+
+      - name: Install the library into a 3.11 environment
+        env:
+          RESOLUTION: ${{ matrix.resolution }}
+        run: |
+          uv venv --python 3.11 "$RUNNER_TEMP/library"
+          uv pip install --python "$RUNNER_TEMP/library" --resolution "$RESOLUTION" ./library
+
+      # compileall parses every module with the 3.11 interpreter, so syntax from
+      # a later Python fails here even in a module no test imports.
+      - name: Compile every module with Python 3.11
+        run: '"$RUNNER_TEMP/library/bin/python" -m compileall -q library/src'
+
+      # mypy comes from the workspace's locked dev group and reads the root
+      # config. --python-executable points it at the 3.11 environment, so it
+      # checks against the dependency versions this leg installed.
+      - name: Type-check the library as 3.11
+        run: >-
+          uv run --frozen --only-group dev mypy
+          --python-version 3.11
+          --python-executable "$RUNNER_TEMP/library/bin/python"
+          library/src

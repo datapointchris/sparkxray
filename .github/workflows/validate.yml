@@ -2,8 +2,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_call:
 
@@ -11,6 +9,86 @@ permissions:
   contents: read
 
 jobs:
+
+  python-library:
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: library
+    steps:
+
+      - uses: actions/checkout@v7
+
+      # generated:python-library
+      # enable-cache is left at setup-uv's `auto`, which caches on a hosted
+      # runner only. Every repo's self-hosted runner shares one ~/.cache/uv
+      # that outlives the job, so there the post step's prune and upload are
+      # work the disk already did, and two jobs pruning at once collide on the
+      # same files. version is the release the uv-lock hook pins, so the sync
+      # here and the lock check in the hooks job run one uv.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.24"
+
+      - run: uv sync --all-extras --dev
+
+      # --with pytest, because skipping is the wrong answer here: a repo with a
+      # real test suite that never declared pytest as a dependency would
+      # silently stop being tested. Supplying the runner runs the tests; a suite
+      # needing plugins still declares those itself.
+      #
+      # pytest exits 5 when it collects nothing, which is not a failure for a
+      # repo that has no tests yet. Written explicitly rather than as an && chain
+      # because the runner uses `bash -e`, where the concise form depends on
+      # subtle errexit-exemption rules.
+      - name: Test
+        run: |
+          set +e
+          uv run --with pytest pytest
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ] || [ "$code" -eq 5 ]; then exit 0; fi
+          exit 1
+
+  python-cli:
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+
+      - uses: actions/checkout@v7
+
+      # generated:python-cli
+      # enable-cache is left at setup-uv's `auto`, which caches on a hosted
+      # runner only. Every repo's self-hosted runner shares one ~/.cache/uv
+      # that outlives the job, so there the post step's prune and upload are
+      # work the disk already did, and two jobs pruning at once collide on the
+      # same files. version is the release the uv-lock hook pins, so the sync
+      # here and the lock check in the hooks job run one uv.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.24"
+
+      - run: uv sync --all-extras --dev
+
+      # --with pytest, because skipping is the wrong answer here: a repo with a
+      # real test suite that never declared pytest as a dependency would
+      # silently stop being tested. Supplying the runner runs the tests; a suite
+      # needing plugins still declares those itself.
+      #
+      # pytest exits 5 when it collects nothing, which is not a failure for a
+      # repo that has no tests yet. Written explicitly rather than as an && chain
+      # because the runner uses `bash -e`, where the concise form depends on
+      # subtle errexit-exemption rules.
+      - name: Test
+        run: |
+          set +e
+          uv run --with pytest pytest
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ] || [ "$code" -eq 5 ]; then exit 0; fi
+          exit 1
 
   hooks:
     runs-on: ubuntu-26.04
@@ -197,6 +275,10 @@ jobs:
             bats
             codespell
             refcheck
+            uv-lock
+            ruff-format
+            ruff-check
+            mypy
             actionlint
           )
           # Every hook runs whatever the one before it found, so one push

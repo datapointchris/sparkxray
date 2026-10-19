@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Scoped per job rather than here: validate only reads, and it is the job that
+# runs the most third-party code.
+permissions:
+  contents: read
+
+# Two pushes to main inside one run's window would otherwise race. Both runs
+# resolve the same version, and the later one fails pushing its tag.
+# Never cancel-in-progress: a canceled release can leave a tag with no release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Without these, release publishes whatever is on main, tested or not.
+  validate:
+    uses: ./.github/workflows/validate.yml
+
+  library-on-python-3-11:
+    uses: ./.github/workflows/library-on-python-3.11.yml
+
+  release:
+    needs: [validate, library-on-python-3-11]
+    uses: datapointchris/reusable-workflows/.github/workflows/python-semantic-release.yml@v1
+    permissions:
+      contents: write
+
+  # A separate job in the same workflow, gated on the one above.
+  #
+  # Same workflow because a tag pushed with GITHUB_TOKEN does not trigger
+  # another workflow run, so a publish keyed on `push: tags` would never fire.
+  # Separate job so the index credentials are reachable from these steps only,
+  # and not from the release job that runs python-semantic-release.
+  #
+  # A commit type that bumps nothing leaves `released` false, and this job is
+  # skipped. A skipped publish on a green run is the correct result there.
+  publish:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The tag, not the branch. Both versions are read from the tag, so a
+          # build anywhere else names the previous release plus a distance, and
+          # main may already have moved past what was released.
+          ref: ${{ needs.release.outputs.tag }}
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.24"
+
+      # One tag, two distributions. The CLI's metadata pins the library to the
+      # same version, so both are built here and uploaded together.
+      - run: uv build --package sparkxray
+      - run: uv build --package sparkxray-cli
+
+      # pypiserver rejects a second upload of a filename it already holds and
+      # offers no yank, so the sdists and wheels are checked while the upload is
+      # still avoidable.
+      - run: uv run --no-project --with twine twine check dist/*
+
+      - name: Publish to pypi.ichrisbirch.com
+        run: uv publish --publish-url https://pypi.ichrisbirch.com/
+        env:
+          UV_PUBLISH_USERNAME: ${{ secrets.PYPI_ICB_USERNAME }}
+          UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_ICB_PASSWORD }}

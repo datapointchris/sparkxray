@@ -1,0 +1,57 @@
+[project]
+name = "sparkxray-cli"
+dynamic = ["version", "dependencies"]
+description = "Terminal and CI front end to sparkxray: findings, annotated plans, reports and run diffs from Spark event logs."
+authors = [{ name = "Chris Birch", email = "datapointchris@gmail.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+keywords = ["spark", "pyspark", "event-log", "performance", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: System :: Distributed Computing",
+]
+requires-python = ">=3.13"
+
+[project.scripts]
+sparkxray = "sparkxray_cli.main:app"
+
+[project.urls]
+Repository = "https://github.com/datapointchris/sparkxray"
+Issues = "https://github.com/datapointchris/sparkxray/issues"
+Changelog = "https://github.com/datapointchris/sparkxray/releases"
+
+# The library is pinned to this release's own version, so a CLI and a library
+# from different releases cannot install together.
+[tool.hatch.metadata.hooks.uv-dynamic-versioning]
+dependencies = [
+    "sparkxray=={{ version }}",
+    "rich>=13.0.0",
+    "typer>=0.15.0",
+]
+
+[tool.uv.sources]
+sparkxray = { workspace = true }
+
+# The release tag is the version, read the same way as the library's.
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+style = "semver"
+
+# A new commit or tag changes the version, so it has to invalidate uv's cache.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
+
+# The published sdist holds the package and its metadata, and none of the
+# repo's tooling or tests.
+[tool.hatch.build.targets.sdist]
+only-include = ["src"]
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
