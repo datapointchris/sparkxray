@@ -64,10 +64,13 @@ Upload the zip, pass its `s3://` path to `--additional-python-modules`, and pass
 | `library/` | the `sparkxray` distribution, which code reading event logs imports |
 | `cli/` | the `sparkxray-cli` distribution: the `sparkxray` command over the library |
 | `docs/` | why the design is what it is |
+| `fixtures/` | the event logs the tests read, and the Spark job and script that write them |
+| `benchmarks/parse/` | the parse benchmark behind the choice of DuckDB |
 
 Both distributions are released together, from one tag, and the CLI pins the library to its own
 release.
 
 ## License
 
-MIT
+MIT. The Apache Spark test logs under `fixtures/logs/apache-spark-events/` are copied from Apache
+Spark and stay under the Apache License 2.0, as `fixtures/NOTICE` records.

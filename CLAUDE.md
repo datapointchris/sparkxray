@@ -11,6 +11,8 @@ pyproject.toml   the workspace, and every tool's config for both members
 library/         sparkxray: imported as `sparkxray`, Python >=3.11, no scripts
 cli/             sparkxray-cli: imported as `sparkxray_cli`, Python >=3.13, the `sparkxray` command
 docs/            the design pages
+fixtures/        event logs per Spark setting, regenerate.sh, and the job that writes them
+benchmarks/parse/ the parse benchmark, run by hand
 ```
 
 - **The dependency runs one way: the CLI imports the library, never the reverse.** Typer and rich
@@ -57,7 +59,12 @@ uv run sparkxray --help
 uv run mypy .
 uv build --package sparkxray --out-dir dist
 uv build --package sparkxray-cli --out-dir dist
+fixtures/regenerate.sh [VARIANT...]      # rewrite fixtures/logs from Spark runs in docker
+zstd -dc fixtures/logs/spark-3.5.9/local-*.zstd | python3 fixtures/stage_totals.py
 ```
+
+A test pins a fixture number from `stage_totals.py`, never from sparkxray's own reading.
+`fixtures/README.md` lists each variant and the numbers it seeds.
 
 ## Where sparkxray writes
 

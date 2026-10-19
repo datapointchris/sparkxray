@@ -2,11 +2,13 @@
 
 ## Every ratio threshold is paired with an absolute floor
 
-A ratio alone fires on noise. A stage of 200 tiny tasks, with a 24 ms median and a 486 ms maximum,
-scored a 20.3× max-to-median duration ratio. Nothing there is worth fixing.
+A ratio alone fires on noise. In the `spark-3.5.9` fixture, the 200-file write's stage runs 200
+tasks with a 14 ms median and a 385 ms maximum. That is a 27× max-to-median duration ratio, and
+nothing there is worth fixing.
 
-Durations also understate real skew. A skewed join stage showed 8.9× in shuffle records but only
-2.4× in task duration.
+Durations also understate real skew. The same fixture's skewed join reads 64× the median's shuffle
+records on its largest task, but runs only 38× the median's time. `fixtures/README.md` gives both
+stages' totals and the command that reads them.
 
 So every ratio comes with an absolute amount, the way AQE's own skew test pairs
 `skewedPartitionFactor` (5) with `skewedPartitionThresholdInBytes` (256 MB). Stage rules lead with

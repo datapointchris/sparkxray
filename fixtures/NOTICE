@@ -1,0 +1,12 @@
+The files under logs/apache-spark-events/ are copied from Apache Spark's
+core/src/test/resources/spark-events/ directory at tag v4.2.0
+(commit 32f7299601108917fb01920a54e084595b7b3bf8). Each event log is stored
+zstd-compressed with a .zstd suffix, and decompresses to the original file
+byte for byte. They are licensed under the Apache License, Version 2.0, a copy
+of which is in LICENSE-APACHE-2.0.txt beside this file.
+
+Apache Spark
+Copyright 2014 and onwards The Apache Software Foundation.
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
