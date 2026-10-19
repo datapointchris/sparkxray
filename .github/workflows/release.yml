@@ -65,8 +65,11 @@ jobs:
       # still avoidable.
       - run: uv run --no-project --with twine twine check dist/*
 
+      # --check-url skips a file the index already holds. A re-run of a release
+      # that failed partway through its upload then finishes it, where the
+      # index's 409 for that file would otherwise stop the job.
       - name: Publish to pypi.ichrisbirch.com
-        run: uv publish --publish-url https://pypi.ichrisbirch.com/
+        run: uv publish --publish-url https://pypi.ichrisbirch.com/ --check-url https://pypi.ichrisbirch.com/simple/
         env:
           UV_PUBLISH_USERNAME: ${{ secrets.PYPI_ICB_USERNAME }}
           UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_ICB_PASSWORD }}
