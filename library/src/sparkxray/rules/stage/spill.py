@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from collections.abc import Mapping
+from typing import Any
+
 from sparkxray.rules.rule import Rule
+from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Threshold
+from sparkxray.rules.stage.skew import rows_outside_skewed_stages
+from sparkxray.rules.stage.statistics import SLOTS
 from sparkxray.rules.stage.statistics import STAGE_CTES
 
 _TUNING_DOCS = 'https://spark.apache.org/docs/latest/tuning.html#memory-management-overview'
 
 # A single-task stage has no other task to compare with, so sparkDoctor holds it to higher floors.
-# The impact is the share of the spilling tasks' run time the disk spill stands for, against what
-# the stage read, and never more than the stage's wall time.
+# The impact is the spilling tasks' run time spread over the stage's slots, times the disk spill's
+# share of what the stage read, which is never past 1. It is never more than the stage's wall time.
 _SPILL_SQL = f"""
 WITH {STAGE_CTES}, spilled AS (
-  SELECT * FROM stage_statistics
+  SELECT stage_id FROM stage_statistics
   WHERE (task_count >= 2 AND (disk_spilled_bytes >= $disk_bytes OR memory_spilled_bytes >= $memory_bytes))
     OR (task_count = 1 AND (disk_spilled_bytes >= $single_task_disk_bytes OR memory_spilled_bytes >= $single_task_memory_bytes))
 ), worst AS (
@@ -24,24 +31,29 @@ WITH {STAGE_CTES}, spilled AS (
   WHERE tasks_effective.memory_spilled_bytes > 0 OR tasks_effective.disk_spilled_bytes > 0
   GROUP BY tasks_effective.stage_id
 ), reads AS (
-  SELECT stage_id, shuffle_read_bytes + coalesce(input_bytes, 0) AS read_bytes FROM spilled
+  SELECT stage_id, shuffle_read_bytes + coalesce(input_bytes, 0) AS read_bytes FROM stage_statistics JOIN spilled USING (stage_id)
 )
-SELECT spilled.stage_id, spilled.stage_attempt, stage_owners.job_id, stage_owners.sql_execution_id, worst.worst_task_ids,
-  CASE WHEN spilled.disk_spilled_bytes >= 1073741824 OR spilled.max_disk_spilled_bytes >= 536870912 THEN 'high' ELSE 'medium' END
-    AS severity,
-  CASE WHEN reads.read_bytes > 0 THEN
-    round(least(stage_walls.wall_ms, spilled.spilling_run_time_ms * spilled.disk_spilled_bytes / reads.read_bytes) / 1000, 3)
-  END AS impact_seconds,
-  spilled.task_count, spilled.spilling_task_count,
-  spilled.memory_spilled_bytes, spilled.disk_spilled_bytes, spilled.max_disk_spilled_bytes AS max_task_disk_spilled_bytes,
+SELECT stage_statistics.stage_id, stage_statistics.stage_attempt, stage_owners.job_id, stage_owners.sql_execution_id,
+  worst.worst_task_ids,
+  CASE WHEN stage_statistics.disk_spilled_bytes >= 1073741824 OR stage_statistics.max_disk_spilled_bytes >= 536870912
+    THEN 'high' ELSE 'medium' END AS severity,
+  CASE WHEN reads.read_bytes > 0 THEN round(least(
+    stage_walls.wall_ms,
+    stage_statistics.spilling_run_time_ms / {SLOTS} * least(1, stage_statistics.disk_spilled_bytes / reads.read_bytes)
+  ) / 1000, 3) END AS impact_seconds,
+  stage_statistics.task_count, stage_statistics.spilling_task_count,
+  stage_statistics.memory_spilled_bytes, stage_statistics.disk_spilled_bytes,
+  stage_statistics.max_disk_spilled_bytes AS max_task_disk_spilled_bytes,
   reads.read_bytes,
-  round(spilled.disk_spilled_bytes / nullif(reads.read_bytes, 0), 4) AS disk_spill_to_read_ratio
-FROM spilled
+  round(stage_statistics.disk_spilled_bytes / nullif(reads.read_bytes, 0), 4) AS disk_spill_to_read_ratio
+FROM stage_statistics
+JOIN spilled USING (stage_id)
 JOIN worst USING (stage_id)
 JOIN reads USING (stage_id)
 LEFT JOIN stage_owners USING (stage_id)
 LEFT JOIN stage_walls USING (stage_id)
-ORDER BY spilled.stage_id
+LEFT JOIN stage_slots USING (stage_id)
+ORDER BY stage_statistics.stage_id
 """
 
 _SPILL_LESSON = """\
@@ -132,12 +144,20 @@ LEFT JOIN stage_owners USING (stage_id)
 ORDER BY skewed.stage_id
 """
 
+
+def _spill_skew(context: RuleContext) -> Iterable[Mapping[str, Any]]:
+    """The stages where a few tasks spilled most, leaving out those `stage.shuffle-skew` found skewed."""
+    return rows_outside_skewed_stages(context, _SPILL_SKEW_SQL)
+
+
 _SPILL_SKEW_LESSON = """\
 ## What it measures
 
 The most any one task of a stage spilled, from memory and to disk, against the median task's
 spill. The median is taken over every successful task, so the rule needs most tasks to spill
-something and a few to spill far more.
+something and a few to spill far more. A stage `stage.shuffle-skew` found skewed is left out,
+because the skewed shuffle partition is why its tasks spilled unevenly, and that finding names
+the fix.
 
 ## Why it costs time
 
@@ -184,7 +204,8 @@ SPILL_SKEW = Rule(
     ),
     docs=(_TUNING_DOCS,),
     lesson=_SPILL_SKEW_LESSON,
-    sql=_SPILL_SKEW_SQL,
+    check=_spill_skew,
+    reads_findings_of=('stage.shuffle-skew',),
 )
 
 RULES = (SPILL, SPILL_SKEW)

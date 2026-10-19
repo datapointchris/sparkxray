@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sparkxray.rules.failure_reasons import failure_line
+from sparkxray.rules.failure_reasons import is_cancellation
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import Threshold
 from sparkxray.tables.registry import RUN_SPAN_SQL
@@ -68,7 +69,7 @@ the first one after each gap, and its call site shows where in the code the driv
 
 DRIVER_GAPS = Rule(
     rule_id='app.driver-gaps',
-    title='No job ran for {total_gap_ms:duration} in {gap_count} gaps between jobs',
+    title='No job ran for {total_gap_ms:duration} in {gap_count:plural gap} between jobs',
     signals=frozenset({'timeline'}),
     scope='application',
     thresholds=(Threshold('min_gap_ms', 60000, 'ms', 'Databricks Spark UI guide: gaps of a minute or more mid-pipeline'),),
@@ -129,7 +130,7 @@ the call site each job ran from.
 
 MANY_SMALL_JOBS = Rule(
     rule_id='app.many-small-jobs',
-    title='{short_job_count} of {job_count} jobs ran for {short_job_time_ms:duration} in all',
+    title='{short_job_count} of {job_count:plural job} ran for {short_job_time_ms:duration} in all',
     signals=frozenset({'timeline'}),
     scope='application',
     thresholds=(
@@ -147,12 +148,17 @@ MANY_SMALL_JOBS = Rule(
     sql=_MANY_SMALL_JOBS_SQL,
 )
 
+# A job Spark cancelled ends as JobFailed too, so it is counted apart and never names the failure.
 _FAILED_JOBS_SQL = f"""
-SELECT 'high' AS severity, count(*) AS failed_job_count, (SELECT count(*) FROM jobs) AS job_count,
-  list(job_id ORDER BY job_id)[1:20] AS failed_job_ids,
-  left(arg_min({failure_line('failure_reason')}, job_id), 500) AS first_failure_reason
-FROM jobs WHERE result = 'JobFailed'
-HAVING count(*) > 0
+WITH ended AS (
+  SELECT job_id, failure_reason, {is_cancellation('failure_reason')} AS cancelled FROM jobs WHERE result = 'JobFailed'
+)
+SELECT 'high' AS severity, count(*) FILTER (WHERE NOT cancelled) AS failed_job_count,
+  count(*) FILTER (WHERE cancelled) AS cancelled_job_count, (SELECT count(*) FROM jobs) AS job_count,
+  (list(job_id ORDER BY job_id) FILTER (WHERE NOT cancelled))[1:20] AS failed_job_ids,
+  left(arg_min({failure_line('failure_reason')}, job_id) FILTER (WHERE NOT cancelled), 500) AS first_failure_reason
+FROM ended
+HAVING count(*) FILTER (WHERE NOT cancelled) > 0
 """
 
 _FAILED_JOBS_LESSON = """\
@@ -160,7 +166,9 @@ _FAILED_JOBS_LESSON = """\
 
 The jobs whose `SparkListenerJobEnd` result is `JobFailed`, and the first line of the first
 one's exception. Where a Python error failed it, that line names the error its traceback ends
-with, rather than the traceback's header.
+with, rather than the traceback's header. Spark ends a job it cancelled as `JobFailed` too, as
+AQE cancels the other query stages of a query one stage failed. Those are counted apart in
+`cancelled_job_count`, and the reason is read from the first job that was not cancelled.
 
 ## Why it costs time
 
@@ -182,11 +190,11 @@ Stages tab › Failed Stages.
 
 FAILED_JOBS = Rule(
     rule_id='app.failed-jobs',
-    title='{failed_job_count} of {job_count} jobs failed',
+    title='{failed_job_count} of {job_count:plural job} failed',
     signals=frozenset({'timeline'}),
     scope='application',
     thresholds=(),
-    severity_ladder={'high': 'any job failed'},
+    severity_ladder={'high': 'any job failed other than by being cancelled'},
     remediation=(
         'read first_failure_reason for the stage and task that failed the job',
         'where it failed fetching shuffle output, check for lost executors',

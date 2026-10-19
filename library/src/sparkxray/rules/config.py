@@ -64,7 +64,7 @@ with AQE on has `AdaptiveSparkPlan isFinalPlan=true` at the root of its plan.
 
 AQE_OFF = Rule(
     rule_id='config.aqe-off',
-    title='AQE was off for {aqe_off_execution_count} of {sql_execution_count} SQL executions',
+    title='AQE was off for {aqe_off_execution_count} of {sql_execution_count:plural SQL execution}',
     signals=frozenset({'environment'}),
     scope='application',
     thresholds=(),

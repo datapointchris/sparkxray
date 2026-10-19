@@ -80,7 +80,8 @@ class Rule:
     `rule_id` is `<prefix>.<kebab-name>` and never changes meaning; a rename is a breaking change.
     `rule_version` starts at 1 and rises whenever what the rule reports changes. `title` is a
     `str.format` template over a finding's scope ids and evidence, where `{key:bytes}` prints a
-    byte count and `{key:duration}` a millisecond duration as the Spark UI prints them. `scope`
+    byte count and `{key:duration}` a millisecond duration as the Spark UI prints them, and
+    `{key:plural task}` a count with the noun agreeing with it. `scope`
     names what one finding is about, and so which ids its `finding_id` is built from.
 
     `sql` runs in DuckDB over the tables, and reads each threshold as a `$name` parameter. `check`
@@ -91,8 +92,9 @@ class Rule:
     unit. `severity` is the rule's grade before the engine weighs the scope's share of the run.
 
     `reads_findings_of` names the rules whose findings a `check` reads from `RuleContext.findings`.
-    Selecting the rule selects them too, and they run first and report as any rule does. A rule
-    whose own signals are present still skips when one of theirs is missing.
+    Selecting the rule runs them first. One not selected itself reports nothing: its findings reach
+    the reading rule alone. A rule whose own signals are present still skips when one of theirs is
+    missing.
     """
 
     rule_id: str

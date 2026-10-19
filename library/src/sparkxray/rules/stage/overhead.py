@@ -88,7 +88,8 @@ GC_PRESSURE = Rule(
 
 _SCHEDULER_DELAY_SQL = _stage_rule_sql(
     'stage_statistics.median_scheduler_delay_ms > $min_delay_ms '
-    'AND stage_statistics.median_scheduler_delay_ms > $min_share * stage_statistics.median_duration_ms',
+    'AND stage_statistics.median_scheduler_delay_ms > $min_share * stage_statistics.median_duration_ms '
+    f'AND stage_statistics.scheduler_delay_ms / {SLOTS} >= $min_impact_ms',
     f"""'medium' AS severity,
   round(stage_statistics.scheduler_delay_ms / 1000 / {SLOTS}, 3) AS impact_seconds,
   stage_statistics.task_count, stage_statistics.median_scheduler_delay_ms, stage_statistics.median_duration_ms,
@@ -130,8 +131,12 @@ SCHEDULER_DELAY = Rule(
     thresholds=(
         Threshold('min_share', 0.1, 'fraction', 'proposed'),
         Threshold('min_delay_ms', 100, 'ms', 'proposed'),
+        Threshold('min_impact_ms', 30000, 'ms', 'proposed: the 30 s at stake stage.task-skew and stage.gc-pressure need'),
     ),
-    severity_ladder={'medium': "the median task's delay is over min_delay_ms and over min_share of the median task's duration"},
+    severity_ladder={
+        'medium': "the median task's delay is over min_delay_ms and over min_share of the median task's duration, "
+        'and the summed delay over concurrent slots is at least min_impact_ms'
+    },
     remediation=(
         'cut the partition count, so each task runs longer',
         'broadcast a large lookup rather than capture it in a closure',
@@ -145,7 +150,8 @@ SCHEDULER_DELAY = Rule(
 # Deserializing comes before a task runs, so it is part of the task's duration and not of its run time.
 _DESERIALIZE_SHARE = 'stage_statistics.deserialize_time_ms / nullif(stage_statistics.task_duration_ms, 0)'
 _DESERIALIZATION_SQL = _stage_rule_sql(
-    f'{_DESERIALIZE_SHARE} > $min_share AND stage_statistics.median_deserialize_time_ms > $min_median_ms',
+    f'{_DESERIALIZE_SHARE} > $min_share AND stage_statistics.median_deserialize_time_ms > $min_median_ms '
+    f'AND stage_statistics.deserialize_time_ms / {SLOTS} >= $min_impact_ms',
     f"""'medium' AS severity,
   round(stage_statistics.deserialize_time_ms / 1000 / {SLOTS}, 3) AS impact_seconds,
   stage_statistics.task_count, stage_statistics.deserialize_time_ms, stage_statistics.median_deserialize_time_ms,
@@ -165,7 +171,9 @@ too.
 
 A task is shipped serialized, and every task of a stage carries the same closure. A closure that
 captured a large object, such as a lookup table or a model, is deserialized again for every task.
-That time is spent before the first row is read.
+That time is spent before the first row is read. The first stage on fresh executors pays for
+loading classes here too, once per core, and a later stage on the same executors does not. So
+the rule needs `min_impact_ms` at stake, which that one-time cost rarely reaches.
 
 ## Where the Spark UI shows it
 
@@ -186,8 +194,12 @@ DESERIALIZATION = Rule(
     thresholds=(
         Threshold('min_share', 0.1, 'fraction', 'proposed'),
         Threshold('min_median_ms', 100, 'ms', 'proposed'),
+        Threshold('min_impact_ms', 30000, 'ms', 'proposed: the 30 s at stake stage.task-skew and stage.gc-pressure need'),
     ),
-    severity_ladder={'medium': "deserializing took over min_share of the tasks' time, and over min_median_ms for the median task"},
+    severity_ladder={
+        'medium': "deserializing took over min_share of the tasks' time and over min_median_ms for the median task, "
+        'and the summed time over concurrent slots is at least min_impact_ms'
+    },
     remediation=(
         'broadcast large objects rather than capture them in a closure',
         'reference only what a function needs',

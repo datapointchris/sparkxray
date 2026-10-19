@@ -10,6 +10,7 @@ from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Threshold
 from sparkxray.rules.spark_settings import ADVISORY_PARTITION_BYTES
+from sparkxray.rules.stage.skew import rows_outside_skewed_stages
 from sparkxray.rules.stage.statistics import SLOTS
 from sparkxray.rules.stage.statistics import STAGE_CTES
 
@@ -46,12 +47,7 @@ ORDER BY sized.stage_id
 
 def _oversized(context: RuleContext) -> Iterable[Mapping[str, Any]]:
     """The stages whose partitions are too large, leaving out those `stage.shuffle-skew` found skewed."""
-    if context.tables is None:
-        return []
-    skewed = {finding.scope.stage_id for finding in context.findings.get('stage.shuffle-skew', ())}
-    relation = context.tables.query(_OVERSIZED_SQL, dict(context.thresholds))
-    rows = [dict(zip(relation.columns, row, strict=True)) for row in relation.fetchall()]
-    return [row for row in rows if row['stage_id'] not in skewed]
+    return rows_outside_skewed_stages(context, _OVERSIZED_SQL)
 
 
 _OVERSIZED_LESSON = """\
@@ -169,7 +165,7 @@ names the partitioning, as in `hashpartitioning(k#2L, 4)`, or a `repartition(n)`
 
 LOW_SHUFFLE_PARALLELISM = Rule(
     rule_id='stage.low-shuffle-parallelism',
-    title='Stage {stage_id} read {total_shuffle_read_bytes:bytes} of shuffle in {task_count} tasks',
+    title='Stage {stage_id} read {total_shuffle_read_bytes:bytes} of shuffle in {task_count:plural task}',
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
@@ -239,7 +235,7 @@ Turn on "Show Additional Metrics" for Scheduler Delay and Task Deserialization T
 
 TINY_TASKS = Rule(
     rule_id='stage.tiny-tasks',
-    title='Stage {stage_id} ran {task_count} tasks averaging {mean_duration_ms:duration}',
+    title='Stage {stage_id} ran {task_count:plural task} averaging {mean_duration_ms:duration}',
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(

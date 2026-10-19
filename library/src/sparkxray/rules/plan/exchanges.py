@@ -65,7 +65,7 @@ starts a stage on the Stages tab.
 
 MANY_EXCHANGES = Rule(
     rule_id='plan.many-exchanges',
-    title='The query shuffles {exchange_count} times',
+    title='The query shuffles {exchange_count:plural time}',
     signals=frozenset({'plan'}),
     scope='sql_execution',
     thresholds=(Threshold('min_exchanges', 4, 'count', 'sparkDoctor docs/detections.md'),),

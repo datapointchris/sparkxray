@@ -55,6 +55,7 @@ SELECT 'medium' AS severity, totals.executor_count, totals.driver_ran_tasks,
   lower(coalesce(spark_settings."{DYNAMIC_ALLOCATION}", 'false')) = 'true' AS dynamic_allocation_enabled
 FROM totals, application, spark_settings
 WHERE totals.core_time_ms > 0 AND 1 - totals.task_core_time_ms / totals.core_time_ms > $min_idle_share
+  AND totals.core_time_ms - totals.task_core_time_ms >= $min_idle_core_ms
 """
 
 _IDLE_CORES_LESSON = """\
@@ -71,7 +72,8 @@ DPUs of 4 vCPUs.
 A core held and running no task is paid for and does nothing. Cores sit idle while the driver
 works alone between jobs, while a stage runs fewer tasks than there are cores, and while every
 core waits on the one slow task a stage ends with. More than half the core time idle means the
-application holds more than it uses.
+application holds more than it uses. A short run is mostly start-up and shutdown, so the rule
+also needs `min_idle_core_ms` of idle core time before the share is worth acting on.
 
 ## Where the Spark UI shows it
 
@@ -95,8 +97,13 @@ IDLE_CORES = Rule(
     title='Cores sat idle for {idle_core_share:.0%} of the time executors held them',
     signals=frozenset({'executors', 'tasks'}),
     scope='application',
-    thresholds=(Threshold('min_idle_share', 0.5, 'fraction', 'DataFlint WastedCoresAlertsReducer.ts'),),
-    severity_ladder={'medium': 'over min_idle_share of the core time ran no task'},
+    thresholds=(
+        Threshold('min_idle_share', 0.5, 'fraction', 'DataFlint WastedCoresAlertsReducer.ts'),
+        Threshold(
+            'min_idle_core_ms', 300000, 'ms', 'proposed: five minutes of one core, past what a short run idles starting and stopping'
+        ),
+    ),
+    severity_ladder={'medium': 'over min_idle_share of the core time ran no task, and at least min_idle_core_ms of core time sat idle'},
     remediation=(
         'with dynamic allocation, lower spark.dynamicAllocation.executorIdleTimeout or spark.dynamicAllocation.executorAllocationRatio',
         'with a fixed allocation, lower spark.executor.instances or spark.executor.cores',
@@ -163,7 +170,16 @@ def _memory_under(context: RuleContext) -> Iterable[Mapping[str, Any]]:
 
 
 def _memory_over(context: RuleContext) -> Iterable[Mapping[str, Any]]:
-    fullest = None if context.tables is None else _fullest_executor(context.tables)
+    """Every executor's peak heap under `min_peak_share` of its memory, unless a task or an executor ran out of memory.
+
+    An allocation that fails never reaches the heap's peak, and a lost executor's last metrics can
+    be lost with it. So a run where `stage.task-oom` fired, or where `executor.lost` graded a loss
+    high, which it does for a loss to memory, says nothing about memory to spare.
+    """
+    ran_out = context.findings.get('stage.task-oom', ()) or any(
+        finding.base_severity == 'high' for finding in context.findings.get('executor.lost', ())
+    )
+    fullest = None if context.tables is None or ran_out else _fullest_executor(context.tables)
     if context.tables is None or fullest is None or fullest['peak_memory_share'] >= context.thresholds['min_peak_share']:
         return []
     gc_share = context.tables.query(_EXECUTOR_GC_SQL).fetchone()
@@ -236,7 +252,9 @@ _MEMORY_OVER_LESSON = f"""\
 The executor whose peak JVM heap came nearest the memory it was given, as a share of that
 memory, so the rule fires only where no executor came near it. {_MEMORY_SOURCES} `gc_share` is
 GC time against task time on the executors, which Dr. Elephant reads as more memory than needed
-below 5%.
+below 5%. The rule stays silent where `stage.task-oom` fired, or `executor.lost` found an
+executor lost to memory. An allocation that fails never reaches the peak, so a low peak there
+hides a heap that ran out.
 
 ## Why it costs time
 
@@ -270,6 +288,7 @@ MEMORY_OVER = Rule(
     docs=(_MEMORY_DOCS,),
     lesson=_MEMORY_OVER_LESSON,
     check=_memory_over,
+    reads_findings_of=('stage.task-oom', 'executor.lost'),
 )
 
 _DRIVER_MEMORY_SQL = f"""

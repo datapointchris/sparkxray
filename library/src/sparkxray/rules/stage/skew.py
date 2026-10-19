@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sparkxray.rules.rule import Rule
+from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Threshold
 from sparkxray.rules.spark_settings import ADAPTIVE
 from sparkxray.rules.spark_settings import SKEW_JOIN
@@ -216,3 +219,17 @@ SHUFFLE_SKEW = Rule(
 )
 
 RULES = (TASK_SKEW, SHUFFLE_SKEW)
+
+
+def rows_outside_skewed_stages(context: RuleContext, sql: str) -> list[dict[str, Any]]:
+    """A stage rule's rows, leaving out the stages `stage.shuffle-skew` found skewed.
+
+    A rule whose finding a skewed partition causes reads `stage.shuffle-skew`, because that
+    finding names the cause and its fix.
+    """
+    if context.tables is None:
+        return []
+    skewed = {finding.scope.stage_id for finding in context.findings.get('stage.shuffle-skew', ())}
+    relation = context.tables.query(sql, dict(context.thresholds))
+    rows = [dict(zip(relation.columns, row, strict=True)) for row in relation.fetchall()]
+    return [row for row in rows if row['stage_id'] not in skewed]

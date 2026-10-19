@@ -5,7 +5,9 @@ These read `tasks`, every attempt, rather than `tasks_effective`, which keeps on
 
 from __future__ import annotations
 
+from sparkxray.rules.failure_reasons import blamed_stage
 from sparkxray.rules.failure_reasons import failure_line
+from sparkxray.rules.failure_reasons import is_cancellation
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import Threshold
 from sparkxray.rules.stage.statistics import SLOTS
@@ -77,7 +79,7 @@ A stage retried after a `FetchFailed` shows a second row with "(retry 1)".
 
 RETRY_WASTE = Rule(
     rule_id='stage.retry-waste',
-    title='Stage {stage_id} threw away {failed_attempt_count} task attempts, {failed_attempt_ms:duration} of task time',
+    title='Stage {stage_id} threw away {failed_attempt_count:plural task attempt}, {failed_attempt_ms:duration} of task time',
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
@@ -150,7 +152,7 @@ Stages tab › the stage › the task table: a task index listed twice, one atte
 
 SPECULATION = Rule(
     rule_id='stage.speculation',
-    title='Speculative copies won {speculative_success_count} of the {task_count} tasks of stage {stage_id}',
+    title='Speculative copies won {speculative_success_count} of the {task_count:plural task} of stage {stage_id}',
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
@@ -216,7 +218,7 @@ executor shows as dead with its removal reason.
 
 TASK_OOM = Rule(
     rule_id='stage.task-oom',
-    title='{oom_attempt_count} task attempts of stage {stage_id} ran out of memory',
+    title='{oom_attempt_count:plural task attempt} of stage {stage_id} ran out of memory',
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(),
@@ -231,14 +233,19 @@ TASK_OOM = Rule(
     sql=_TASK_OOM_SQL,
 )
 
+# Spark ends every running stage of a job it fails or cancels with the job's reason. So a stage
+# counts as failed only where its reason blames it, or blames no stage and one of its attempts
+# failed rather than being killed. A sibling stopped for another's failure has only killed attempts.
 _FAILED_SQL = f"""
 WITH {STAGE_CTES}, failed AS (
-  SELECT stage_id, attempt, name, failure_reason FROM stages WHERE is_highest_attempt AND failure_reason IS NOT NULL
+  SELECT stage_id, attempt, name, failure_reason, {blamed_stage('failure_reason')} AS blamed_stage_id FROM stages
+  WHERE is_highest_attempt AND failure_reason IS NOT NULL AND NOT {is_cancellation('failure_reason')}
 ), attempts AS (
   SELECT stage_id, count(*) AS stage_attempt_count FROM stages GROUP BY stage_id
 ), failed_tasks AS (
-  SELECT stage_id, count(*) AS failed_attempt_count, sum(duration_ms) AS failed_attempt_ms FROM tasks
-  WHERE {_UNSUCCESSFUL} GROUP BY stage_id
+  SELECT stage_id, count(*) AS failed_attempt_count, sum(duration_ms) AS failed_attempt_ms,
+    count(*) FILTER (WHERE end_reason = 'TaskKilled') AS killed_attempt_count
+  FROM tasks WHERE {_UNSUCCESSFUL} GROUP BY stage_id
 )
 SELECT failed.stage_id, failed.attempt AS stage_attempt, stage_owners.job_id, stage_owners.sql_execution_id,
   'high' AS severity, failed.name AS stage_name,
@@ -249,6 +256,8 @@ FROM failed
 JOIN attempts USING (stage_id)
 LEFT JOIN failed_tasks USING (stage_id)
 LEFT JOIN stage_owners USING (stage_id)
+WHERE failed.blamed_stage_id = failed.stage_id
+  OR (failed.blamed_stage_id IS NULL AND failed_tasks.failed_attempt_count > failed_tasks.killed_attempt_count)
 ORDER BY failed.stage_id
 """
 
@@ -256,7 +265,10 @@ _FAILED_LESSON = """\
 ## What it measures
 
 A stage whose last attempt ended with a failure reason, from its `SparkListenerStageCompleted`
-event. A stage retried after a fetch failure and then finished is not failed.
+event. A stage retried after a fetch failure and then finished is not failed. Spark ends every
+running stage of a failed or cancelled job with the job's reason. So a stage counts only where
+the reason blames it, or blames no stage and one of its own task attempts failed. A stage of a
+cancelled job, or one stopped because another stage failed, is left out.
 
 ## Why it costs time
 
@@ -281,7 +293,7 @@ FAILED = Rule(
     signals=frozenset({'timeline'}),
     scope='stage',
     thresholds=(),
-    severity_ladder={'high': "the stage's last attempt failed"},
+    severity_ladder={'high': "the stage's last attempt failed, and its reason blames this stage or one of its task attempts failed"},
     remediation=(
         'read failure_reason for the failing task and its error',
         'fix the code or data where tasks failed spark.task.maxFailures times',
