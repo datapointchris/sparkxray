@@ -183,6 +183,29 @@ def small_files_read(spark: SparkSession, data: str) -> None:
     noop(spark.read.parquet(f'{data}/small-files'))
 
 
+def outer_join_small_left(spark: SparkSession, data: str) -> None:
+    describe(spark, (), ('plan.smj-small-side',), 'left outer join whose small side is the left one, which Spark cannot broadcast')
+    small = spark.read.parquet(f'{data}/t2025').select(sf.col('id').alias('k'))
+    large = spark.range(0, 2_000_000).select(sf.col('id').alias('k'), (sf.col('id') * 3).alias('v'))
+    noop(small.join(large, 'k', 'left'))
+
+
+def cached_unpushed_filter(spark: SparkSession, data: str) -> DataFrame:
+    return spark.read.parquet(f'{data}/t').filter(sf.col('id').cast('string').like('8%')).cache()
+
+
+def cached_filter_first_read(spark: SparkSession, data: str) -> None:
+    describe(spark, ('plan.filter-not-pushed',), (), 'first read of a cached filter Parquet cannot take, which fills the cache')
+    noop(cached_unpushed_filter(spark, data))
+
+
+def cached_filter_read_again(spark: SparkSession, data: str) -> None:
+    describe(spark, (), ('plan.filter-not-pushed',), 'the same cached filter read again, from the cache')
+    cached = cached_unpushed_filter(spark, data)
+    noop(cached)
+    cached.unpersist()
+
+
 QUERIES: tuple[Callable[[SparkSession, str], None], ...] = (
     large_sides_join,
     exploding_join,
@@ -204,6 +227,9 @@ QUERIES: tuple[Callable[[SparkSession, str], None], ...] = (
     long_filter,
     small_files_written,
     small_files_read,
+    outer_join_small_left,
+    cached_filter_first_read,
+    cached_filter_read_again,
 )
 
 

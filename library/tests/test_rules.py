@@ -47,8 +47,8 @@ def _plan_firings(path: pathlib.Path, cache_dir: pathlib.Path) -> list[tuple[str
     [
         'logs/spark-3.5.9/local-1792406949080.zstd',
         'logs/spark-4.2.0/eventlog_v2_local-1792407003364',
-        'logs/spark-3.5.9-plan-rules/local-1792435924878.zstd',
-        'logs/spark-4.2.0-plan-rules/local-1792435963598.zstd',
+        'logs/spark-3.5.9-plan-rules/local-1792441743480.zstd',
+        'logs/spark-4.2.0-plan-rules/local-1792441776528.zstd',
         'explain/spark-3.5.9-plan-rules/cost-mode.json',
         'explain/spark-4.2.0-plan-rules/cost-mode.json',
     ],
