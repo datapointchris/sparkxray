@@ -17,21 +17,10 @@ classifiers = [
 ]
 
 # AWS Glue 5.0 and 5.1 run Python 3.11, and the library is imported inside Glue
-# jobs. The floors below are the oldest releases the code is tested against, so
+# jobs. Each dependency's floor is the oldest release the tests pass against, so
 # installing into a Glue job upgrades as little of its environment as it can.
 requires-python = ">=3.11"
-dependencies = [
-    "boto3>=1.28.57",
-    "cramjam>=2.8.0",
-    "duckdb>=1.1.0",
-    # httpx's successor rather than a typosquat of it: same author, developed at
-    # pydantic/httpx2 under BSD-3. The name alone reads as one, which is why it is
-    # said here.
-    "httpx2>=2.9.1",
-    # 16.0 is the first pyarrow built against NumPy 2. An older one installs
-    # beside NumPy 2, which nothing caps, and then fails to import.
-    "pyarrow>=16.0.0",
-]
+dependencies = []
 
 [project.urls]
 Repository = "https://github.com/datapointchris/sparkxray"
