@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 _CODES: dict[str, type[SparkxrayError]] = {}
+_VALID_SHOWN = 10
 
 
 class SparkxrayError(Exception):
@@ -39,7 +40,14 @@ class SparkxrayError(Exception):
         self.hint = hint
 
     def __str__(self) -> str:
-        return f'{self.code}: {self.message}'
+        text = f'{self.code}: {self.message}'
+        if self.valid:
+            text += '\n  valid:' + ''.join(f'\n    {value}' for value in self.valid[:_VALID_SHOWN])
+            if len(self.valid) > _VALID_SHOWN:
+                text += f'\n    and {len(self.valid) - _VALID_SHOWN} more'
+        if self.hint:
+            text += f'\n  hint: {self.hint}'
+        return text
 
 
 def registered() -> tuple[type[SparkxrayError], ...]:
