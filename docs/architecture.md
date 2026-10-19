@@ -138,9 +138,10 @@ fails on a frame cut short. `zstandard` streams across frames and returns every 
 holds, which a log Spark is still writing needs.
 
 A truncated final line is expected. Glue's periodic log backups and killed applications can both
-leave one. A log Spark has not finished, by its `.inprogress` name or its `appstatus` marker, has
-its last file decoded into the cache. A zstd frame cut short is indistinguishable from a whole one
-until it is decoded, so DuckDB never reads one. The reader drops a final line that does not parse
+leave one. DuckDB fails on it with `Malformed JSON … unexpected end of data`. A compressed file
+cannot be read from its end, so checking its last line means decoding all of it. So a log Spark
+has not finished, by its `.inprogress` name or its `appstatus` marker, has its last file decoded
+into the cache, and DuckDB reads those lines. The reader drops a final line that does not parse
 and records `truncated_tail` in the manifest.
 
 A cut anywhere but the last file is `E-INGEST-006`, as is a block that does not decode. Ingest
