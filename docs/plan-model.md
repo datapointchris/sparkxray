@@ -196,4 +196,5 @@ A driver value above every task's names no task, so `max_stage_id` and `max_task
 where the SQL tab prints `(driver)`.
 
 `fixtures/history-server-sql/` holds what the SQL tab serves for the plan-shapes logs, metric
-strings included, to check the tables against.
+strings included. The tables test prints each execution's `plan_node_metrics` the way the SQL tab
+prints them, and requires the two to match.
