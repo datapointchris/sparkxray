@@ -154,17 +154,28 @@ looks for it in the cache.
 
 The cache answers from its tables' manifests alone, so finding a log reads no event. Each
 `tables/<source>/<key>/manifest.json` names the log it was built from. Only the newest entry per
-source counts, whichever sparkxray built it. `cached_logs()` lists those entries, and
-`sparkxray logs list` prints them.
+source counts, whichever sparkxray built it. Entries then merge where they are one log:
 
-Tables the installed sparkxray built open as they stand, so the log's source is never read. That
-keeps an S3 log openable with no credentials and no network. Tables an earlier sparkxray built
-are never read, because their columns may differ from this one's. So the app id resolves to the log's
-location instead, and the open reads it as a path would. An app id keeps opening after an
-upgrade, and `logs list` lists every app id that opens.
+- Two locations reaching the same files, such as a directory and the file in it, share a tables
+  key.
+- A log read while Spark wrote it, then read again after, holds its files under their names
+  without `.inprogress`. The later read stands.
+- A location that no longer exists loses to one with the same app id that does. Spark renames a
+  finished log, so a log read while it ran is looked for under its finished name too.
+
+`cached_logs()` lists what is left, and `sparkxray logs list` prints it. So an app id listed once
+opens.
+
+Finished tables the installed sparkxray built open as they stand, so the log's source is never
+read. That keeps an S3 log openable with no credentials and no network. A log Spark was still
+writing is read again, because it may have grown since, and the tables key reuses its tables if
+it has not. Tables an earlier sparkxray built are never read, because their columns may differ
+from this one's. Either way the app id resolves to the log's location, and the open reads it as
+a path would. So an app id and a path give one answer, and an app id keeps opening after an
+upgrade.
 
 An app id no cached log holds is `E-INGEST-001`, listing the app ids the cache does hold. Two
-attempts of one application share an app id, and so does one log copied to two places. Either is
+attempts of one application share an app id, and so do two copies of a log that differ. Either is
 `E-INGEST-005`, listing each location to open instead.
 
 ## Spark's lz4 and snappy logs need two small decoders, and zstd a streaming one

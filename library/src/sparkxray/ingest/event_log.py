@@ -109,9 +109,10 @@ class EventLog:
 
         `location` is a log file, a directory, a rolling `eventlog_v2_*` directory, or an `s3://`
         URI to any of those. It must hold exactly one application. It may also be the app id of a
-        log the cache holds tables for, where it names no file. Tables the installed sparkxray
-        built then open without reading the log's source again, and tables an earlier one built
-        send the open to that source, as its location would. `cache_dir` overrides
+        log the cache holds tables for, where it names no file. Finished tables the installed
+        sparkxray built then open without reading the log's source again. A log Spark was still
+        writing, or tables an earlier sparkxray built, send the open to the log's location, so
+        it reads the log as it stands now. `cache_dir` overrides
         `$XDG_CACHE_HOME/sparkxray`. `profile` and `region` narrow boto3's credential chain.
         """
         text = os.fspath(location)
