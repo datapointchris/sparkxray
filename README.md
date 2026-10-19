@@ -188,6 +188,8 @@ text, with no log. Only the rules reading a plan alone run, and `skipped` names 
 rule lacked. Other code adds its own rules with `sparkxray.rules.register`.
 
 `findings.parquet` is written beside the tables, and holds the last analysis's findings.
+`log.tables.stored_analysis()` says which rules that analysis ran, under which thresholds, and
+which it skipped.
 
 ## Layout
 

@@ -5,13 +5,15 @@ from __future__ import annotations
 import dataclasses as dc
 import decimal
 import math
+import os
+import string
 from collections.abc import Iterable
 from collections.abc import Mapping
 from collections.abc import Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
+from sparkxray.errors import InvalidRuleError
 from sparkxray.errors import UnknownRuleError
 from sparkxray.plan.tree import NumberedNode
 from sparkxray.plan.tree import Plan
@@ -32,6 +34,8 @@ from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Severity
 from sparkxray.rules.rule import Signal
 from sparkxray.rules.thresholds import resolve_thresholds
+from sparkxray.spark_ui_format import bytes_to_string
+from sparkxray.spark_ui_format import format_duration
 
 if TYPE_CHECKING:
     from sparkxray.ingest.event_log import EventLog
@@ -84,6 +88,19 @@ GROUP BY ALL
 
 
 @dc.dataclass(frozen=True, slots=True)
+class RuleRun:
+    """A rule the analysis ran, and the thresholds it applied, whether or not it found anything."""
+
+    rule_id: str
+    rule_version: int
+    thresholds: Mapping[str, AppliedThreshold]
+
+    def to_json(self) -> dict[str, Any]:
+        thresholds = {name: applied.to_json() for name, applied in self.thresholds.items()}
+        return {'rule_id': self.rule_id, 'rule_version': self.rule_version, 'thresholds': thresholds}
+
+
+@dc.dataclass(frozen=True, slots=True)
 class SkippedRule:
     """A rule the analysis did not run, and the signals its input lacked."""
 
@@ -100,12 +117,15 @@ class Analysis:
     """What one analysis found.
 
     `findings` runs from the most wall time a fix could recover to the least, with findings of
-    unknown impact last, then by severity. `signals` names what the input held, and each rule
-    needing anything else is in `skipped`, so a partial analysis reads as partial.
+    unknown impact last, then by severity. `signals` names what the input held. `rules_run`
+    names every rule that ran with the thresholds it applied, and each rule needing a signal the
+    input lacked is in `skipped`. So a partial analysis reads as partial, and a rule silenced by
+    an override reads as silenced rather than clean.
     """
 
     app_id: str | None
     signals: frozenset[Signal]
+    rules_run: tuple[RuleRun, ...]
     findings: tuple[Finding, ...]
     skipped: tuple[SkippedRule, ...]
     schema_version: int = SCHEMA_VERSION
@@ -115,6 +135,7 @@ class Analysis:
             'schema_version': self.schema_version,
             'app_id': self.app_id,
             'signals': [signal for signal in SIGNALS if signal in self.signals],
+            'rules_run': [run.to_json() for run in self.rules_run],
             'findings': [finding.to_json() for finding in self.findings],
             'skipped': [skipped.to_json() for skipped in self.skipped],
         }
@@ -138,16 +159,16 @@ def analyze(
     *,
     rules: Iterable[str] | None = None,
     thresholds: Thresholds | None = None,
-    threshold_file: Path | None = None,
+    threshold_file: str | os.PathLike[str] | None = None,
     threshold_flags: Iterable[str] = (),
 ) -> Analysis:
     """Run the rules over one log, and write its findings beside its tables as `findings.parquet`.
 
     `rules` names the rule ids to run, and every catalog rule runs by default. `thresholds` sets
     values by rule id and name, as in `{'stage.shuffle-skew': {'ratio': 8}}`. `threshold_file`
-    is a TOML file of the same, and `threshold_flags` holds `<rule_id>.<name>=<value>` strings,
-    as the command line's `--threshold` takes them. A flag beats the SDK, the SDK beats the file,
-    and the file beats the rule's default. Each finding records the layer that set each value.
+    is a TOML file of the same, and `threshold_flags` holds `<rule_id>.<name>=<value>` strings.
+    A flag beats the SDK, the SDK beats the file, and the file beats the rule's default. Each
+    applied value records the layer that set it.
     """
     selected, every_rule = _selected(rules)
     applied = resolve_thresholds(selected, every_rule, sdk=thresholds, file=threshold_file, flags=threshold_flags)
@@ -174,7 +195,9 @@ def analyze(
     )
     from sparkxray.tables.relations import FINDINGS_FILE
 
-    write_findings_parquet(analysis.findings, tables.path / FINDINGS_FILE)
+    document = analysis.to_json()
+    del document['findings']
+    write_findings_parquet(analysis.findings, document, tables.path / FINDINGS_FILE)
     tables.register_findings()
     return analysis
 
@@ -185,7 +208,7 @@ def analyze_plan(
     node_metrics: Mapping[int, Mapping[str, float]] | None = None,
     rules: Iterable[str] | None = None,
     thresholds: Thresholds | None = None,
-    threshold_file: Path | None = None,
+    threshold_file: str | os.PathLike[str] | None = None,
     threshold_flags: Iterable[str] = (),
 ) -> Analysis:
     """Run the rules over one plan, as one read from `explain()` text, with no log.
@@ -220,18 +243,20 @@ def _selected(rules: Iterable[str] | None) -> tuple[list[Rule], list[Rule]]:
     wanted = {rules} if isinstance(rules, str) else set(rules)
     for rule_id in sorted(wanted):
         if rule_id not in known:
-            raise UnknownRuleError(f'no rule is called {rule_id!r}', field='rules', valid=sorted(known), hint='sparkxray rules list')
+            raise UnknownRuleError(f'no rule is called {rule_id!r}', field='rules', valid=sorted(known))
     return [known[rule_id] for rule_id in sorted(wanted)], every_rule
 
 
 def _run(rules: Sequence[Rule], applied: Mapping[str, Mapping[str, AppliedThreshold]], given: _Input) -> Analysis:
     findings: list[Finding] = []
+    ran = []
     skipped = []
     for rule in rules:
         missing = tuple(signal for signal in SIGNALS if signal in rule.signals and signal not in given.signals)
         if missing:
             skipped.append(SkippedRule(rule.rule_id, rule.rule_version, missing))
             continue
+        ran.append(RuleRun(rule.rule_id, rule.rule_version, applied[rule.rule_id]))
         values = {name: threshold.value for name, threshold in applied[rule.rule_id].items()}
         rows: Iterable[Mapping[str, Any]]
         if rule.check is not None:
@@ -244,7 +269,7 @@ def _run(rules: Sequence[Rule], applied: Mapping[str, Mapping[str, AppliedThresh
         rule_findings = [_finding(rule, row, applied[rule.rule_id], given) for row in rows]
         ids = [finding.finding_id for finding in rule_findings]
         if len(set(ids)) != len(ids):
-            raise ValueError(f'rule {rule.rule_id} gave two findings for one scope: {sorted(ids)}')
+            raise InvalidRuleError(f'rule {rule.rule_id} gave two findings for one scope: {sorted(ids)}', field='rule')
         findings.extend(rule_findings)
     findings.sort(
         key=lambda finding: (
@@ -254,17 +279,21 @@ def _run(rules: Sequence[Rule], applied: Mapping[str, Mapping[str, AppliedThresh
             finding.finding_id,
         )
     )
-    return Analysis(given.app_id, given.signals, tuple(findings), tuple(skipped))
+    return Analysis(given.app_id, given.signals, tuple(ran), tuple(findings), tuple(skipped))
 
 
 def _finding(rule: Rule, row: Mapping[str, Any], applied: Mapping[str, AppliedThreshold], given: _Input) -> Finding:
     values = dict(row)
     base_severity = values.pop('severity', None)
     if base_severity not in SEVERITIES:
-        raise ValueError(f'rule {rule.rule_id} gave a finding with severity {base_severity!r}, not one of {", ".join(SEVERITIES)}')
+        raise InvalidRuleError(
+            f'rule {rule.rule_id} gave a finding with severity {base_severity!r}, not one of {", ".join(SEVERITIES)}', field='rule'
+        )
     confidence = values.pop('confidence', 'high')
     if confidence not in CONFIDENCES:
-        raise ValueError(f'rule {rule.rule_id} gave a finding with confidence {confidence!r}, not one of {", ".join(CONFIDENCES)}')
+        raise InvalidRuleError(
+            f'rule {rule.rule_id} gave a finding with confidence {confidence!r}, not one of {", ".join(CONFIDENCES)}', field='rule'
+        )
     impact = _plain(values.pop('impact_seconds', None))
     reason = values.pop('confidence_reason', None)
     scope = _scope({key: values.pop(key) for key in list(values) if key in _SCOPE_FIELDS}, given)
@@ -279,9 +308,11 @@ def _finding(rule: Rule, row: Mapping[str, Any], applied: Mapping[str, AppliedTh
         evidence[f'{share_level}_wall_share'] = share
     fields = {**scope.to_json(), **evidence_json(evidence)}
     try:
-        title = rule.title.format(**fields)
+        title = _TITLE.format(rule.title, **fields)
     except (KeyError, IndexError, ValueError, TypeError) as error:
-        raise ValueError(f'rule {rule.rule_id} gave a finding its title {rule.title!r} cannot be written from: {error!r}') from None
+        raise InvalidRuleError(
+            f'rule {rule.rule_id} gave a finding its title {rule.title!r} cannot be written from: {error!r}', field='rule'
+        ) from None
     return Finding(
         finding_id=f'{rule.rule_id}:{scope.key(rule.scope)}',
         rule_id=rule.rule_id,
@@ -320,13 +351,31 @@ def _evidence(rule: Rule, key: str, value: Any) -> Evidence:
         items = None
         numeric = _numeric(value)
     if numeric and not key.endswith(UNIT_SUFFIXES):
-        raise ValueError(f'rule {rule.rule_id} gave numeric evidence {key!r}, whose name must end in its unit: {", ".join(UNIT_SUFFIXES)}')
+        raise InvalidRuleError(
+            f'rule {rule.rule_id} gave numeric evidence {key!r}, whose name must end in its unit: {", ".join(UNIT_SUFFIXES)}', field='rule'
+        )
     for item in items if items is not None else (value,):
         if item is not None and not isinstance(item, bool | int | float | str):
-            raise ValueError(f'rule {rule.rule_id} gave evidence {key!r} as {type(item).__name__}, not a number, string, boolean or null')
+            raise InvalidRuleError(
+                f'rule {rule.rule_id} gave evidence {key!r} as {type(item).__name__}, not a number, string, boolean or null', field='rule'
+            )
         if isinstance(item, float) and not math.isfinite(item):
-            raise ValueError(f'rule {rule.rule_id} gave evidence {key!r} as {item}, which JSON cannot hold')
+            raise InvalidRuleError(f'rule {rule.rule_id} gave evidence {key!r} as {item}, which JSON cannot hold', field='rule')
     return items if items is not None else value
+
+
+class _TitleFormatter(string.Formatter):
+    """`str.format`, with `bytes` and `duration` specs that print a value as the Spark UI does."""
+
+    def format_field(self, value: Any, format_spec: str) -> str:
+        if format_spec == 'bytes':
+            return bytes_to_string(int(value))
+        if format_spec == 'duration':
+            return format_duration(int(value))
+        return str(super().format_field(value, format_spec))
+
+
+_TITLE = _TitleFormatter()
 
 
 def _plain(value: Any) -> Any:

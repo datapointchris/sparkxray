@@ -14,6 +14,7 @@ from typing import Any
 from typing import Literal
 
 from sparkxray.cache_directory import PARTIAL_MARK
+from sparkxray.errors import InvalidRuleError
 from sparkxray.rules.rule import ScopeLevel
 from sparkxray.rules.rule import Severity
 from sparkxray.rules.rule import ThresholdUnit
@@ -25,6 +26,8 @@ CONFIDENCES: tuple[Confidence, ...] = ('high', 'medium', 'low')
 ThresholdLayer = Literal['default', 'file', 'sdk', 'flag']
 # Every numeric evidence key ends in one of these, so a value always names its unit.
 UNIT_SUFFIXES = ('_ms', '_ns', '_bytes', '_records', '_rows', '_count', '_share', '_ratio', '_hours', '_seconds', '_percent', '_id')
+# The key of `findings.parquet`'s metadata that holds the analysis document, its findings left out.
+ANALYSIS_METADATA_KEY = 'sparkxray.analysis'
 
 Evidence = bool | int | float | str | None | tuple[bool | int | float | str | None, ...]
 
@@ -135,11 +138,14 @@ def evidence_json(evidence: Mapping[str, Evidence]) -> dict[str, Any]:
     return {key: [_number(item) for item in value] if isinstance(value, tuple) else _number(value) for key, value in evidence.items()}
 
 
-def write_findings_parquet(findings: Sequence[Finding], path: Path) -> None:
+def write_findings_parquet(findings: Sequence[Finding], analysis: Mapping[str, Any], path: Path) -> None:
     """Write findings to `path` as one row each, replacing what was there only once the file is whole.
 
     The scope's ids are columns of their own, so a query joins findings to the tables on
-    `stage_id` or `sql_execution_id`. `evidence` and `thresholds` are JSON text.
+    `stage_id` or `sql_execution_id`. `evidence` and `thresholds` are JSON text. `analysis` is the
+    analysis document without its findings, kept as JSON in the file's key-value metadata under
+    `ANALYSIS_METADATA_KEY`. So the file says which rules ran, under which thresholds, even when
+    it holds no row.
     """
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -170,7 +176,8 @@ def write_findings_parquet(findings: Sequence[Finding], path: Path) -> None:
         'remediation': (pa.list_(pa.string()), [row['remediation'] for row in rows]),
         'docs': (pa.list_(pa.string()), [row['docs'] for row in rows]),
     }
-    schema = pa.schema([(name, kind) for name, (kind, _) in columns.items()])
+    metadata = {ANALYSIS_METADATA_KEY: json.dumps(analysis, sort_keys=True)}
+    schema = pa.schema([(name, kind) for name, (kind, _) in columns.items()], metadata=metadata)
     table = pa.table({name: pa.array(values, type=kind) for name, (kind, values) in columns.items()}, schema=schema)
     partial = path.with_name(f'{path.name}{PARTIAL_MARK}{os.getpid()}-{secrets.token_hex(4)}')
     try:
@@ -189,5 +196,5 @@ def _number(value: Any) -> Any:
 
 def _required(value: int | str | None, name: str, level: ScopeLevel) -> int | str:
     if value is None:
-        raise ValueError(f'a {level} finding needs {name} in its scope')
+        raise InvalidRuleError(f'a {level} finding needs {name} in its scope', field='rule')
     return value

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import tomllib
 from collections.abc import Iterable
@@ -50,7 +51,7 @@ def resolve_thresholds(
     every_rule: Sequence[Rule],
     *,
     sdk: Mapping[str, Mapping[str, object]] | None = None,
-    file: Path | None = None,
+    file: str | os.PathLike[str] | None = None,
     flags: Iterable[str] = (),
 ) -> dict[str, dict[str, AppliedThreshold]]:
     """The applied thresholds of each rule in `rules`, by rule id and threshold name.
@@ -61,10 +62,16 @@ def resolve_thresholds(
     known = {rule.rule_id: rule for rule in every_rule}
     overrides: dict[tuple[str, str], tuple[float, ThresholdLayer]] = {}
     if file is not None:
-        for rule_id, name, raw in _file_overrides(file, known):
+        for rule_id, name, raw in _file_overrides(Path(file), known):
             overrides[rule_id, name] = (_value(raw, known[rule_id], name), 'file')
     for rule_id, values in (sdk or {}).items():
         _rule(rule_id, known, field=f'threshold.{rule_id}')
+        if not isinstance(values, Mapping):
+            raise ThresholdValueError(
+                f'the thresholds given for {rule_id} are {values!r}, not a mapping of threshold names to values',
+                field=f'threshold.{rule_id}',
+                valid=("{'stage.shuffle-skew': {'ratio': 8}}",),
+            )
         for name, raw in values.items():
             overrides[rule_id, name] = (_value(raw, known[rule_id], name), 'sdk')
     for flag in flags:
@@ -123,7 +130,7 @@ def _flag(flag: str, known: Mapping[str, Rule]) -> tuple[str, str, str]:
     rule_id, dot, name = key.strip().rpartition('.')
     if not equals or not dot:
         raise ThresholdValueError(
-            f'--threshold {flag!r} is not <rule_id>.<threshold>=<value>',
+            f'the threshold override {flag!r} is not <rule_id>.<threshold>=<value>',
             field=f'threshold.{key.strip()}',
             valid=('stage.shuffle-skew.ratio=8',),
         )
@@ -133,7 +140,7 @@ def _flag(flag: str, known: Mapping[str, Rule]) -> tuple[str, str, str]:
 
 def _rule(rule_id: str, known: Mapping[str, Rule], *, field: str) -> Rule:
     if rule_id not in known:
-        raise UnknownRuleError(f'no rule is called {rule_id!r}', field=field, valid=sorted(known), hint='sparkxray rules list')
+        raise UnknownRuleError(f'no rule is called {rule_id!r}', field=field, valid=sorted(known))
     return known[rule_id]
 
 
@@ -142,10 +149,7 @@ def _value(raw: object, rule: Rule, name: str) -> float:
     if threshold is None:
         names = [known.name for known in rule.thresholds]
         raise UnknownThresholdError(
-            f'{rule.rule_id} has no threshold called {name!r}',
-            field=f'threshold.{rule.rule_id}.{name}',
-            valid=names,
-            hint=f'sparkxray rules show {rule.rule_id}',
+            f'{rule.rule_id} has no threshold called {name!r}', field=f'threshold.{rule.rule_id}.{name}', valid=names
         )
     return parse_threshold_value(raw, threshold, field=f'threshold.{rule.rule_id}.{name}')
 
@@ -153,8 +157,5 @@ def _value(raw: object, rule: Rule, name: str) -> float:
 def _bad_value(raw: object, threshold: Threshold, field: str) -> ThresholdValueError:
     named = field.removeprefix('threshold.')
     return ThresholdValueError(
-        f'{named} takes {_TAKES[threshold.unit]}, and {raw!r} is not one',
-        field=field,
-        valid=_EXAMPLES[threshold.unit],
-        hint=f'sparkxray rules show {named.rpartition(".")[0]}',
+        f'{named} takes {_TAKES[threshold.unit]}, and {raw!r} is not one', field=field, valid=_EXAMPLES[threshold.unit]
     )

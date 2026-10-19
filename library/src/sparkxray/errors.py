@@ -109,6 +109,21 @@ class UnknownThresholdError(SparkxrayError):
 class ThresholdValueError(SparkxrayError):
     code = 'E-RULE-003'
     raised_when = (
-        "a threshold value does not parse or carries another unit than the threshold's, or the thresholds file is missing or not TOML"
+        "a threshold value does not parse or carries another unit than the threshold's, a rule's thresholds are not a mapping, "
+        'or the thresholds file is missing or not TOML'
     )
+    exit_code = 2
+
+
+class InvalidRuleError(SparkxrayError):
+    code = 'E-RULE-004'
+    raised_when = (
+        'a rule is malformed or its id is taken, or a finding it returned breaks the finding contract; names the rule and what is wrong'
+    )
+    exit_code = 2
+
+
+class NotAnalyzedError(SparkxrayError):
+    code = 'E-RULE-005'
+    raised_when = "a log's findings were read before any analysis of it wrote them"
     exit_code = 2

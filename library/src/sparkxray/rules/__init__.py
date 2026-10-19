@@ -1,6 +1,7 @@
 """Heuristic rules over a Spark run, and the findings they report in a versioned shape."""
 
 from sparkxray.rules.analysis import Analysis
+from sparkxray.rules.analysis import RuleRun
 from sparkxray.rules.analysis import SkippedRule
 from sparkxray.rules.analysis import analyze
 from sparkxray.rules.analysis import analyze_plan
@@ -22,6 +23,7 @@ __all__ = [
     'FindingScope',
     'Rule',
     'RuleContext',
+    'RuleRun',
     'Severity',
     'Signal',
     'SkippedRule',

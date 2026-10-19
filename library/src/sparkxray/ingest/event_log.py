@@ -88,7 +88,7 @@ class EventLog:
         *,
         rules: Iterable[str] | None = None,
         thresholds: Mapping[str, Mapping[str, object]] | None = None,
-        threshold_file: Path | None = None,
+        threshold_file: str | os.PathLike[str] | None = None,
         threshold_flags: Iterable[str] = (),
     ) -> Analysis:
         """Run the rules over this log, as `sparkxray.rules.analyze` runs them."""

@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "sparkxray findings",
-  "description": "What one analysis of a Spark run found: its findings, from the most wall time a fix could recover to the least, and the rules it skipped because the input lacked a signal they read. A field removed or a meaning changed raises schema_version, and a field added does not.",
+  "description": "What one analysis of a Spark run found: the rules it ran with the thresholds each applied, its findings, from the most wall time a fix could recover to the least, and the rules it skipped because the input lacked a signal they read. findings.parquet keeps this document without findings in its key-value metadata, under sparkxray.analysis. A field removed or a meaning changed raises schema_version, and a field added does not.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "app_id", "signals", "findings", "skipped"],
+  "required": ["schema_version", "app_id", "signals", "rules_run", "findings", "skipped"],
   "properties": {
     "schema_version": {"const": 1},
     "app_id": {"type": ["string", "null"], "description": "The application analyzed. Null for a plan analyzed alone, with no log."},
@@ -13,6 +13,11 @@
       "uniqueItems": true,
       "description": "What the analyzed input held. A rule reading anything else is in skipped.",
       "items": {"$ref": "#/$defs/signal"}
+    },
+    "rules_run": {
+      "type": "array",
+      "description": "Every rule that ran, found something or not, with the thresholds it applied. So a rule an override silenced reads as silenced, not as clean.",
+      "items": {"$ref": "#/$defs/rule_run"}
     },
     "findings": {
       "type": "array",
@@ -102,9 +107,19 @@
       "properties": {
         "value": {"type": "number", "minimum": 0},
         "unit": {"enum": ["x", "bytes", "ms", "count", "rows", "fraction"]},
-        "source": {"enum": ["default", "file", "sdk", "flag"], "description": "The layer that set value: the rule's default, a thresholds file, the SDK's thresholds mapping, or a --threshold flag. A later layer in that list overrides an earlier one."},
+        "source": {"enum": ["default", "file", "sdk", "flag"], "description": "The layer that set value: the rule's default, a thresholds file, the SDK's thresholds mapping, or a <rule_id>.<name>=<value> override string. A later layer in that list overrides an earlier one."},
         "default": {"type": "number", "minimum": 0, "description": "The rule's own value."},
         "default_source": {"type": "string", "description": "Where the rule's own value comes from."}
+      }
+    },
+    "rule_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "rule_version", "thresholds"],
+      "properties": {
+        "rule_id": {"type": "string"},
+        "rule_version": {"type": "integer", "minimum": 1},
+        "thresholds": {"type": "object", "additionalProperties": {"$ref": "#/$defs/applied_threshold"}}
       }
     },
     "skipped_rule": {

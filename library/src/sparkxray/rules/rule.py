@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
 
+from sparkxray.errors import InvalidRuleError
 from sparkxray.plan.tree import NumberedNode
 from sparkxray.plan.tree import Plan
 
@@ -71,8 +72,9 @@ class Rule:
 
     `rule_id` is `<prefix>.<kebab-name>` and never changes meaning; a rename is a breaking change.
     `rule_version` starts at 1 and rises whenever what the rule reports changes. `title` is a
-    `str.format` template over a finding's scope ids and evidence. `scope` names what one finding
-    is about, and so which ids its `finding_id` is built from.
+    `str.format` template over a finding's scope ids and evidence, where `{key:bytes}` prints a
+    byte count and `{key:duration}` a millisecond duration as the Spark UI prints them. `scope`
+    names what one finding is about, and so which ids its `finding_id` is built from.
 
     `sql` runs in DuckDB over the tables, and reads each threshold as a `$name` parameter. `check`
     receives a `RuleContext`. Either returns one mapping per finding. The keys `severity`,
@@ -120,7 +122,7 @@ class Rule:
         if self.rule_version < 1:
             problems.append('its rule_version starts at 1')
         if problems:
-            raise ValueError(f'rule {self.rule_id!r} is malformed: {"; ".join(problems)}')
+            raise InvalidRuleError(f'rule {self.rule_id!r} is malformed: {"; ".join(problems)}', field='rule')
 
     def threshold(self, name: str) -> Threshold | None:
         return next((threshold for threshold in self.thresholds if threshold.name == name), None)

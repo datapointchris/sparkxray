@@ -43,7 +43,7 @@ Glue 5.0 and 5.1 run Python 3.11. So nothing under `library/` may use what arriv
 ```bash
 uv venv --python 3.11 /tmp/sparkxray-311
 uv pip install --python /tmp/sparkxray-311 --resolution lowest-direct ./library
-uv pip install --python /tmp/sparkxray-311 pytest
+uv pip install --python /tmp/sparkxray-311 pytest jsonschema
 /tmp/sparkxray-311/bin/python -m compileall -q library/src
 uv run --only-group dev mypy --python-version 3.11 --python-executable /tmp/sparkxray-311/bin/python library/src
 /tmp/sparkxray-311/bin/python -m pytest library

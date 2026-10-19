@@ -77,7 +77,13 @@ Either returns one mapping per finding, and the engine sorts its keys three ways
 
 A numeric evidence key must end in its unit, such as `_bytes`, `_ms`, `_records`, `_rows`,
 `_count`, `_share` or `_ratio`. The engine refuses a finding that breaks this, and the findings
-schema does too. So a rule registered by other code is held to the same shape.
+schema does too. So a rule registered by other code is held to the same shape. A malformed rule,
+a taken id, or a finding that breaks the contract is `E-RULE-004`, naming the rule.
+
+A rule's `title` is a `str.format` template over the finding's scope ids and evidence. In it,
+`{key:bytes}` prints a byte count as the Spark UI's `Utils.bytesToString` does, `702.5 MiB`, and
+`{key:duration}` prints milliseconds as its `UIUtils.formatDuration` does, `26 s`. So a title reads
+the way the Stages tab shows the same number.
 
 ## A finding is named by its rule and its scope
 
@@ -110,7 +116,7 @@ A threshold's value comes from one of four layers, each overriding the one befor
 1. the rule's default;
 2. a TOML file, with one `["<rule_id>"]` table per rule;
 3. the SDK's `thresholds` mapping;
-4. a `<rule_id>.<name>=<value>` flag, as the command line's `--threshold` takes it.
+4. a `<rule_id>.<name>=<value>` override string, passed in `threshold_flags`.
 
 Every finding lists each of its rule's thresholds, with the value applied, the layer that set it,
 and the default beside it. So a finding judged against an override says so.
@@ -128,14 +134,28 @@ passes silently.
 
 `analyze` writes `findings.parquet` into the log's table directory, and `tables.findings` reads it.
 A finding's scope ids are columns of their own, so a query joins findings to `stages` on
-`stage_id`. `evidence` and `thresholds` are JSON text. The file holds the last analysis's findings
-only, under whatever thresholds it applied.
+`stage_id`. `evidence` and `thresholds` are JSON text. Reading `findings` before any analysis is
+`E-RULE-005`, because an empty view would read the same as a clean log.
+
+The file holds the last analysis only. A finding a threshold silenced leaves no row, and neither
+does a rule that never ran. So the file's key-value metadata keeps the analysis document without
+its findings, under `sparkxray.analysis`. It names the signals read, every rule run with the
+thresholds it applied, and every rule skipped. `tables.stored_analysis()` returns it, and DuckDB's
+`parquet_kv_metadata` reads it. It is written in the same file as the rows, so the two never
+disagree.
+
+*Rejected:* a sidecar `analysis.json`. Two files are replaced one at a time, and a reader between
+the two renames gets one analysis's rules beside another's findings.
 
 ## The seed rules measure what the Spark UI shows
 
-`stage.shuffle-skew` reads the shuffle-reading tasks of `tasks_effective`. It takes the median at
-sorted index n / 2, as the Stages tab's summary metrics do. DuckDB's `median` interpolates and its
-`quantile_disc` takes the lower middle, so either would print a ratio the UI does not.
+`stage.shuffle-skew` reads every task of `tasks_effective` in each stage that read a shuffle, the
+tasks that read an empty partition included. The Stages tab's summary metrics and AQE's skew join
+both take their median over every task. So where most partitions are empty the median is 0, and
+the size floor alone decides, as it does for AQE. The ratio is then null rather than infinite.
+
+It takes the median at sorted index n / 2, as the Stages tab does. DuckDB's `median` interpolates
+and its `quantile_disc` takes the lower middle, so either would print a number the UI does not.
 
 Its `aqe_skew_join_enabled` is AQE and its skew join both on. Each comes from the execution's own
 `modified_configs`, then the application's Spark properties, then the release's default: AQE is on
