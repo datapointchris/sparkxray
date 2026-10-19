@@ -80,15 +80,18 @@ A list keeps each row on one line. On a narrow terminal its longest text ends in
 narrower still each row prints as a block of field and value. A `show` command and `--json`
 print every value whole.
 
-`findings list` exits 3 when a finding is at or above `--fail-on`, which defaults to `high`. It
-exits 2 on a usage error and 0 otherwise. So a CI step gates on the severity it names:
+`findings list` exits 0 when no finding is at or above `--fail-on`, which defaults to `high`. It
+exits 3 when one is, or when the log cannot be read, and 2 on a usage error. So a CI step gates
+on the severity it names:
 
 ```bash
 sparkxray findings list "$LOG" --fail-on critical
 ```
 
-`--min-severity` and `--limit` narrow what is listed, never what gates. `--json` carries the
-verdict as `"gate": {"fail_on": "high", "passed": false, "blocking": ["stage.shuffle-skew:s4"]}`.
+`--min-severity` and `--limit` narrow what is listed, never what gates. Whenever the log was read,
+`--json` carries the verdict as
+`"gate": {"fail_on": "high", "passed": false, "blocking": ["stage.shuffle-skew:s4"]}`. So an exit 3
+with nothing on stdout means the log was not read.
 
 ## Open an event log from a path or S3
 

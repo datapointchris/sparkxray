@@ -36,16 +36,21 @@ ends with the run.
 ## The gate judges every finding, whatever the listing shows
 
 `Analysis.gate(fail_on)` names each finding at or above a severity, by `finding_id`. `findings
-list` exits 3 when one is, 2 on a usage error, and 0 otherwise. So a CI job gates on the severity
-it names, and a scheduled report stays green while it lists medium findings.
+list` exits 0 when none is, 3 when one is or the log cannot be read, and 2 on a usage error. So a
+CI job gates on the severity it names, and a scheduled report stays green while it lists medium
+findings.
+
+A failed gate and an unreadable log share exit 3, because each needs a person to look. Neither is
+a difference the tool could repair on its own, which is what a separate exit 1 would mean.
 
 The gate is judged before `--min-severity` and `--limit` narrow the list. So `-n 0` prints no
 finding and still exits 3 on a high one. A gate judged after narrowing would pass a run by hiding
 what failed it.
 
-`--json` carries the gate beside the findings, as the findings schema's optional `gate`. A caller
-reads the verdict there rather than inferring it from the exit status. A severity outside the
-ladder is `E-RULE-006`, listing the five.
+`--json` carries the gate beside the findings whenever the log was read, as the findings schema's
+optional `gate`. A caller reads the verdict there rather than inferring it from the exit status.
+An exit 3 with no `gate` on stdout means the log was not read. A severity outside the ladder is
+`E-RULE-006`, listing the five.
 
 ## `impact_seconds` is wall time a fix could recover, and null where nobody can say
 
