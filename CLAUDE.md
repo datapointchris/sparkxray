@@ -27,6 +27,9 @@ benchmarks/parse/ the parse benchmark, run by hand
 - **The CLI holds no logic.** A command parses its arguments, calls one library function and
   renders the result. Anything worth testing lives in the library. The per-resource reads live in
   `sparkxray.summaries`, and all printing in `sparkxray_cli/render.py`.
+- **A rules module never imports `sparkxray.summaries` as it loads.** `summaries` imports
+  `tables.relations`, which imports `rules.findings`, so the import would cycle. SQL a rule and a
+  summary share lives in `tables/registry.py`, as `EXECUTOR_TIME_CTES` does.
 - **A library refusal reaches the terminal through the root group.** `SparkxrayGroup` in
   `sparkxray_cli/main.py` prints it on stderr and exits with the error's own `exit_code`. So a
   command never catches a `SparkxrayError` itself.

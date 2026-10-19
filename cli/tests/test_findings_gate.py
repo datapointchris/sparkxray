@@ -12,8 +12,9 @@ SKEWED_JOIN_LOG = Path(__file__).parents[2] / 'fixtures/logs/spark-3.5.9/local-1
 def test_findings_list_exits_3_at_or_above_fail_on_and_0_below(tmp_path: Path) -> None:
     runner = CliRunner(env={'XDG_CACHE_HOME': str(tmp_path)})
 
-    at_default = runner.invoke(app, ['findings', 'list', str(SKEWED_JOIN_LOG), '--json'])
-    at_critical = runner.invoke(app, ['findings', 'list', str(SKEWED_JOIN_LOG), '--json', '--fail-on', 'critical'])
+    skew_only = ['findings', 'list', str(SKEWED_JOIN_LOG), '--rule', 'stage.shuffle-skew', '--json']
+    at_default = runner.invoke(app, skew_only)
+    at_critical = runner.invoke(app, [*skew_only, '--fail-on', 'critical'])
 
     assert at_default.exit_code == 3, at_default.stderr
     gate = json.loads(at_default.stdout)['gate']

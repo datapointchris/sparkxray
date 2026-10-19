@@ -24,6 +24,7 @@ _LIST_COLUMNS = (
     'task_time_ms',
     'idle_share',
     'peak_jvm_heap_bytes',
+    'peak_memory_source',
     'remove_reason',
 )
 
@@ -32,7 +33,9 @@ _LIST_COLUMNS = (
 def list_executors(log: LogArgument, limit: LimitOption = None, as_json: JsonOption = False) -> None:
     """List the driver and every executor: lifetime, cores, memory, task time, idle share and peak heap.
 
-    The idle share is the part of an executor's core time, lifetime times cores, that no task ran in.
+    The idle share is the part of an executor's core time, lifetime times cores, that no task held,
+    each task holding spark.task.cpus cores. The peak heap's source says whether it came from
+    per-stage executor metrics or only from task-end polls.
     """
     rows = executor_summaries(open_tables(log), limit=limit)
     if as_json:

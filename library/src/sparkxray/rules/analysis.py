@@ -205,9 +205,7 @@ def analyze(
     A flag beats the SDK, the SDK beats the file, and the file beats the rule's default. Each
     applied value records the layer that set it.
     """
-    selected, every_rule = _selected(rules)
-    if rules is None:
-        selected = [rule for rule in selected if rule.signals <= _LOG_SIGNALS]
+    selected, every_rule = _selected(rules, feedable=_LOG_SIGNALS)
     applied = resolve_thresholds(selected, every_rule, sdk=thresholds, file=threshold_file, flags=threshold_flags)
     tables = log.tables
     plans: dict[int | None, Plan] = {execution_id: plan for execution_id, plan in tables.last_plans().items()}
@@ -281,32 +279,55 @@ def analyze_plan(
     )
 
 
-def _selected(rules: Iterable[str] | None) -> tuple[list[Rule], list[Rule]]:
+def _selected(rules: Iterable[str] | None, *, feedable: frozenset[Signal] = frozenset(SIGNALS)) -> tuple[list[Rule], list[Rule]]:
+    """The rules to run, each after the rules whose findings it reads, and every rule in the catalog.
+
+    With no `rules`, every rule runs whose signals are all `feedable`.
+    """
     every_rule = catalog()
-    if rules is None:
-        return every_rule, every_rule
     known = {rule.rule_id: rule for rule in every_rule}
-    wanted = {rules} if isinstance(rules, str) else set(rules)
-    for rule_id in sorted(wanted):
+    if rules is None:
+        wanted = {rule.rule_id for rule in every_rule if rule.signals <= feedable}
+    else:
+        wanted = {rules} if isinstance(rules, str) else set(rules)
+        for rule_id in sorted(wanted):
+            if rule_id not in known:
+                raise UnknownRuleError(f'no rule is called {rule_id!r}', field='rules', valid=sorted(known))
+    ordered: dict[str, Rule] = {}
+
+    def visit(rule_id: str) -> None:
+        if rule_id in ordered:
+            return
         if rule_id not in known:
-            raise UnknownRuleError(f'no rule is called {rule_id!r}', field='rules', valid=sorted(known))
-    return [known[rule_id] for rule_id in sorted(wanted)], every_rule
+            raise InvalidRuleError(f'a rule reads the findings of {rule_id!r}, which no rule is called', field='rule')
+        for prerequisite in known[rule_id].reads_findings_of:
+            visit(prerequisite)
+        ordered[rule_id] = known[rule_id]
+
+    for rule_id in sorted(wanted):
+        visit(rule_id)
+    return list(ordered.values()), every_rule
 
 
 def _run(rules: Sequence[Rule], applied: Mapping[str, Mapping[str, AppliedThreshold]], given: _Input) -> Analysis:
     findings: list[Finding] = []
+    by_rule: dict[str, tuple[Finding, ...]] = {}
+    lacking: dict[str, tuple[Signal, ...]] = {}
     ran = []
     skipped = []
     for rule in rules:
-        missing = tuple(signal for signal in SIGNALS if signal in rule.signals and signal not in given.signals)
+        needed = set(rule.signals).union(*(lacking.get(prerequisite, ()) for prerequisite in rule.reads_findings_of))
+        missing = tuple(signal for signal in SIGNALS if signal in needed and signal not in given.signals)
         if missing:
+            lacking[rule.rule_id] = missing
             skipped.append(SkippedRule(rule.rule_id, rule.rule_version, missing))
             continue
         ran.append(RuleRun(rule.rule_id, rule.rule_version, applied[rule.rule_id]))
         values = {name: threshold.value for name, threshold in applied[rule.rule_id].items()}
         rows: Iterable[Mapping[str, Any]]
         if rule.check is not None:
-            rows = rule.check(RuleContext(given.plans, given.numbered, given.node_metrics, values, given.tables))
+            read = {prerequisite: by_rule[prerequisite] for prerequisite in rule.reads_findings_of}
+            rows = rule.check(RuleContext(given.plans, given.numbered, given.node_metrics, values, given.tables, read))
         elif rule.sql is not None and given.tables is not None:
             relation = given.tables.query(rule.sql, values or None)
             rows = [dict(zip(relation.columns, row, strict=True)) for row in relation.fetchall()]
@@ -316,6 +337,7 @@ def _run(rules: Sequence[Rule], applied: Mapping[str, Mapping[str, AppliedThresh
         ids = [finding.finding_id for finding in rule_findings]
         if len(set(ids)) != len(ids):
             raise InvalidRuleError(f'rule {rule.rule_id} gave two findings for one scope: {sorted(ids)}', field='rule')
+        by_rule[rule.rule_id] = tuple(rule_findings)
         findings.extend(rule_findings)
     findings.sort(
         key=lambda finding: (

@@ -110,16 +110,25 @@ _EXECUTORS = Table(
           SELECT "Resource Profile Id" AS profile_id, "Executor Resource Requests"."memory"."Amount" AS memory_mib FROM events
           WHERE kind = 'SparkListenerResourceProfileAdded'
           QUALIFY row_number() OVER (PARTITION BY "Resource Profile Id" ORDER BY rowid DESC) = 1
+        ), stage_peaks AS (
+          SELECT "Executor ID" AS executor_id, max("Executor Metrics"."JVMHeapMemory") AS heap FROM events
+          WHERE kind = 'SparkListenerStageExecutorMetrics' GROUP BY "Executor ID"
+        ), task_peaks AS (
+          SELECT "Task Info"."Executor ID" AS executor_id, max("Task Executor Metrics"."JVMHeapMemory") AS heap FROM events
+          WHERE kind = 'SparkListenerTaskEnd' GROUP BY "Task Info"."Executor ID"
         ), ids AS (
           SELECT executor_id FROM added UNION SELECT executor_id FROM block_managers UNION SELECT executor_id FROM removed
         )
         SELECT ids.executor_id, added.added_at, added.info, removed.removed_at, removed.removed_reason,
-          block_managers.block_manager_host, block_managers.maximum_memory, block_managers.registered_at, profiles.memory_mib
+          block_managers.block_manager_host, block_managers.maximum_memory, block_managers.registered_at, profiles.memory_mib,
+          nullif(stage_peaks.heap, 0) AS stage_heap, nullif(task_peaks.heap, 0) AS task_heap
         FROM ids
         LEFT JOIN added USING (executor_id)
         LEFT JOIN removed USING (executor_id)
         LEFT JOIN block_managers USING (executor_id)
         LEFT JOIN profiles ON profiles.profile_id = added.info."Resource Profile Id"
+        LEFT JOIN stage_peaks USING (executor_id)
+        LEFT JOIN task_peaks USING (executor_id)
     """,
     columns=_columns(
         ('executor_id', 'VARCHAR', 'executor_id'),
@@ -133,6 +142,15 @@ _EXECUTORS = Table(
         ('remove_epoch_ms', 'BIGINT', 'removed_at'),
         ('remove_reason', 'VARCHAR', 'removed_reason'),
         ('is_driver', 'BOOLEAN', "executor_id = 'driver'"),
+        # The Executors tab's Peak JVM Memory OnHeap: the most heap any stage's or task's peaks saw.
+        # Stage peaks are written only under spark.eventLog.logStageExecutorMetrics, and a task's
+        # only where a poll landed while it ran. Spark writes 0 for a peak it never polled.
+        ('peak_jvm_heap_bytes', 'BIGINT', 'greatest(stage_heap, task_heap)'),
+        (
+            'peak_memory_source',
+            'VARCHAR',
+            "CASE WHEN stage_heap IS NOT NULL THEN 'stage_executor_metrics' WHEN task_heap IS NOT NULL THEN 'task_peaks' END",
+        ),
     ),
     order_by='is_driver DESC, try_cast(executor_id AS BIGINT), executor_id',
 )
@@ -492,6 +510,20 @@ SELECT start_epoch_ms, coalesce(end_epoch_ms, greatest(
   (SELECT max(end_epoch_ms) FROM jobs), (SELECT max(end_epoch_ms) FROM sql_executions))) AS end_epoch_ms
 FROM application
 """
+
+# Each executor's lifetime and the task time it ran, as common table expressions: `lifetimes`,
+# `task_totals`, and `task_cpus`, the cores each task holds. An executor never removed lives to the
+# run's end. Task time counts every attempt, failed and speculative ones included.
+EXECUTOR_TIME_CTES = f"""run AS ({RUN_SPAN_SQL}), task_cpus AS (
+  SELECT coalesce(max(try_cast(value AS BIGINT)) FILTER (WHERE key = 'spark.task.cpus'), 1) AS cpus
+  FROM environment WHERE section = 'spark'
+), task_totals AS (
+  SELECT executor_id, count(*) AS task_count, count(*) FILTER (WHERE failed) AS failed_task_count,
+    sum(duration_ms)::BIGINT AS task_time_ms
+  FROM tasks GROUP BY executor_id
+), lifetimes AS (
+  SELECT executors.*, coalesce(executors.remove_epoch_ms, run.end_epoch_ms) - executors.add_epoch_ms AS lifetime_ms FROM executors, run
+)"""
 
 # Each stage's and SQL execution's wall time, and its share of the run's. A stage runs from its
 # first attempt's submission to its last completion, or to its last task's finish where it never

@@ -16,6 +16,7 @@ from sparkxray.plan.tree import NumberedNode
 from sparkxray.plan.tree import Plan
 
 if TYPE_CHECKING:
+    from sparkxray.rules.findings import Finding
     from sparkxray.tables.relations import Tables
 
 Signal = Literal['plan', 'plan_metrics', 'plan_estimates', 'tasks', 'executors', 'environment', 'timeline']
@@ -56,7 +57,8 @@ class RuleContext:
     `Plan.numbered()`. A plan analyzed alone is keyed by its own execution id, which may be None.
     `node_metrics` gives each node's metric totals by name, keyed by execution id and node number,
     and is empty where nothing measured the plan. `thresholds` holds the values this analysis
-    applies, by name. `tables` is None where no log was analyzed.
+    applies, by name. `tables` is None where no log was analyzed. `findings` holds, by rule id, the
+    findings of each rule named in the rule's `reads_findings_of`.
     """
 
     plans: Mapping[int | None, Plan]
@@ -64,6 +66,7 @@ class RuleContext:
     node_metrics: Mapping[int | None, Mapping[int, Mapping[str, float]]]
     thresholds: Mapping[str, float]
     tables: Tables | None
+    findings: Mapping[str, tuple[Finding, ...]] = dc.field(default_factory=dict)
 
     def metrics(self, execution_id: int | None, number: int) -> Mapping[str, float]:
         """One node's metric totals by name, empty where none was measured."""
@@ -86,6 +89,10 @@ class Rule:
     `plan_node_id`, `plan_node_label`, `stage_id`, `stage_attempt`, `job_id`, `executor_id` and
     `worst_task_ids`, fill the finding's own fields. Every other key is evidence, named with its
     unit. `severity` is the rule's grade before the engine weighs the scope's share of the run.
+
+    `reads_findings_of` names the rules whose findings a `check` reads from `RuleContext.findings`.
+    Selecting the rule selects them too, and they run first and report as any rule does. A rule
+    whose own signals are present still skips when one of theirs is missing.
     """
 
     rule_id: str
@@ -100,6 +107,7 @@ class Rule:
     sql: str | None = None
     check: Callable[[RuleContext], Iterable[Mapping[str, Any]]] | None = None
     rule_version: int = 1
+    reads_findings_of: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         problems = []
@@ -125,6 +133,10 @@ class Rule:
             problems.append(f'its severity ladder keys must be some of {", ".join(SEVERITIES)}')
         if self.rule_version < 1:
             problems.append('its rule_version starts at 1')
+        if self.reads_findings_of and self.sql is not None:
+            problems.append("only a check reads other rules' findings")
+        if self.rule_id in self.reads_findings_of:
+            problems.append('it cannot read its own findings')
         if problems:
             raise InvalidRuleError(f'rule {self.rule_id!r} is malformed: {"; ".join(problems)}', field='rule')
 
@@ -144,4 +156,5 @@ class Rule:
             'remediation': list(self.remediation),
             'docs': list(self.docs),
             'lesson': self.lesson,
+            'reads_findings_of': list(self.reads_findings_of),
         }

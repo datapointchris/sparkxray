@@ -258,7 +258,9 @@ So after a stage retry, its totals can fall short of the same metric summed over
 | `block_updates` | `spark.eventLog.logBlockUpdates.enabled` |
 | `process_tree_metrics` | `spark.executor.processTreeMetrics.enabled` |
 
-Without stage executor metrics, each task's peaks are the log's only memory figures. Without
+Without stage executor metrics, each task's peaks are the log's only memory figures. So an
+executor's `peak_jvm_heap_bytes` is the larger of its stage and task peaks, and
+`peak_memory_source` says which it had. Without
 process-tree metrics, `peak_python_rss_bytes` is null. Spark writes 0 for a metric it never
 measured, and the table does not pass that off as a measurement.
 
@@ -291,8 +293,8 @@ weighed by.
 
 An executor's task time is its tasks' summed duration, which Spark sums too. Spark's Executors tab
 then shows the driver's task time as the application's run time, and its GC time as the driver
-JVM's own. `task_time_ms` keeps the tasks' sum, because the idle share, 1 − task time ÷
-(lifetime × cores), needs the time tasks held cores.
+JVM's own. `task_time_ms` keeps the tasks' sum, because the idle share needs the time tasks held cores. It is
+1 − task time × `spark.task.cpus` ÷ (lifetime × cores), since each task holds that many cores.
 
 A SQL execution's operator counts read its last plan version, as the rules do. A stage a job
 planned but never ran is what the Spark UI lists as skipped, and no summary holds it.

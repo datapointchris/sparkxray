@@ -56,14 +56,20 @@ An exit 3 with no `gate` on stdout means the log was not read. A severity outsid
 
 ## `impact_seconds` is wall time a fix could recover, and null where nobody can say
 
-| Rule family | `impact_seconds` |
+| Rule | `impact_seconds` |
 | --- | --- |
-| skew | the slowest task minus the median task, on the stage's critical path |
-| spill | the spilling tasks' run time × (disk spill ÷ (shuffle read + input)), capped at stage wall time |
-| tiny tasks, scheduler delay, deserialization | the summed overhead ÷ the stage's concurrent slots |
-| driver gaps | the gap lengths |
-| retry waste | the failed attempts' run time ÷ concurrent slots |
-| plan-only rules | null |
+| `stage.task-skew` | the slowest task's run time minus the median task's |
+| `stage.shuffle-skew`, `stage.spill-skew` | the slowest task's duration minus the median task's |
+| `stage.spill` | the spilling tasks' run time × (disk spill ÷ (shuffle read + input)), capped at stage wall time |
+| `stage.tiny-tasks` | the tasks' summed duration less their run time, ÷ the stage's concurrent slots |
+| `stage.scheduler-delay` | the summed scheduler delay ÷ concurrent slots |
+| `stage.deserialization` | the summed deserialization time ÷ concurrent slots |
+| `stage.retry-waste` | the failed attempts' run time ÷ concurrent slots |
+| `app.driver-gaps` | the gaps' summed length |
+| every other rule | null |
+
+A stage's concurrent slots are its task count or the cores of the executors that ran its tasks,
+whichever is fewer.
 
 Findings sort by `impact_seconds`, largest first and nulls last, then by severity.
 
@@ -86,9 +92,28 @@ Rule ids are dotted by the evidence they read:
 | --- | --- |
 | `plan.` | plan nodes, and their metrics where present |
 | `stage.` | effective tasks and stages |
-| `executor.` | executors and task memory peaks |
+| `executor.` | executors, their memory peaks and their memory settings |
 | `app.` | jobs, stages and executors as a timeline |
 | `config.` | the environment, against other findings |
+
+## A rule may read another rule's findings, and that rule runs first
+
+A Python rule names the rules whose findings it reads in `reads_findings_of`. Its context's
+`findings` holds them by rule id. Selecting the rule selects those it reads, and they run first
+and report as any rule does. Where one of theirs lacks a signal, the reading rule skips too.
+
+Only a Python rule may read findings, and no rule reads its own. `register` refuses a rule reading
+one the catalog does not hold. So the order is always known before the first rule runs.
+
+Two rules read findings:
+
+- `stage.oversized-partitions` leaves out the stages `stage.shuffle-skew` found. A skewed
+  partition is too large because it is skewed, and the skew finding names the fix.
+- `config.skew-join-off-with-skew` fires on each `stage.shuffle-skew` finding whose stage ran a
+  sort-merge or shuffled hash join, where AQE's skew join was off for that execution.
+
+*Rejected:* reading the findings table from SQL. It holds the last analysis, which need not have
+run the rule read, or run it with the same thresholds.
 
 ## A SQL rule reads its thresholds as parameters, and a Python rule reads the plans
 
@@ -135,11 +160,10 @@ A `Threshold` carries a `source` beside its default. Most defaults come from pub
   repeated-subtree sizes;
 - DataFlint's alert reducers, for wasted cores, memory provisioning and partition size, and for
   join sides, broadcast size, file sizes and filter length;
-- Dr. Elephant's Spark heuristics, for the GC ladder and task failure rates;
+- Dr. Elephant's `ExecutorGcHeuristic`, for the GC ladder;
 - Spark's own defaults, for the partition size at which AQE calls a partition skewed;
 - AWS Glue's observability docs, for the skewness score;
-- kubeflow's Spark tools, for spill and GC;
-- Sparklens, for the executor simulation.
+- the Databricks Spark UI guide, for a driver gap of a minute and a job of a few seconds.
 
 A threshold no prior art supplies is marked `proposed`. `sparkxray rules show <rule id>` prints
 each threshold's source.
@@ -278,3 +302,38 @@ The Python worker's time shows in no operator metric, only in the stage's run ti
 Python UDF rules report presence. Their evidence names the stages running the UDF, and those
 stages' share of the run's task time. Spark 4 renamed several Python operators, and the rules read
 both releases' names.
+
+## A memory finding names where it read the heap's size and its peak
+
+An executor's peak is the most JVM heap any stage or task peak reported for it, as the Executors
+tab's Peak JVM Memory OnHeap shows it. Spark writes stage peaks only under
+`spark.eventLog.logStageExecutorMetrics`, which is off by default. Without them the peak is a
+task-end poll, which can miss the top. So `executor.memory-over` takes medium confidence there,
+and `config.event-log-incomplete` names the setting.
+
+The heap's size is the executor's resource profile memory, then `spark.executor.memory`, then
+Spark's 1 GiB default. A setting reads as Spark reads it, so a bare number is MiB. The driver's
+size comes from `spark.driver.memory` the same way. Each finding names both sources, as
+`peak_memory_source` and `executor_memory_source` or `driver_memory_source`.
+
+DataFlint's bars apply to the fullest non-driver executor. Over 95% of its heap is too little, and
+under 70% is too much. The suggestion is 20% over the heap that filled, or 20% over the peak.
+
+## Idle cores count the cores each task holds
+
+`executor.idle-cores` follows DataFlint: the share of executor core time, lifetime × cores, that
+no task held. A task holds `spark.task.cpus` cores, so two-core tasks keep a two-core executor
+busy. In local mode the driver runs the tasks, so the driver is counted instead. A Glue run's
+evidence adds the idle DPU-hours, at four cores to a DPU.
+
+## An executor's loss is reported unless it was ended on purpose
+
+`executor.lost` reports every executor removal but those Spark or the cluster manager meant:
+dynamic allocation's kill and decommission, and YARN's explicit termination and shutdown. Each
+cluster manager words the reason its own way. The exit code is read from YARN's `Exit status: N`,
+Kubernetes' `exit code N` and standalone's `exited with code N`.
+
+The loss is `high` where its reason or a task on the executor names running out of memory. That is
+an `OutOfMemoryError`, YARN's memory limit, or exit code 52, 137 or 143. Spark exits 52 on an
+`OutOfMemoryError`. 137 is SIGKILL, which a container's memory limit sends, and 143 is SIGTERM,
+which YARN sends first.
