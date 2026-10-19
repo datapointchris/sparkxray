@@ -1,4 +1,4 @@
-"""The sparkxray root command: the grammar, `--version`, and the resources under it."""
+"""The sparkxray root command and its `--version`."""
 
 import importlib.metadata
 import json
@@ -45,11 +45,4 @@ def main(
         typer.Option('--version', callback=version_callback, is_eager=True, help='Show the installed version and exit.'),
     ] = None,
 ) -> None:
-    """**sparkxray** reads a Spark event log and finds why the run was slow.
-
-    Commands take the shape `sparkxray RESOURCE VERB`. The resource is what you are looking
-    at, such as a log, its stages or its findings. The verb comes from one closed set and
-    means the same thing on every resource: `list` prints a set, `show` prints one record.
-
-    Run any partial command with no arguments, or with --help, to see what comes next.
-    """
+    """**sparkxray** reads a Spark event log and finds why the run was slow."""
