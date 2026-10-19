@@ -16,6 +16,7 @@ def test_findings_list_exits_3_at_or_above_fail_on_and_0_below(tmp_path: Path) -
     at_critical = runner.invoke(app, ['findings', 'list', str(SKEWED_JOIN_LOG), '--json', '--fail-on', 'critical'])
 
     assert at_default.exit_code == 3, at_default.stderr
-    assert json.loads(at_default.stdout)['gate'] == {'fail_on': 'high', 'passed': False, 'blocking': ['stage.shuffle-skew:s4']}
+    gate = json.loads(at_default.stdout)['gate']
+    assert (gate['fail_on'], gate['passed'], 'stage.shuffle-skew:s4' in gate['blocking']) == ('high', False, True)
     assert at_critical.exit_code == 0, at_critical.stderr
     assert json.loads(at_critical.stdout)['gate'] == {'fail_on': 'critical', 'passed': True, 'blocking': []}

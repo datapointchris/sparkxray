@@ -249,11 +249,17 @@ def analyze_plan(
 
     `node_metrics` gives each node's metric totals by name, keyed by its number in
     `plan.numbered()`. Without them only rules reading the plan alone run, and the rest are
-    skipped. The thresholds are set as `analyze` sets them. Nothing is written.
+    skipped. A plan read from `explain(mode='cost')` text holds the optimizer's estimates too,
+    which no log does. The thresholds are set as `analyze` sets them. Nothing is written.
     """
     selected, every_rule = _selected(rules)
     applied = resolve_thresholds(selected, every_rule, sdk=thresholds, file=threshold_file, flags=threshold_flags)
-    signals: frozenset[Signal] = frozenset({'plan', 'plan_metrics'} if node_metrics else {'plan'})
+    held: set[Signal] = {'plan'}
+    if node_metrics:
+        held.add('plan_metrics')
+    if plan.estimates:
+        held.add('plan_estimates')
+    signals = frozenset(held)
     return _run(
         selected,
         applied,
@@ -403,9 +409,9 @@ class _TitleFormatter(string.Formatter):
 
     def format_field(self, value: Any, format_spec: str) -> str:
         if format_spec == 'bytes':
-            return bytes_to_string(int(value))
+            return bytes_to_string(round(value))
         if format_spec == 'duration':
-            return format_duration(int(value))
+            return format_duration(round(value))
         return str(super().format_field(value, format_spec))
 
 

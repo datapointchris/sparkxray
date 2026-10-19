@@ -144,8 +144,9 @@ for execution_id, plan in last_plans(events).items():
 
 `last_plans` keeps each SQL execution's last plan, after adaptive query execution re-planned it.
 For an execution that never finished, as in a killed application, `is_final` is False.
-`parse_plan_text` reads `explain()` output. `normalize_label` rewrites a node's ids, so two builds
-of one query compare equal.
+`parse_plan_text` reads `explain()` output. From `explain(mode='cost')` it also reads the
+optimizer's size estimates into `plan.estimates`, which no event log carries. `normalize_label`
+rewrites a node's ids, so two builds of one query compare equal.
 
 ## Query a log's tables with SQL
 
@@ -242,7 +243,24 @@ min_bytes = "512MiB"
 
 `sparkxray.rules.analyze_plan` runs the rules over one plan, such as one read from `explain()`
 text, with no log. Only the rules reading a plan alone run, and `skipped` names what each other
-rule lacked. Other code adds its own rules with `sparkxray.rules.register`.
+rule lacked. A plan printed before it ran has no sizes. After an action,
+`explain(mode='formatted')` prints each finished query stage's measured size, which the join rules
+read. Simple and cost text print none. `plan.estimate-unreliable` runs on `explain(mode='cost')`
+text only. Other code adds its own rules with `sparkxray.rules.register`.
+
+```python
+import contextlib
+import io
+
+from sparkxray.plan import parse_plan_text
+from sparkxray.rules import analyze_plan
+
+printed = io.StringIO()
+with contextlib.redirect_stdout(printed):
+    df.explain(mode='cost')
+for finding in analyze_plan(parse_plan_text(printed.getvalue())).findings:
+    print(finding.finding_id, finding.title)
+```
 
 `findings.parquet` is written beside the tables, and holds the last analysis's findings.
 `log.tables.stored_analysis()` says which rules that analysis ran, under which thresholds, and
@@ -264,4 +282,6 @@ release.
 ## License
 
 MIT. The Apache Spark test logs under `fixtures/logs/apache-spark-events/` are copied from Apache
-Spark and stay under the Apache License 2.0, as `fixtures/NOTICE` records.
+Spark and stay under the Apache License 2.0, as `fixtures/NOTICE` records. Some of the rule
+catalog's wording is adapted from DataFlint and SparkDoctor, both under the Apache License 2.0, as
+`library/NOTICE` records.

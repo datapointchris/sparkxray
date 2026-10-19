@@ -39,8 +39,8 @@
   },
   "$defs": {
     "signal": {
-      "description": "plan: a physical plan. plan_metrics: its nodes' measured metrics. tasks: task metrics. executors: executor lifetimes and sizes. environment: the run's configuration. timeline: when stages ran.",
-      "enum": ["plan", "plan_metrics", "tasks", "executors", "environment", "timeline"]
+      "description": "plan: a physical plan. plan_metrics: its nodes' measured metrics. plan_estimates: the optimizer's size estimates, which only explain(mode='cost') text prints and no event log carries. tasks: task metrics. executors: executor lifetimes and sizes. environment: the run's configuration. timeline: when stages ran.",
+      "enum": ["plan", "plan_metrics", "plan_estimates", "tasks", "executors", "environment", "timeline"]
     },
     "severity": {"enum": ["info", "low", "medium", "high", "critical"]},
     "evidence_value": {
@@ -60,8 +60,8 @@
         "schema_version": {"const": 1},
         "finding_id": {
           "type": "string",
-          "pattern": "^[a-z]+\\.[a-z0-9]+(-[a-z0-9]+)*:(app|e[0-9]+|(e[0-9]+)?n[0-9]+|s[0-9]+|x.+)$",
-          "description": "The rule id and a key naming the scope: app for the application, e0 for execution 0, e0n9 for its plan node 9, s4 for stage 4, x3 for executor 3. Analyzing the same log again gives the same ids."
+          "pattern": "^[a-z]+\\.[a-z0-9]+(-[a-z0-9]+)*:(app|plan|e[0-9]+|(e[0-9]+)?n[0-9]+|s[0-9]+|x.+)$",
+          "description": "The rule id and a key naming the scope: app for the application, e0 for execution 0, e0n9 for its plan node 9, s4 for stage 4, x3 for executor 3. A plan analyzed alone with no execution id is plan, and its node 9 is n9. Analyzing the same log again gives the same ids."
         },
         "rule_id": {"type": "string", "pattern": "^[a-z]+\\.[a-z0-9]+(-[a-z0-9]+)*$"},
         "rule_version": {"type": "integer", "minimum": 1, "description": "Rises whenever what the rule reports changes."},
@@ -73,7 +73,7 @@
           "type": "object",
           "description": "What the rule measured. A numeric value's key ends in its unit. stage_wall_share or sql_execution_wall_share is the scope's share of the application's wall time, which moved severity.",
           "patternProperties": {
-            "(_ms|_ns|_bytes|_records|_rows|_count|_share|_ratio|_hours|_seconds|_percent|_id)$": {"$ref": "#/$defs/evidence_value"}
+            "(_ms|_ns|_bytes|_records|_rows|_count|_share|_ratio|_hours|_seconds|_percent|_id|_ids)$": {"$ref": "#/$defs/evidence_value"}
           },
           "additionalProperties": {
             "anyOf": [
