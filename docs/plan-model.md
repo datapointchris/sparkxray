@@ -6,7 +6,7 @@
 | --- | --- |
 | `sparkPlanInfo` JSON | `SparkListenerSQLExecutionStart` and every `SparkListenerSQLAdaptiveExecutionUpdate` in an event log |
 | formatted text | `physicalPlanDescription` in the same events, and `df.explain(mode='formatted')` |
-| simple text | `df.explain()`, the physical plan section of `explain(mode='extended')`, and `physicalPlanDescription` in AWS Glue's event logs, which Glue writes in extended mode |
+| simple text | `df.explain()`, the physical plan section of `explain(mode='extended')` and `explain(mode='cost')`, and `physicalPlanDescription` in AWS Glue's event logs, which Glue writes in extended mode |
 | REST SQL graph | a History Server's `/api/v1/applications/{app}/sql/{id}` with details |
 
 `parse_plan_text` tells formatted text from simple text by its first tree line. So a caller never
@@ -118,6 +118,22 @@ Finished query stages print their measured size, as in `Statistics(sizeInBytes=8
 come from completed shuffles, not cost-model guesses, so plan rules can size a join's sides with no
 task metrics. Spark 4 prints `8.0 EiB` on `ResultQueryStage`. That is `Long.MaxValue` used as a
 placeholder, and the parser reads it as unknown.
+
+## Cost-mode text adds the optimizer's estimates, kept beside the tree
+
+`explain(mode='cost')` prints the optimized logical plan, each node ending in
+`Statistics(sizeInBytes=…)`, then the physical plan. `parse_plan_text` reads the physical plan as
+the tree, as for any text. It reads the logical plan into `Plan.estimates`, one `LogicalEstimate`
+per node in the order printed, each naming its parent and children. Every other form leaves
+`estimates` empty.
+
+An estimate is the optimizer's guess before anything ran, where a finished query stage's size was
+measured. A relation without table statistics is sized from its files. One the optimizer could not
+size prints `8.0 EiB`. That relation and every node above it have `size_bytes` None, because each
+of their estimates grew from the placeholder.
+
+The logical and physical trees share no node ids. One logical join can become an exchange, a sort
+and a join. So the estimates are a list beside the plan, never a field on its nodes.
 
 ## A truncated plan is flagged, never read as a smaller one
 
