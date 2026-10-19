@@ -23,10 +23,11 @@ from sparkxray.tables.relations import Tables
 
 @dc.dataclass(frozen=True, slots=True)
 class CachedLog:
-    """One log whose tables the installed sparkxray built, and the cache holds.
+    """One log the cache holds tables for, which opens by its app id.
 
     `location` is what `EventLog.open` takes to read the log from its source again: a path, or
-    an S3 URI. `cached_ms` is when the tables were built, and `tables_path` their directory.
+    an S3 URI. `cached_ms` is when its newest tables were built, and `tables_path` their directory.
+    An earlier sparkxray may have built them, and then the next open builds them again.
     """
 
     app_id: str
@@ -63,25 +64,24 @@ class CachedLog:
 
 
 def cached_logs(cache_dir: str | os.PathLike[str] | None = None, *, limit: int | None = None) -> list[CachedLog]:
-    """Every log the cache holds tables for, newest first, one per source, or the first `limit` of them.
-
-    Tables an older sparkxray built are left out, because this one would build them again.
-    """
+    """Every log the cache holds tables for, newest first, one per source, or the first `limit` of them."""
     if limit is not None and limit < 0:
         raise ValueError(f'limit is {limit}, and a list cannot keep fewer than 0 logs')
-    entries = _current(cache_root(cache_dir))[:limit]
+    entries = _newest_builds(cache_root(cache_dir))[:limit]
     names = _app_names([directory for directory, _ in entries])
     return [CachedLog._built(manifest, directory, names.get(directory)) for directory, manifest in entries]
 
 
-def cached_ingest(app_id: str, cache: Path) -> IngestManifest:
-    """The ingest manifest of the one cached log with this app id.
+def cached_ingest(app_id: str, cache: Path) -> IngestManifest | str:
+    """What opens the one cached log with this app id.
 
-    No such log raises `NoEventLogError`, listing the app ids the cache holds, and two raise
+    Tables the installed sparkxray built give their ingest manifest, so the log opens without its
+    source. Tables an earlier one built give the log's location instead, to be read again. No such
+    log raises `NoEventLogError`, listing the app ids the cache holds, and two raise
     `AmbiguousLocationError`, listing where each came from.
     """
-    entries = _current(cache)
-    matches = [manifest.ingest for _, manifest in entries if manifest.ingest.app_id == app_id]
+    entries = _newest_builds(cache)
+    matches = [manifest for _, manifest in entries if manifest.ingest.app_id == app_id]
     if not matches:
         held = sorted({manifest.ingest.app_id for _, manifest in entries})
         raise NoEventLogError(
@@ -91,14 +91,15 @@ def cached_ingest(app_id: str, cache: Path) -> IngestManifest:
         raise AmbiguousLocationError(
             f'{len(matches)} logs in the cache have the app id {app_id}',
             field='location',
-            valid=[_openable(ingest.source) for ingest in matches],
+            valid=[_openable(manifest.ingest.source) for manifest in matches],
             hint='pass one of the listed locations',
         )
-    return matches[0]
+    manifest = matches[0]
+    return manifest.ingest if manifest.key == tables_key(manifest.ingest) else _openable(manifest.ingest.source)
 
 
-def _current(cache: Path) -> list[tuple[Path, TablesManifest]]:
-    """The newest tables the installed sparkxray built for each source, newest first."""
+def _newest_builds(cache: Path) -> list[tuple[Path, TablesManifest]]:
+    """The newest tables built for each source, by any sparkxray, newest first."""
     newest: dict[str, tuple[float, Path, TablesManifest]] = {}
     for path in (cache / 'tables').glob('*/*/manifest.json'):
         try:
@@ -107,7 +108,7 @@ def _current(cache: Path) -> list[tuple[Path, TablesManifest]]:
         except (OSError, ValueError, KeyError, TypeError):
             continue  # being removed, or written by a sparkxray whose manifest this one cannot read
         # A build in progress writes its manifest before its directory takes the key's name.
-        if path.parent.name != manifest.key or manifest.key != tables_key(manifest.ingest):
+        if path.parent.name != manifest.key:
             continue
         held = newest.get(manifest.ingest.source)
         if held is None or built > held[0]:
@@ -119,7 +120,10 @@ def _app_names(directories: list[Path]) -> dict[Path, str | None]:
     if not directories:
         return {}
     files = '[' + ', '.join(_literal(str(directory / 'application.parquet')) for directory in directories) + ']'
-    rows = duckdb.connect().execute(f'SELECT filename, app_name FROM read_parquet({files}, filename = true)').fetchall()
+    # Tables an earlier sparkxray built may hold other columns, so the files are read by column name.
+    rows = (
+        duckdb.connect().execute(f'SELECT filename, app_name FROM read_parquet({files}, filename = true, union_by_name = true)').fetchall()
+    )
     return {Path(filename).parent: name for filename, name in rows}
 
 

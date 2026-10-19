@@ -153,9 +153,15 @@ An app id never holds a `/`, and an S3 URI or a path with a separator always doe
 looks for it in the cache.
 
 The cache answers from its tables' manifests alone, so finding a log reads no event. Each
-`tables/<source>/<key>/manifest.json` names the log it was built from. An entry counts only when
-the installed sparkxray built it, and only the newest per source. `cached_logs()` lists those
-entries, and `sparkxray logs list` prints them.
+`tables/<source>/<key>/manifest.json` names the log it was built from. Only the newest entry per
+source counts, whichever sparkxray built it. `cached_logs()` lists those entries, and
+`sparkxray logs list` prints them.
+
+Tables the installed sparkxray built open as they stand, so the log's source is never read. That
+keeps an S3 log openable with no credentials and no network. Tables an earlier sparkxray built
+are never read, because their columns may differ from this one's. So the app id resolves to the log's
+location instead, and the open reads it as a path would. An app id keeps opening after an
+upgrade, and `logs list` lists every app id that opens.
 
 An app id no cached log holds is `E-INGEST-001`, listing the app ids the cache does hold. Two
 attempts of one application share an app id, and so does one log copied to two places. Either is
