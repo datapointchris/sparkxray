@@ -195,6 +195,31 @@ def print_described(
     print_table(printed)
 
 
+def print_metric_changes(records: Sequence[Mapping[str, Any]], *, title: str) -> None:
+    """Print one row per metric that moved: the part of the run, how it was paired, the metric, each run's value, and the change.
+
+    Each record carries `part`, `matched_by`, and a metric's fields as `MetricDelta.to_json` gives
+    them. Each value prints in the record's own unit, and the change as a share of run A's.
+    """
+    printed = table(title=title)
+    printed.add_column('part', no_wrap=True)
+    printed.add_column(header('matched_by'), overflow='fold')
+    printed.add_column('metric', no_wrap=True)
+    for column in ('a', 'b', 'change'):
+        printed.add_column(column, justify='right', no_wrap=True)
+    for record in records:
+        share = record['delta_share']
+        printed.add_row(
+            Text(record['part']),
+            Text(record['matched_by']),
+            Text(header(record['metric'])),
+            Text(shown_in(record['unit'], record['a'])),
+            Text(shown_in(record['unit'], record['b'])),
+            Text('' if share is None else f'{share * 100:+.0f}%'),
+        )
+    print_table(printed)
+
+
 def print_table(printed: Table) -> None:
     """Print a table and a blank line after it, which sets it apart from the next section."""
     stdout.print(printed)

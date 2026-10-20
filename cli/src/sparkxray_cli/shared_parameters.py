@@ -8,14 +8,8 @@ from typing import Annotated
 import typer
 from sparkxray.rules import Severity
 
-LogArgument = Annotated[
-    str,
-    typer.Argument(
-        metavar='LOG',
-        help='A log file or directory, an s3:// URI to one, or the app id of a log already read.',
-        show_default=False,
-    ),
-]
+LOG_HELP = 'A log file or directory, an s3:// URI to one, or the app id of a log already read.'
+LogArgument = Annotated[str, typer.Argument(metavar='LOG', help=LOG_HELP, show_default=False)]
 JsonOption = Annotated[bool, typer.Option('--json', help='Print JSON to stdout instead of a table, and a refusal as JSON on stderr.')]
 LimitOption = Annotated[
     int | None,
