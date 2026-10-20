@@ -6,7 +6,7 @@ from pathlib import Path
 
 from sparkxray.ingest import EventLog
 from sparkxray.rules import Analysis
-from sparkxray.tables import Tables
+from sparkxray.tables.relations import Tables
 
 from sparkxray_cli import render
 
