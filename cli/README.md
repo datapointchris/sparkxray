@@ -19,6 +19,7 @@ sparkxray findings list LOG                  # what slowed the run, costliest fi
 sparkxray findings list LOG --fail-on critical   # exit 3 on a critical finding, for a CI step
 sparkxray reports write LOG --out report.md      # the findings and the run behind them, as Markdown
 sparkxray logs diff LOG_A LOG_B                  # what changed between two runs of one job
+sparkxray executors simulate LOG                 # the run's wall time at other executor counts
 sparkxray stages list LOG --sort wall_ms -n 5
 sparkxray tables query LOG "select count(*) from tasks"
 ```

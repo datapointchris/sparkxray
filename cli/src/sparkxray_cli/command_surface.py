@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 import typer
+from typer._click.types import FuncParamType  # Typer vendors click, and exports none of its types
 
 # A command with one of these verbs can write a file the caller names. Every command may write sparkxray's cache.
 _WRITING_VERBS = ('write',)
@@ -79,10 +80,11 @@ def flag_names(option: Any) -> list[str]:
 def _flag(option: Any) -> dict[str, Any]:
     names = flag_names(option)
     choices = getattr(option.type, 'choices', None)
+    # A flag whose value a function parses, as `--executors 2..64` is, takes text.
     return {
         'name': names[0],
         'aliases': names[1:],
-        'type': _TYPES.get(option.type.name, option.type.name),
+        'type': 'string' if isinstance(option.type, FuncParamType) else _TYPES.get(option.type.name, option.type.name),
         'choices': list(choices) if choices is not None else None,
         'multiple': option.multiple,
         'required': option.required,

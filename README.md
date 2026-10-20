@@ -74,6 +74,7 @@ sparkxray rules show stage.shuffle-skew
 sparkxray metrics show "Executor CPU Time"
 sparkxray reports write spark-application-1729 --out report.md
 sparkxray logs diff spark-application-1728 spark-application-1729
+sparkxray executors simulate spark-application-1729 --executors 4,8,16
 ```
 
 A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and `26 s`. `--json`
@@ -146,6 +147,17 @@ above it that is new, or that was below it in A:
 ```bash
 sparkxray logs diff last-good-run tonights-run --fail-on high
 ```
+
+`executors simulate` estimates the run's wall time at other executor counts, with Sparklens's
+model. Each group of jobs that ran together is replayed onto executors times cores task slots,
+every task taking the time it took, and the time no job ran stays the same. The counts default to
+10% to 500% of the most executors the run had alive at once. `--executors 2..64` or
+`--executors 4,8,16` names others, and `--cores` sets each executor's cores. Beside the curve it
+prints the run on unlimited executors, at today's size with no skew, and on one core, and the
+core-hours the driver and the executors left idle. Its model error compares the estimate at the
+run's own size with the wall time. A large one, as dynamic allocation gives, says to trust the
+curve less. A task's time is held fixed, so the spill fewer executors cause and the shuffle more
+of them fetch never show.
 
 ## A program or an agent drives sparkxray from what it prints
 
@@ -373,6 +385,18 @@ diff = diff_logs(EventLog.open(good), EventLog.open(slow), baselines=[EventLog.o
 [finding.finding_id for finding in diff.findings.new]
 diff.gate('high').passed                     # False when a finding new in the slow run is at or above high
 diff.to_json()                               # the shape sparkxray/schemas/diff.json pins
+```
+
+`sparkxray.simulation.simulate` estimates a run at other executor counts as `executors simulate`
+does:
+
+```python
+from sparkxray.simulation import simulate
+
+simulation = simulate(EventLog.open(location), executors=[4, 8, 16])
+[(point.executor_count, point.estimated_wall_ms) for point in simulation.curve]
+simulation.model_error_share                 # how far the estimate at the run's own size is from its wall time
+simulation.to_json()                         # the shape sparkxray/schemas/simulation.json pins
 ```
 
 `sparkxray.schemas.schema_document(name)` returns any schema `schemas show` prints, and

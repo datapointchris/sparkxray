@@ -32,15 +32,21 @@ _LIST_COLUMNS = (
     'shuffle_write_bytes',
     'memory_spilled_bytes',
     'gc_time_ms',
+    'available_core_hours',
+    'used_core_hours',
+    'wasted_core_hours',
+    'parallelism_ratio',
 )
 
 
 @app.command('list')
 def list_stages(log: LogArgument, sort: SortOption = None, limit: LimitOption = None, as_json: JsonOption = False) -> None:
-    """List every stage: its tasks, wall time and share of the run, task durations, shuffle, spill and GC.
+    """List every stage: its tasks, wall time and share of the run, task durations, shuffle, spill, GC and core-hours.
 
-    Totals count each partition once, from its first successful task. `--sort wall_ms` puts the
-    slowest stage first.
+    Totals count each partition once, from its first successful task. A stage's available
+    core-hours are the run's cores over its wall time, as if it held every core, and the used ones
+    are its tasks' run time. Its parallelism ratio is its partitions over the run's cores, so one
+    under 1 left cores idle. `--sort wasted_core_hours` puts the stage that idled the most first.
     """
     rows = stage_summaries(open_tables(log), sort=sort, limit=limit)
     if as_json:
