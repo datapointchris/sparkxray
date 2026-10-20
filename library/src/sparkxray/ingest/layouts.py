@@ -16,7 +16,8 @@ from typing import Literal
 
 from sparkxray.ingest.decoders import Codec
 
-Layout = Literal['single_file', 'rolling']
+# `rest_rebuild` is one file sparkxray wrote from a Spark server's REST JSON, which `history_server` reads.
+Layout = Literal['single_file', 'rolling', 'rest_rebuild']
 
 _CODEC_SUFFIXES: dict[str, Codec] = {'zstd': 'zstd', 'zst': 'zstd', 'lz4': 'lz4', 'snappy': 'snappy', 'lzf': 'lzf', 'gz': 'gzip'}
 _CODEC = r'(?:\.(?P<codec>zstd|zst|lz4|snappy|lzf|gz))?'

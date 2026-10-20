@@ -1,4 +1,4 @@
-"""Open one Spark application's event log from a local path or S3, and read its events in order."""
+"""Open one Spark application's event log from a local path, S3 or a Spark server, and read its events in order."""
 
 from __future__ import annotations
 
@@ -104,27 +104,30 @@ class EventLog:
         cache_dir: str | os.PathLike[str] | None = None,
         profile: str | None = None,
         region: str | None = None,
+        app: str | None = None,
     ) -> EventLog:
         """Resolve `location` to one application's log and make every file of it readable.
 
         `location` is a log file, a directory, a rolling `eventlog_v2_*` directory, or an `s3://`
-        URI to any of those. It must hold exactly one application. It may also be the app id of a
-        log the cache holds tables for, where it names no file. Finished tables the installed
-        sparkxray built then open without reading the log's source again. A log Spark was still
-        writing, or tables an earlier sparkxray built, send the open to the log's location, so
-        it reads the log as it stands now. `cache_dir` overrides
+        URI to any of those. It must hold exactly one application. It may also be the
+        `http(s)://` address of a Spark History Server or driver UI, which `app` names an
+        application on where the address names none, and which `history_server` describes. It
+        may also be the app id of a log the cache holds tables for, where it names no file.
+        Finished tables the installed sparkxray built then open without reading the log's source
+        again. A log Spark was still writing, or tables an earlier sparkxray built, send the open
+        to the log's location, so it reads the log as it stands now. `cache_dir` overrides
         `$XDG_CACHE_HOME/sparkxray`. `profile` and `region` narrow boto3's credential chain.
         """
         text = os.fspath(location)
         cache = cache_root(cache_dir)
-        if _may_be_app_id(text):
+        if app is None and _may_be_app_id(text):
             from sparkxray.tables.cached_logs import cached_ingest  # DuckDB is imported only when an app id is opened
 
             cached = cached_ingest(text, cache)
             if isinstance(cached, IngestManifest):
                 return cls(cached, cache)
             text = cached
-        source = location_for(text, profile=profile, region=region)
+        source = location_for(text, profile=profile, region=region, app=app, cache=cache)
         candidate = _resolve(source)
         local_paths = _in_parallel(lambda log_file: source.local_path(log_file.listed, cache), candidate.files)
         files = []
@@ -146,7 +149,7 @@ class EventLog:
         provisional = IngestManifest(
             source=source.uri,
             app_id=candidate.app_id,
-            layout=candidate.layout,
+            layout='rest_rebuild' if source.rest_rebuild else candidate.layout,
             files=tuple(files),
             compacted=candidate.compacted,
             in_progress=candidate.in_progress,

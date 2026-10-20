@@ -28,7 +28,7 @@ from sparkxray.tables.rows import rows_of
 
 FINDINGS_FILE = 'findings.parquet'
 _NODE_METRIC_TOTALS_SQL = """
-SELECT metrics.execution_id, metrics.node_id, metrics.metric_name, arg_min(metrics.total, metrics.accumulator_id) AS total
+SELECT metrics.execution_id, metrics.node_id, metrics.metric_name, arg_min(metrics.total, coalesce(metrics.accumulator_id, -1)) AS total
 FROM plan_node_metrics AS metrics JOIN sql_executions USING (execution_id)
 WHERE metrics.total IS NOT NULL
   AND (CAST($execution_id AS BIGINT) IS NULL OR metrics.execution_id = $execution_id)

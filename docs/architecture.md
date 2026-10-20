@@ -108,6 +108,64 @@ unused. An `EventLog` opened before the file changed still reads its copy. So no
 the moment a newer version lands. A write goes to a `.part-` file first and is renamed into place.
 A partial file a killed process left behind is removed the same way.
 
+## A server's log is downloaded where it serves one, and rebuilt from its REST JSON where not
+
+A History Server serves each application's event log as a zip at
+`/api/v1/applications/<app>[/<attempt>]/logs`. sparkxray downloads that first, and reads the
+unpacked files as it reads a local log. Their tables match a file ingest's, column for column.
+
+A live driver UI answers the same path with 200 and an empty zip, because only a History Server
+writes logs. A server whose log is unreadable answers 503, and an older one 404. In each case
+sparkxray rewrites the application's REST JSON as the listener events Spark would have logged,
+with `JsonProtocol`'s field names and units, into one file. The one build then reads it, so no
+table has a second code path to drift from the first.
+
+```text
+GET <app>/logs ── zip with members ──→ unpack ──→ the files, as a local log
+       │
+       └── empty zip, 404, 503 ──→ GET environment, allexecutors, jobs, stages, sql,
+                                       every started stage's taskList (paged 1000)
+                                   ──→ one JSONL of listener events ──→ the same build
+```
+
+REST carries less than the log. So the rebuild's manifest names, beside what Spark writes only
+when asked, what the build finds missing from the events:
+
+- `stage_parents`: `StageData` holds no parent ids. The simulation then has a stage wait on every
+  lower-numbered stage of its job that ended before it was submitted.
+- `task_executor_metrics`: no task's executor peaks. Each executor's whole-run peaks come from
+  `/allexecutors`. A History Server builds those from the events it replayed. So they count as
+  stage peaks where the run set `spark.eventLog.logStageExecutorMetrics`, and as task peaks where
+  not, which is what a file ingest of the same log reports.
+- `task_accumulators`: no task's accumulator updates. So `node_stages` is empty, and a plan node's
+  metrics are the totals and spread the SQL tab displays, read back from their display strings.
+  The SQL graph leaves out each query stage the plan text prints. Stepping over those aligns the
+  graph's nodes with the text's, and a graph that still differs gives no metrics.
+- `execution_configs`: no SQL execution carries the settings it changed, so a setting changed at
+  runtime reads as the application's.
+- `evicted_records`: the server had dropped part of the run past its `spark.ui.retained*` limits.
+  Spark numbers jobs, stages and SQL executions from 0, so a lowest id above 0 shows the oldest
+  went. A stage holding fewer tasks than it counts shows some of its tasks went. The rebuild
+  writes a `sparkxray.RestEvicted` event, and `app.failed-jobs` needs the `whole_run` signal it
+  takes away. A command naming such a log prints a note saying only part of the run is held.
+
+Only each execution's final plan survives, read from its text. A task's end reason is read back
+from the string `TaskEndReason.toErrorString` made of it. A failed job's failure is its failed
+stage's, because Spark ends each running stage only that job used with the job's message.
+
+A rule that needs a missing part is skipped by signal. `config.skew-join-off-with-skew` needs
+`plan_stages`, which `node_stages` holding rows provides. The rules that read `node_stages` only
+to name a node keep running and name none.
+
+A finished attempt's copy is keyed by its end time and last update, so it is fetched once. An
+incomplete attempt's download is keyed by its last update. A History Server dates that by the
+log's last write, so a run killed long ago is fetched once, and a growing log again as it grows.
+A driver UI dates a running attempt by its start. So a rebuild of a running attempt gets a fresh
+key on every open, and a live application is never read from the cache. Downloads and rebuilds
+go under `logs/rest/<server hash>/<app>/<attempt>/<version>/`. One httpx2 client per open bounds
+how many requests run at once, and retries a connection error or a 5xx with backoff. It never
+retries a 404 or a 503 from `/logs`, which mean no log. `rest_client.py` holds the limits.
+
 ## The resolver finds a log by Spark's names, and confirms it by its first line
 
 No platform's folder layout is written into the code. Glue, EMR and a local run each write one of

@@ -13,8 +13,11 @@ from typing import Any
 import duckdb
 import pyarrow as pa
 
+from sparkxray.ingest.events_from_rest import PLAN_METRICS_EVENT
 from sparkxray.plan.last_plans import plan_for_event
 from sparkxray.plan.tree import NumberedNode
+
+_REST_PLAN_METRICS = PLAN_METRICS_EVENT.rpartition('.')[2]
 
 _NODE_SCHEMA = pa.schema(
     [
@@ -44,6 +47,14 @@ _METRIC_SCHEMA = pa.schema(
         ('metric_name', pa.string()),
         ('metric_type', pa.string()),
         ('accumulator_id', pa.int64()),
+        # What a server displayed for the metric, where the log was rebuilt from its REST JSON.
+        ('display_unit', pa.string()),
+        ('display_total', pa.float64()),
+        ('display_min', pa.float64()),
+        ('display_median', pa.float64()),
+        ('display_max', pa.float64()),
+        ('display_max_stage_id', pa.int64()),
+        ('display_max_task_id', pa.int64()),
     ]
 )
 
@@ -65,23 +76,29 @@ def plan_rows(connection: duckdb.DuckDBPyConnection) -> PlanRows:
     metrics: list[dict[str, Any]] = []
     versions: list[dict[str, Any]] = []
     cursor = connection.execute(
-        """
-        SELECT kind, executionId, sparkPlanInfo, physicalPlanDescription, sqlPlanMetrics FROM events
+        f"""
+        SELECT kind, executionId, sparkPlanInfo, physicalPlanDescription, sqlPlanMetrics, restPlanMetrics FROM events
         WHERE kind IN (
-          'SparkListenerSQLExecutionStart', 'SparkListenerSQLAdaptiveExecutionUpdate', 'SparkListenerSQLAdaptiveSQLMetricUpdates'
+          'SparkListenerSQLExecutionStart', 'SparkListenerSQLAdaptiveExecutionUpdate', 'SparkListenerSQLAdaptiveSQLMetricUpdates',
+          '{_REST_PLAN_METRICS}'
         ) AND executionId IS NOT NULL
         ORDER BY rowid
         """
     )
     next_version: dict[int, int] = {}
     while rows := cursor.fetchmany(64):
-        for kind, execution_id, info, text, declared in rows:
+        for kind, execution_id, info, text, declared, displayed in rows:
             if kind == 'SparkListenerSQLAdaptiveSQLMetricUpdates':
                 # AQE re-planned a subquery, whose plan it never logs, and declares its new nodes' metrics.
                 metrics.extend(
                     _metric_row(execution_id, None, None, metric['name'], metric['metricType'], metric['accumulatorId'])
                     for metric in declared or ()
                 )
+                continue
+            if kind == _REST_PLAN_METRICS:
+                # It follows the start event of the plan whose nodes it numbers.
+                version = next_version.get(execution_id, 1) - 1
+                metrics.extend(_displayed_row(execution_id, version, metric) for metric in displayed or ())
                 continue
             version = next_version.get(execution_id, 0)
             next_version[execution_id] = version + 1
@@ -158,4 +175,17 @@ def _metric_row(
         'metric_name': name,
         'metric_type': metric_type,
         'accumulator_id': accumulator_id,
+    }
+
+
+def _displayed_row(execution_id: int, version: int, metric: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **_metric_row(execution_id, version, metric['node'], metric['name'], None, None),
+        'display_unit': metric['unit'],
+        'display_total': metric['total'],
+        'display_min': metric['min'],
+        'display_median': metric['median'],
+        'display_max': metric['max'],
+        'display_max_stage_id': metric['maxStageId'],
+        'display_max_task_id': metric['maxTaskId'],
     }

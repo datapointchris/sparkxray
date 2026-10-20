@@ -21,10 +21,17 @@ from sparkxray.summaries.annotated_plans import AnnotatedPlan
 from sparkxray.tables.registry import column_unit
 
 _CODE_SPAN = re.compile(r'(`[^`]*`)')
-_LACKS = {
+_WRITTEN_WITHOUT = {
     'stage_executor_metrics': 'stage executor metrics',
     'block_updates': 'block updates',
     'process_tree_metrics': 'process tree metrics',
+}
+_HELD_WITHOUT = {
+    'stage_parents': "stages' parents",
+    'task_executor_metrics': "tasks' executor metrics",
+    'task_accumulators': "tasks' accumulator updates",
+    'execution_configs': "SQL executions' changed settings",
+    'evicted_records': 'the jobs, stages, SQL executions or tasks the server had dropped',
 }
 
 
@@ -57,8 +64,12 @@ def _header(report: Report) -> str:
         caveats.append('Spark was still writing it')
     if report.log.compacted:
         caveats.append('a History Server compacted it, dropping finished tasks')
-    if report.log.lacks:
-        caveats.append(f'Spark wrote it without {_listed([_LACKS.get(lack, lack) for lack in report.log.lacks])}')
+    if report.log.layout == 'rest_rebuild':
+        caveats.append("sparkxray rebuilt it from a server's REST JSON")
+    if written_without := [_WRITTEN_WITHOUT[lack] for lack in report.log.lacks if lack in _WRITTEN_WITHOUT]:
+        caveats.append(f'Spark wrote it without {_listed(written_without)}')
+    if held_without := [_HELD_WITHOUT.get(lack, lack) for lack in report.log.lacks if lack not in _WRITTEN_WITHOUT]:
+        caveats.append(f'it holds no {_listed(held_without)}')
     if caveats:
         lines += ['', f'The log: {"; ".join(caveats)}.']
     lines += ['', f'{report.generated_by}, from `{report.log.source}`.']

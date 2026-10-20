@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regenerate the event log fixtures. Runs the fixture jobs under each Spark image and each setting
-# that changes what Spark writes, then rewrites logs/, decoded-by-spark/, history-server-sql/ and
-# explain/ from the output.
+# that changes what Spark writes, then rewrites logs/, decoded-by-spark/, history-server-sql/,
+# history-server-rest/ and explain/ from the output.
 #
 #   fixtures/regenerate.sh              every variant
 #   fixtures/regenerate.sh VARIANT...   only these, e.g. spark-3.5.9-lz4
@@ -191,11 +191,12 @@ decode_with_spark() {
   done
 }
 
-# capture_history_server IMAGE OUT: start IMAGE's History Server over the plain logs in OUT, and
-# save each application's SQL endpoint, with node details and plan text, under
-# history-server-sql/, compacted and zstd'd.
+# capture_history_server IMAGE OUT [rest]: start IMAGE's History Server over the plain logs in OUT,
+# and save each application's SQL endpoint, with node details and plan text, under
+# history-server-sql/, compacted and zstd'd. With rest, save instead every answer a rebuild from
+# REST reads, under history-server-rest/.
 capture_history_server() {
-  local image=$1 out=$2 variant name="sparkxray-fixture-history-$$" address apps='' app
+  local image=$1 out=$2 what=${3:-sql} variant name="sparkxray-fixture-history-$$" address apps='' app
   variant=$(basename "$out")
   # Spark creates each log readable by its own user only, and the server runs as that user.
   chmod -R a+rX "$out"
@@ -217,10 +218,15 @@ capture_history_server() {
     echo "regenerate.sh: the History Server listed no application within two minutes" >&2
     exit 1
   fi
-  mkdir -p "$work/history-server-sql/$variant"
+  mkdir -p "$work/history-server-$what/$variant"
   while IFS= read -r app; do
-    curl -fsS "http://$address/api/v1/applications/$app/sql?details=true&planDescription=true&length=1000" \
-      | jq -c . | zstd -19 -q -o "$work/history-server-sql/$variant/$app.json.zstd"
+    if [ "$what" = rest ]; then
+      uv --directory "$fixtures/.." run --quiet python "$fixtures/record_history_server_rest.py" \
+        "http://$address" "$app" "$work/history-server-rest/$variant/$app.jsonl.zstd"
+    else
+      curl -fsS "http://$address/api/v1/applications/$app/sql?details=true&planDescription=true&length=1000" \
+        | jq -c . | zstd -19 -q -o "$work/history-server-sql/$variant/$app.json.zstd"
+    fi
   done < <(jq -r '.[].id' <<<"$apps")
   docker rm -f "$name" >/dev/null
 }
@@ -289,6 +295,7 @@ run_variant() {
       ;;
     spark-3.5.9-stage-rules)
       submit "$SPARK_3" "$out" /opt/spark/bin/spark-submit "${STAGE_RULES_CONF[@]}" /job/stage_rules_job.py
+      capture_history_server "$SPARK_3" "$out" rest
       zstd_plain "$out"/app-*
       ;;
     spark-4.2.0-stage-rules)
@@ -339,7 +346,7 @@ main() {
     rm -rf "${fixtures:?}/logs/$variant"
     mkdir -p "$fixtures/logs"
     mv "$work/$variant" "$fixtures/logs/$variant"
-    for beside in decoded-by-spark history-server-sql explain; do
+    for beside in decoded-by-spark history-server-sql history-server-rest explain; do
       rm -rf "${fixtures:?}/$beside/$variant"
       if [ -d "$work/$beside/$variant" ]; then
         mkdir -p "$fixtures/$beside"

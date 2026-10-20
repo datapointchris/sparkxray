@@ -11,10 +11,10 @@ from sparkxray.tables import Tables
 from sparkxray_cli import render
 
 
-def open_log(location: str) -> EventLog:
-    """The log, resolved and decoded, its tables not yet built."""
+def open_log(location: str, *, app: str | None = None) -> EventLog:
+    """The log, resolved and decoded, its tables not yet built. `app` picks one application on a server."""
     with render.status(f'Reading {location}'):
-        log = EventLog.open(location)
+        log = EventLog.open(location, app=app)
     render.ingest_notes(log.manifest)
     return log
 
@@ -27,7 +27,9 @@ def open_tables(location: str) -> Tables:
 def tables_of(log: EventLog) -> Tables:
     """An opened log's tables, built the first time and read from the cache after."""
     with render.status(f'Reading the tables of {log.manifest.app_id}'):
-        return log.tables
+        tables = log.tables
+    render.tables_notes(log.manifest.app_id, tables.manifest)
+    return tables
 
 
 def analyze_log(log: EventLog, rules: list[str] | None, threshold_flags: list[str] | None, threshold_file: Path | None) -> Analysis:

@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import Literal
 
 from sparkxray.plan import labels
+from sparkxray.plan.display_values import DisplayValue
 
 PlanSource = Literal['plan_info_json', 'formatted_text', 'simple_text', 'rest_graph']
 
@@ -21,12 +22,13 @@ class MetricRef:
 
     An event log's tree carries the accumulator id that task updates report against, and the
     metric's type: `sum`, `size`, `timing`, `nsTiming` or `average`. The History Server's graph
-    carries the name alone.
+    carries the name, and the value it displays, which `display_value` holds as numbers.
     """
 
     name: str
     accumulator_id: int | None
     metric_type: str | None
+    display_value: DisplayValue | None = None
 
 
 @dc.dataclass(frozen=True, slots=True)

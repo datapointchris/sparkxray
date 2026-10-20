@@ -1,6 +1,13 @@
-"""Every codec Spark writes a log in decodes to the lines Spark wrote."""
+"""Every codec Spark writes a log in decodes to the lines Spark wrote, and a server's log reads as the file does."""
 
+import contextlib
+import http.server
+import io
+import json
 import pathlib
+import threading
+import zipfile
+from collections.abc import Iterator
 
 import pytest
 from fixture_logs import FIXTURES
@@ -8,6 +15,28 @@ from fixture_logs import plain_bytes
 from fixture_logs import plain_lines
 from fixture_logs import rolled_files
 from sparkxray.ingest import EventLog
+from sparkxray.tables import TABLES
+
+# What a rebuilt log's tables hold differently, by table. REST carries no trace of the first four's
+# columns. A final plan is read from its text, so its nodes are labeled as a text plan's are, and a
+# plan metric is the value the SQL tab displayed, so only which node measured what is compared.
+_REBUILD_LOSES = {
+    'application': {'log_source'},
+    'stages': {'parent_ids'},
+    'tasks': {'peak_jvm_heap_bytes', 'peak_jvm_offheap_bytes', 'major_gc_count', 'major_gc_time_ms'},
+    'sql_executions': {'details', 'job_tags', 'modified_configs', 'plan_version_count', 'initial_plan_text', 'final_plan_json'},
+    'plan_versions': {'plan_json'},
+    'plan_nodes': {'label', 'normalized_label', 'subtree_hash', 'details'},
+    'plan_node_metrics': {'metric_type', 'accumulator_id', 'value_count', 'total', 'min', 'median', 'max', 'max_stage_id', 'max_task_id'},
+    'node_stages': {'execution_id', 'node_id', 'stage_id'},
+}
+# The rows each table is compared on: a final plan's, and a plan metric some task reported to.
+_COMPARED_ROWS = {
+    'plan_versions': '(execution_id, plan_version) IN (SELECT execution_id, plan_version_count - 1 FROM sql_executions)',
+    'plan_nodes': '(execution_id, plan_version) IN (SELECT execution_id, plan_version_count - 1 FROM sql_executions)',
+    'plan_node_metrics': '(execution_id, plan_version) IN (SELECT execution_id, plan_version_count - 1 FROM sql_executions) '
+    'AND (total IS NOT NULL OR max IS NOT NULL)',
+}
 
 
 def _log(variant: str) -> pathlib.Path:
@@ -63,3 +92,61 @@ def test_an_app_id_read_while_spark_wrote_the_log_opens_the_log_spark_finished_a
 def _task_count(log: EventLog) -> int:
     count: int = log.tables.query('SELECT count(*) FROM tasks').fetchall()[0][0]
     return count
+
+
+@pytest.mark.parametrize('serves_logs', [True, False], ids=['downloaded', 'rebuilt'])
+def test_a_history_server_s_log_reads_as_the_file_does(serves_logs: bool, tmp_path: pathlib.Path) -> None:
+    log = FIXTURES / 'logs' / 'spark-3.5.9-stage-rules' / 'app-20261019220120-0000.zstd'
+    recording = FIXTURES / 'history-server-rest' / 'spark-3.5.9-stage-rules' / 'app-20261019220120-0000.jsonl.zstd'
+    from_file = EventLog.open(log, cache_dir=tmp_path / 'file')
+    with _history_server(recording, log, serves_logs=serves_logs) as address:
+        from_server = EventLog.open(f'{address}/history/app-20261019220120-0000/jobs/', cache_dir=tmp_path / 'server')
+
+    loses = _REBUILD_LOSES if not serves_logs else {'application': {'log_source'}}
+    for table in TABLES:
+        names = [column.name for column in table.columns if column.name not in loses.get(table.name, ()) and column.name != 'plan_version']
+        query = f'SELECT {", ".join(f"{chr(34)}{name}{chr(34)}" for name in names) or "1"} FROM {table.name}'
+        if not serves_logs and table.name in _COMPARED_ROWS:
+            query += f' WHERE {_COMPARED_ROWS[table.name]}'
+        query += ' ORDER BY ALL'
+        expected = from_file.tables.query(query).fetchall() if names else []
+        assert from_server.tables.query(query).fetchall() == expected, table.name
+
+    file_found, server_found = from_file.analyze(), from_server.analyze()
+    assert from_server.manifest.layout == ('single_file' if serves_logs else 'rest_rebuild')
+    # Which stages ran a join, and the settings a query changed, are what REST does not carry.
+    lost = set() if serves_logs else {'config.skew-join-off-with-skew', 'config.aqe-off'}
+    assert {finding.finding_id for finding in server_found.findings} == {
+        finding.finding_id for finding in file_found.findings if finding.rule_id not in lost
+    }
+
+
+@contextlib.contextmanager
+def _history_server(recording: pathlib.Path, log: pathlib.Path, *, serves_logs: bool) -> Iterator[str]:
+    """A History Server answering what `recording` saved, and `log` zipped at `/logs` where it serves logs."""
+    answers = {answer['path']: (answer['status'], answer['body'].encode()) for answer in map(json.loads, plain_lines(recording))}
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, 'w') as archive:
+        archive.write(log, log.name)
+
+    class Replay(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path.endswith('/logs'):
+                status, body = (200, zipped.getvalue()) if serves_logs else (404, b'')
+            else:
+                status, body = answers.get(self.path, (404, b''))
+            self.send_response(status)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_: object) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Replay)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f'http://127.0.0.1:{server.server_address[1]}'
+    finally:
+        server.shutdown()
+        server.server_close()

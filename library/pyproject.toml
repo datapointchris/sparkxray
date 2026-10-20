@@ -27,6 +27,10 @@ dependencies = [
     "boto3>=1.28.0",
     # The raw lz4 and snappy blocks inside Spark's lz4-java and snappy-java streams.
     "cramjam>=2.8.0",
+    # The REST API of a History Server or driver UI, imported only when a log is
+    # read from one. httpx2 is the Pydantic-maintained continuation of httpx, and
+    # 2.0.0 is its first release.
+    "httpx2>=2.0.0",
     # Parses every event line and writes the Parquet tables. 1.5.0 is the first
     # release whose relation keeps its connection open, so `log.tables.tasks`
     # still reads after the Tables it came from is gone.

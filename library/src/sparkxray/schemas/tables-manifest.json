@@ -16,8 +16,8 @@
     "lacks": {
       "type": "array",
       "uniqueItems": true,
-      "description": "What Spark wrote only when asked, and this log was written without. stage_executor_metrics: spark.eventLog.logStageExecutorMetrics was off, so the per-task peaks are the only memory figures. block_updates: spark.eventLog.logBlockUpdates.enabled was off. process_tree_metrics: spark.executor.processTreeMetrics.enabled was off, so peak_python_rss_bytes is null.",
-      "items": {"enum": ["stage_executor_metrics", "block_updates", "process_tree_metrics"]}
+      "description": "What this log was written without: what Spark writes only when asked, and what a log rebuilt from a server's REST JSON cannot carry. stage_executor_metrics: spark.eventLog.logStageExecutorMetrics was off, so the per-task peaks are the only memory figures. block_updates: spark.eventLog.logBlockUpdates.enabled was off. process_tree_metrics: spark.executor.processTreeMetrics.enabled was off, so peak_python_rss_bytes is null. A log rebuilt from a server's REST JSON also goes without these. stage_parents: no stage names the stages it reads, so the simulation infers them. task_executor_metrics: no task carries the executor's peaks while it ran. task_accumulators: no task carries its accumulator updates, so plan_node_metrics holds the values the SQL tab displayed and node_stages is empty. execution_configs: no SQL execution carries the settings it changed, so a setting changed at runtime reads as the application's. evicted_records: the server had dropped part of the run past its spark.ui.retained* limits, so the tables hold only the part it kept.",
+      "items": {"enum": ["stage_executor_metrics", "block_updates", "process_tree_metrics", "stage_parents", "task_executor_metrics", "task_accumulators", "execution_configs", "evicted_records"]}
     },
     "ingest": {"$ref": "ingest-manifest.json", "description": "The ingest manifest of the log the tables were built from."}
   }

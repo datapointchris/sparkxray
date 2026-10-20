@@ -36,6 +36,7 @@ from sparkxray.cache_directory import remove_superseded
 from sparkxray.cache_directory import used
 from sparkxray.errors import CorruptLogError
 from sparkxray.ingest import decoders
+from sparkxray.ingest.events_from_rest import EVICTED_EVENT
 from sparkxray.ingest.manifest import IngestedFile
 from sparkxray.ingest.manifest import IngestManifest
 from sparkxray.tables.event_columns import EVENT_COLUMNS
@@ -173,14 +174,34 @@ _WORKING_TABLES = (
     """,
 )
 
-_LACKS = """
+_EVICTED_KIND = EVICTED_EVENT.rpartition('.')[2]
+_LACKS = f"""
     SELECT
       count(*) FILTER (WHERE kind = 'SparkListenerStageExecutorMetrics') = 0,
       count(*) FILTER (WHERE kind = 'SparkListenerBlockUpdated') = 0,
-      NOT (SELECT measured FROM process_tree)
+      NOT (SELECT measured FROM process_tree),
+      count(*) FILTER (
+        WHERE kind IN ('SparkListenerStageSubmitted', 'SparkListenerStageCompleted') AND "Stage Info"."Parent IDs" IS NULL
+      ) > 0,
+      count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd') > 0
+        AND count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd' AND "Task Executor Metrics" IS NOT NULL) = 0,
+      count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd') > 0
+        AND count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd' AND len("Task Info"."Accumulables") > 0) = 0,
+      count(*) FILTER (WHERE kind = 'SparkListenerSQLExecutionStart') > 0
+        AND count(*) FILTER (WHERE kind = 'SparkListenerSQLExecutionStart' AND modifiedConfigs IS NOT NULL) = 0,
+      count(*) FILTER (WHERE kind = '{_EVICTED_KIND}') > 0
     FROM events
 """
-_LACK_ORDER: tuple[Lack, ...] = ('stage_executor_metrics', 'block_updates', 'process_tree_metrics')
+_LACK_ORDER: tuple[Lack, ...] = (
+    'stage_executor_metrics',
+    'block_updates',
+    'process_tree_metrics',
+    'stage_parents',
+    'task_executor_metrics',
+    'task_accumulators',
+    'execution_configs',
+    'evicted_records',
+)
 
 
 def build_tables(log: EventLog) -> Tables:

@@ -17,6 +17,7 @@ from sparkxray_cli import render
 from sparkxray_cli.findings import exit_if_gated
 from sparkxray_cli.log_opening import open_log
 from sparkxray_cli.log_opening import open_tables
+from sparkxray_cli.log_opening import tables_of
 from sparkxray_cli.shared_parameters import LOG_HELP
 from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import LimitOption
@@ -46,13 +47,26 @@ _APPLICATION_KEYS = (
 
 
 @app.command('ingest')
-def ingest(log: LogArgument, as_json: JsonOption = False) -> None:
+def ingest(
+    log: LogArgument,
+    app_id: Annotated[
+        str | None,
+        typer.Option(
+            '--app',
+            metavar='APP_ID',
+            help="The application to read from a server holding several. Its newest attempt, unless LOG's address names one.",
+            show_default=False,
+        ),
+    ] = None,
+    as_json: JsonOption = False,
+) -> None:
     """Read a log, build its tables, and print the directory that holds them.
 
     Reading an unchanged log again reads the tables already built, so every other command is
-    as fast on the second run as the first was slow.
+    as fast on the second run as the first was slow. A server's address reads the event log it
+    serves, or rebuilds one from its REST JSON where it serves none, as a live driver UI does.
     """
-    cached = CachedLog.of(open_tables(log))
+    cached = CachedLog.of(tables_of(open_log(log, app=app_id)))
     if as_json:
         render.emit_json(cached.to_json())
     else:
@@ -142,6 +156,8 @@ def diff(
     """
     opened_a, opened_b = open_log(log_a), open_log(log_b)
     opened_baselines = [open_log(location) for location in baseline or ()]
+    for opened in (opened_a, opened_b, *opened_baselines):
+        tables_of(opened)
     with render.status(f'Comparing {opened_b.manifest.app_id} with {opened_a.manifest.app_id}'):
         compared = diff_logs(
             opened_a,

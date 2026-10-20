@@ -7,9 +7,9 @@
   "required": ["schema_version", "source", "app_id", "layout", "files", "compacted", "in_progress", "truncated_tail", "spark_version", "platform"],
   "properties": {
     "schema_version": {"const": 1},
-    "source": {"type": "string", "description": "The location ingested, as a file:// or s3:// URI."},
+    "source": {"type": "string", "description": "The location ingested, as a file://, s3:// or http(s):// URI. A server's is the REST API address of the application, or of its attempt."},
     "app_id": {"type": "string", "description": "The App ID SparkListenerApplicationStart carries, or the one the log's name holds when that event is missing."},
-    "layout": {"enum": ["single_file", "rolling"]},
+    "layout": {"enum": ["single_file", "rolling", "rest_rebuild"], "description": "rest_rebuild: a server answered with no event log, so sparkxray rebuilt one file of listener events from its REST JSON."},
     "files": {
       "type": "array",
       "minItems": 1,

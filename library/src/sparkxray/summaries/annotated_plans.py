@@ -44,7 +44,8 @@ SELECT node_id, list(stage_id ORDER BY stage_id) FROM node_stages WHERE executio
 """
 
 _NODE_METRICS_SQL = """
-SELECT node_id, metric_name, metric_type, unit, coalesce(value_count, 0), total, min, median, max, max_stage_id, max_task_id
+SELECT node_id, metric_name, metric_type, unit, CASE WHEN accumulator_id IS NOT NULL THEN coalesce(value_count, 0) END,
+  total, min, median, max, max_stage_id, max_task_id
 FROM plan_node_metrics
 WHERE execution_id = $execution_id AND plan_version = $version
 QUALIFY row_number() OVER (PARTITION BY node_id, metric_name ORDER BY accumulator_id) = 1
@@ -61,14 +62,15 @@ class NodeMetric:
     """One metric a node declares, aggregated as the SQL tab aggregates it, with `total`, `min`, `median` and `max` in `unit`.
 
     `total` is None for an average, which has no unit and which Spark shows only as its spread.
-    `value_count` is 0 for a metric nothing reported to. `max_stage_id` and `max_task_id` name
-    the task that reported the largest value, and are None where the driver did.
+    `value_count` is 0 for a metric nothing reported to, and None where the log was rebuilt from
+    a server's REST JSON, whose displayed values carry no count. `max_stage_id` and `max_task_id`
+    name the task that reported the largest value, and are None where the driver did.
     """
 
     name: str
     metric_type: str | None
     unit: str | None
-    value_count: int
+    value_count: int | None
     total: float | None
     min: float | None
     median: float | None
@@ -385,7 +387,7 @@ def annotated_plan(tables: Tables, execution_id: int, *, version: int | None = N
     nodes = []
     for each in numbered:
         node, declared = each.node, metrics.get(each.number, {})
-        names = dict.fromkeys(ref.name for ref in node.metrics if ref.name in declared)
+        names = dict.fromkeys(ref.name for ref in node.metrics if ref.name in declared) or dict.fromkeys(declared)
         stats = node.runtime_stats
         nodes.append(
             AnnotatedNode(

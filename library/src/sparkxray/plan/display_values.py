@@ -15,7 +15,8 @@ _DISPLAY = re.compile(
     rf'(?:\((?P<min>{_VALUE}), (?P<median>{_VALUE}), (?P<max>{_VALUE}) '
     r'\((?:stage (?P<stage>\d+)\.(?P<attempt>\d+): task (?P<task>\d+)|driver)\)\))?'
 )
-_HEADER = 'total (min, med, max (stageId: taskId))'
+# What a summed metric's value opens with, and an average's.
+_HEADERS = ('total (min, med, max (stageId: taskId))', '(min, med, max (stageId: taskId)):')
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -42,12 +43,13 @@ def parse_display_value(text: str) -> DisplayValue:
 
     Handles `1,000`, `8.2 MiB`, `1.5 s`, the multi-line
     `total (min, med, max (stageId: taskId))\\n12 ms (6 ms, 6 ms, 6 ms (stage 28.0: task 37))`
-    form, an average's `(1.0, 1.5, 2.0 (stage 3.0: task 4))`, and a `name=value` prefix.
-    Raises ValueError on any other string.
+    form, an average's `(min, med, max (stageId: taskId)):\\n(1, 1.5, 2 (stage 3.0: task 4))`, and a
+    `name=value` prefix. Raises ValueError on any other string.
     """
     body = text.strip()
-    if body.startswith(_HEADER):
-        body = body[len(_HEADER) :].strip()
+    for header in _HEADERS:
+        if body.startswith(header):
+            body = body[len(header) :].strip()
     if '=' in body:
         body = body.rsplit('=', 1)[1].strip()
     match = _DISPLAY.fullmatch(body)

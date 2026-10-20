@@ -14,6 +14,10 @@ from __future__ import annotations
 
 import dataclasses as dc
 
+from sparkxray.ingest.events_from_rest import EXECUTOR_PEAKS_EVENT
+
+_EXECUTOR_PEAKS_KIND = EXECUTOR_PEAKS_EVENT.rpartition('.')[2]
+
 
 @dc.dataclass(frozen=True, slots=True)
 class Column:
@@ -108,7 +112,7 @@ _ENVIRONMENT = Table(
 _EXECUTORS = Table(
     name='executors',
     description='Every executor and the driver: where it ran, its cores and memory, and when it was added and removed.',
-    source="""
+    source=f"""
         WITH added AS (
           SELECT "Executor ID" AS executor_id, "Timestamp" AS added_at, "Executor Info" AS info FROM events
           WHERE kind = 'SparkListenerExecutorAdded'
@@ -130,8 +134,10 @@ _EXECUTORS = Table(
           SELECT "Executor ID" AS executor_id, max("Executor Metrics"."JVMHeapMemory") AS heap FROM events
           WHERE kind = 'SparkListenerStageExecutorMetrics' GROUP BY "Executor ID"
         ), task_peaks AS (
-          SELECT "Task Info"."Executor ID" AS executor_id, max("Task Executor Metrics"."JVMHeapMemory") AS heap FROM events
-          WHERE kind = 'SparkListenerTaskEnd' GROUP BY "Task Info"."Executor ID"
+          SELECT coalesce("Task Info"."Executor ID", "Executor ID") AS executor_id,
+            max(coalesce("Task Executor Metrics"."JVMHeapMemory", "Executor Metrics"."JVMHeapMemory")) AS heap
+          FROM events
+          WHERE kind IN ('SparkListenerTaskEnd', '{_EXECUTOR_PEAKS_KIND}') GROUP BY ALL
         ), ids AS (
           SELECT executor_id FROM added UNION SELECT executor_id FROM block_managers UNION SELECT executor_id FROM removed
         )
@@ -724,7 +730,8 @@ _PLAN_NODE_METRICS = Table(
     name='plan_node_metrics',
     description=(
         "Every metric a plan node declares, aggregated as the History Server's SQL tab aggregates it. "
-        'A metric AQE declared for a subquery plan it never logged has no plan version or node.'
+        'A metric AQE declared for a subquery plan it never logged has no plan version or node. '
+        "In a log rebuilt from a server's REST JSON, each value is what the SQL tab displayed, and no metric has an accumulator."
     ),
     source="""
         SELECT refs.*, aggregates.value_count, aggregates.total, aggregates.minimum, aggregates.median, aggregates.maximum,
@@ -736,19 +743,44 @@ _PLAN_NODE_METRICS = Table(
         ('plan_version', 'BIGINT', 'plan_version', 'The plan version that declares it. Null for an AQE subquery plan never logged.'),
         ('node_id', 'BIGINT', 'node_id', 'The node that declares it, numbered as in plan_nodes. Null where plan_version is.'),
         ('metric_name', 'VARCHAR', 'metric_name', 'The name the Spark UI shows. metrics show describes each.'),
-        ('metric_type', 'VARCHAR', 'metric_type', "Spark's kind for it: size, timing, nsTiming, sum or average."),
-        ('accumulator_id', 'BIGINT', 'accumulator_id', 'The accumulator tasks and the driver report its values to.'),
-        ('value_count', 'BIGINT', 'value_count', 'How many values were reported to it.'),
-        ('total', 'DOUBLE', _statistic('total', total=True), 'The sum of every reported value, in its unit. Null for an average.'),
-        ('min', 'DOUBLE', _statistic('minimum'), 'The smallest reported value, in its unit.'),
-        ('median', 'DOUBLE', _statistic('median'), 'The median reported value, in its unit.'),
-        ('max', 'DOUBLE', _statistic('maximum'), 'The largest reported value, in its unit.'),
-        ('max_stage_id', 'BIGINT', 'maximum_stage_id', 'The stage of the task that reported the largest value. Null where the driver did.'),
-        ('max_task_id', 'BIGINT', 'maximum_task_id', 'The task that reported the largest value. Null where the driver did.'),
+        (
+            'metric_type',
+            'VARCHAR',
+            'metric_type',
+            "Spark's kind for it: size, timing, nsTiming, sum or average. Null where the log was rebuilt from REST.",
+        ),
+        (
+            'accumulator_id',
+            'BIGINT',
+            'accumulator_id',
+            'The accumulator tasks and the driver report its values to. Null where the log was rebuilt from REST.',
+        ),
+        ('value_count', 'BIGINT', 'value_count', 'How many values were reported to it. Null where the log was rebuilt from REST.'),
+        (
+            'total',
+            'DOUBLE',
+            f'coalesce({_statistic("total", total=True)}, display_total)',
+            'The sum of every reported value, in its unit. Null for an average.',
+        ),
+        ('min', 'DOUBLE', f'coalesce({_statistic("minimum")}, display_min)', 'The smallest reported value, in its unit.'),
+        ('median', 'DOUBLE', f'coalesce({_statistic("median")}, display_median)', 'The median reported value, in its unit.'),
+        ('max', 'DOUBLE', f'coalesce({_statistic("maximum")}, display_max)', 'The largest reported value, in its unit.'),
+        (
+            'max_stage_id',
+            'BIGINT',
+            'coalesce(maximum_stage_id, display_max_stage_id)',
+            'The stage of the task that reported the largest value. Null where the driver did.',
+        ),
+        (
+            'max_task_id',
+            'BIGINT',
+            'coalesce(maximum_task_id, display_max_task_id)',
+            'The task that reported the largest value. Null where the driver did.',
+        ),
         (
             'unit',
             'VARCHAR',
-            _METRIC_UNITS,
+            f'coalesce({_METRIC_UNITS}, display_unit)',
             'The unit of total, min, median and max: bytes, ms or count. Null for an average, which has none.',
         ),
     ),

@@ -50,12 +50,14 @@ _SCOPE_FIELDS = frozenset(field.name for field in dc.fields(FindingScope)) - {'a
 _MINOR_SHARE = 0.05
 _MAJOR_SHARE = 0.5
 
-_COUNTED_SIGNALS = ('plan_metrics', 'tasks', 'executors', 'environment', 'timeline')
+_COUNTED_SIGNALS = ('plan_metrics', 'plan_stages', 'tasks', 'executors', 'environment', 'timeline')
 # Only explain(mode='cost') text prints the optimizer's estimates, so no event log can feed a rule reading them.
 _LOG_SIGNALS: frozenset[Signal] = frozenset(SIGNALS) - {'plan_estimates'}
+# A log rebuilt from a server's REST JSON holds displayed metric values, which no task reported.
 _SIGNALS_SQL = """
 SELECT
-  (SELECT count(*) FROM plan_node_metrics WHERE value_count > 0) > 0 AS plan_metrics,
+  (SELECT count(*) FROM plan_node_metrics WHERE value_count > 0 OR total IS NOT NULL OR max IS NOT NULL) > 0 AS plan_metrics,
+  (SELECT count(*) FROM node_stages) > 0 AS plan_stages,
   (SELECT count(*) FROM tasks_effective) > 0 AS tasks,
   (SELECT count(*) FROM executors) > 0 AS executors,
   (SELECT count(*) FROM environment) > 0 AS environment,
@@ -213,6 +215,7 @@ def analyze(
     tables = log.tables
     plans: dict[int | None, Plan] = {execution_id: plan for execution_id, plan in tables.last_plans().items()}
     held = dict(zip(_COUNTED_SIGNALS, tables.query(_SIGNALS_SQL).fetchall()[0], strict=True))
+    held['whole_run'] = 'evicted_records' not in tables.manifest.lacks
     signals = frozenset(signal for signal in SIGNALS if held.get(signal) or (signal == 'plan' and plans))
     node_metrics: dict[int | None, dict[int, dict[str, float]]] = {
         execution_id: totals for execution_id, totals in tables.node_metric_totals().items()

@@ -25,6 +25,7 @@ from sparkxray import spark_ui_format
 from sparkxray.errors import SparkxrayError
 from sparkxray.ingest import IngestManifest
 from sparkxray.rules import Severity
+from sparkxray.tables.manifest import TablesManifest
 from sparkxray.tables.registry import column_unit
 from sparkxray.tables.rows import Rows
 
@@ -282,3 +283,18 @@ def ingest_notes(manifest: IngestManifest) -> None:
         note(f"{manifest.app_id}: the log's last line was cut off partway, and is left out")
     if manifest.compacted:
         note(f'{manifest.app_id}: a History Server compacted this log, which dropped the events of finished tasks')
+    if manifest.layout == 'rest_rebuild':
+        note(
+            f'{manifest.app_id}: the server serves no event log for it, so this one was rebuilt from its REST JSON. '
+            "That holds no stage's parents, no task's accumulator updates or executor metrics, and no setting a SQL "
+            'execution changed at runtime'
+        )
+
+
+def tables_notes(app_id: str, manifest: TablesManifest) -> None:
+    """Notes on stderr about what a log's tables hold only part of."""
+    if 'evicted_records' in manifest.lacks:
+        note(
+            f'{app_id}: the server had dropped part of the run past its spark.ui.retained* limits, '
+            'so the tables hold only the jobs, stages, SQL executions and tasks it kept'
+        )
