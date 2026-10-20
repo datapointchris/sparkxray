@@ -21,6 +21,7 @@ _OUTCOME_SQL = f"""
 WITH run AS ({RUN_SPAN_SQL})
 SELECT application.app_id, application.app_name, application.spark_version,
   run.end_epoch_ms - run.start_epoch_ms AS wall_ms,
+  application.end_epoch_ms IS NOT NULL AS ended,
   application.end_epoch_ms IS NOT NULL AND NOT EXISTS (SELECT 1 FROM jobs WHERE result IS DISTINCT FROM 'JobSucceeded') AS succeeded
 FROM application, run
 """
@@ -35,7 +36,8 @@ WITH walls AS (
   WHERE plan_nodes.node_id = 0
   GROUP BY plan_nodes.execution_id
 )
-SELECT sql_executions.execution_id, sql_executions.description, walls.wall_ms, roots.initial_plan_hash, roots.final_plan_hash
+SELECT sql_executions.execution_id, sql_executions.description, walls.wall_ms, roots.initial_plan_hash, roots.final_plan_hash,
+  sql_executions.end_epoch_ms IS NOT NULL AND sql_executions.error IS NULL AS finished
 FROM sql_executions LEFT JOIN walls USING (execution_id) LEFT JOIN roots USING (execution_id)
 ORDER BY sql_executions.execution_id
 """
@@ -63,7 +65,8 @@ WITH summaries AS ({STAGE_SUMMARIES_SQL}), owners AS (
     list_sort(list(coalesce(shuffle_remote_read_bytes, 0) + coalesce(shuffle_local_read_bytes, 0))) AS shuffle_reads
   FROM tasks_effective GROUP BY stage_id
 )
-SELECT summaries.stage_id, summaries.name, owners.execution_id, summaries.wall_ms, summaries.task_count,
+SELECT summaries.stage_id, summaries.name, owners.execution_id, summaries.status = 'complete' AS finished,
+  summaries.wall_ms, summaries.task_count,
   effective.executor_run_time_ms, effective.executor_cpu_time_ns,
   summaries.input_bytes, effective.input_records, summaries.output_bytes, effective.output_records,
   summaries.shuffle_read_bytes, effective.shuffle_read_records, summaries.shuffle_write_bytes, effective.shuffle_write_records,

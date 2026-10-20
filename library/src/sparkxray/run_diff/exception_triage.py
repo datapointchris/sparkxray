@@ -25,7 +25,8 @@ ExceptionStatus = Literal['new', 'recurring', 'routine', 'resolved']
 STATUS_ORDER: tuple[ExceptionStatus, ...] = ('new', 'recurring', 'routine', 'resolved')
 
 # Each rewrite runs in order over the line, after the run's own hosts are replaced. A URI or path
-# goes before a number inside it, and a UUID before the hex run inside it.
+# goes before a number inside it, and a UUID before the hex run inside it. A number after a letter
+# is part of a name, as in `Int32`, while one after `_` is an id, as in `broadcast_5_piece0`.
 _REWRITES = (
     (re.compile(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'), '<uuid>'),
     (re.compile(r'\b[A-Za-z][A-Za-z0-9+.-]*:/[^\s,;\'")\]]*'), '<path>'),
@@ -33,7 +34,7 @@ _REWRITES = (
     (re.compile(r'\b\d{1,3}(?:\.\d{1,3}){3}\b'), '<host>'),
     (re.compile(r'\b0x[0-9a-fA-F]+\b'), '<hex>'),
     (re.compile(r'\b(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{8,}\b'), '<hex>'),
-    (re.compile(r'(?<![A-Za-z_])\d+'), '<n>'),
+    (re.compile(r'(?<![A-Za-z0-9])\d+'), '<n>'),
 )
 
 

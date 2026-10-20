@@ -198,8 +198,15 @@ class RunDiff:
     schema_version: int = SCHEMA_VERSION
 
     def gate(self, fail_on: str) -> Gate:
-        """Whether no new finding of run B is at or above the severity `fail_on`, and which are, as `Analysis.gate` judges."""
-        return gate_findings(self.findings.new, fail_on)
+        """Whether run B passes the severity `fail_on`, as `Analysis.gate` judges, over the findings it added or raised to the bar.
+
+        A finding both runs report blocks when run B's is at or above `fail_on` and run A's was
+        below it. One that was already at the bar in run A does not.
+        """
+        persisting = self.findings.persisting
+        already = set(gate_findings([pair.a for pair in persisting], fail_on).blocking)
+        risen = [pair.b for pair in persisting if pair.a.finding_id not in already]
+        return gate_findings([*self.findings.new, *risen], fail_on)
 
     def to_json(self) -> dict[str, Any]:
         return {

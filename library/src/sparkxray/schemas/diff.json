@@ -13,7 +13,7 @@
     "baselines": {"type": "array", "items": {"$ref": "#/$defs/run"}, "description": "The runs --baseline named, read for their exceptions alone."},
     "gate": {
       "$ref": "findings.json#/properties/gate",
-      "description": "Present where --fail-on is given. It judges run B's new findings alone: it passes when none is at or above fail_on, and blocking names those that are."
+      "description": "Present where --fail-on is given. It judges run B's new findings, and each finding both runs report whose severity in run B is at or above fail_on and in run A was below it. It passes when none is, and blocking names those that are."
     },
     "sql": {
       "type": "object",
@@ -59,19 +59,35 @@
     "findings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["new", "resolved", "persisting"],
+      "required": ["new", "resolved", "persisting", "on_parts_b_did_not_finish"],
       "description": "Two findings match when one rule reported them about paired parts of the runs: the paired execution or stage, a node of the paired execution, the application, or executors in id order. A finding_id carries its run's ids, so it never matches.",
       "properties": {
         "new": {"type": "array", "items": {"$ref": "findings.json#/$defs/finding"}, "description": "Run B's findings run A lacks, in run B's analysis order."},
-        "resolved": {"type": "array", "items": {"$ref": "findings.json#/$defs/finding"}, "description": "Run A's findings run B lacks, in run A's analysis order."},
+        "resolved": {
+          "type": "array",
+          "items": {"$ref": "findings.json#/$defs/finding"},
+          "description": "Run A's findings run B lacks about a part run B finished, in run A's analysis order: a stage that completed, an execution that ended without an error, or the application, where run B's ended."
+        },
+        "on_parts_b_did_not_finish": {
+          "type": "array",
+          "items": {"$ref": "findings.json#/$defs/finding"},
+          "description": "Run A's findings run B lacks about a part run B did not finish, in run A's analysis order: an execution or stage it has no match for or that did not complete, or the application where run B's log ends before it did. They are not resolved, since run B never got as far."
+        },
         "persisting": {
           "type": "array",
           "description": "The findings both runs report, in run B's analysis order. A severity that moved shows as the two findings' severities.",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["a", "b"],
-            "properties": {"a": {"$ref": "findings.json#/$defs/finding"}, "b": {"$ref": "findings.json#/$defs/finding"}}
+            "required": ["a", "b", "finished_in_b"],
+            "properties": {
+              "a": {"$ref": "findings.json#/$defs/finding"},
+              "b": {"$ref": "findings.json#/$defs/finding"},
+              "finished_in_b": {
+                "type": "boolean",
+                "description": "Whether run B finished the part the finding is about, as resolved counts it. Where it did not, a lower severity in run B is no improvement."
+              }
+            }
           }
         }
       }
@@ -101,7 +117,7 @@
       "required": ["metric", "unit", "a", "b", "delta", "delta_share", "notable"],
       "description": "One metric in both runs. A stage's sums are over its effective tasks, as stages list takes them, and its task_count counts every attempt.",
       "properties": {
-        "metric": {"type": "string", "description": "A column name of stages list --json."},
+        "metric": {"type": "string", "description": "The metric, named as sparkxray names a column, so its suffix names its unit."},
         "unit": {"type": "string", "description": "The unit a, b and delta are in, from the metric's name: ms, ns, bytes, records, count or x."},
         "a": {"type": ["number", "null"]},
         "b": {"type": ["number", "null"]},

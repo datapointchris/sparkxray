@@ -50,7 +50,7 @@ class Alignment(Generic[_Match]):
 
 
 def align_executions(a: RunFacts, b: RunFacts) -> Alignment[ExecutionMatch]:
-    """Run B's SQL executions paired with run A's, in the passes the module describes."""
+    """Run B's SQL executions paired with run A's, in the passes the module describes, the pairs in run B's order."""
 
     def final_operators(facts: RunFacts) -> Callable[[_Row], Hashable | None]:
         def key(row: _Row) -> Hashable | None:
@@ -68,7 +68,8 @@ def align_executions(a: RunFacts, b: RunFacts) -> Alignment[ExecutionMatch]:
         ('initial_plan', lambda row: row['initial_plan_hash'], lambda row: row['initial_plan_hash']),
         ('description_and_order', lambda row: (row['description'],), lambda row: (row['description'],)),
     ]
-    return _in_passes(a.executions, b.executions, passes)
+    aligned = _in_passes(a.executions, b.executions, passes)
+    return dc.replace(aligned, paired=tuple(sorted(aligned.paired, key=lambda pair: pair.b['execution_id'])))
 
 
 def align_stages(a: RunFacts, b: RunFacts, executions: Alignment[ExecutionMatch]) -> Alignment[StageMatch]:
