@@ -121,7 +121,11 @@ def diff(
     thresholds: ThresholdFileOption = None,
     fail_on: Annotated[
         Severity | None,
-        typer.Option('--fail-on', help='Exit 3 when a finding new in LOG_B is at or above this severity.', show_default=False),
+        typer.Option(
+            '--fail-on',
+            help='Exit 3 when a finding of LOG_B is at or above this severity, and is new or was below it in LOG_A.',
+            show_default=False,
+        ),
     ] = None,
     as_json: JsonOption = False,
 ) -> None:
@@ -133,7 +137,8 @@ def diff(
     view prints the notable changes and counts the rest, and `--json` carries every row.
 
     Exits 0 when it ran, whatever changed, and 2 on a usage error. Exits 3 when `--fail-on` is
-    given and LOG_B has a new finding at or above it, or when a log could not be read.
+    given and LOG_B has a finding at or above it that is new or was below it in LOG_A, or when a
+    log could not be read.
     """
     opened_a, opened_b = open_log(log_a), open_log(log_b)
     opened_baselines = [open_log(location) for location in baseline or ()]
@@ -197,20 +202,26 @@ def _print_diff(compared: RunDiff) -> None:
             render.print_records(records, ('execution_id', 'description', 'wall_ms'), title=f'SQL executions only run {run} holds')
 
     config = compared.config
-    settings = [
-        {'change': change, **setting.to_json()} for change in ('added', 'removed', 'changed') for setting in getattr(config, change)
-    ]
-    if settings:
-        render.print_records(settings, ('change', 'section', 'key', 'a', 'b'), title='Settings that differ')
+    render.print_list(
+        'Settings that differ',
+        [
+            f'{setting.section} {setting.key}: {_setting_value(setting.a)} → {_setting_value(setting.b)}'
+            for change in ('added', 'removed', 'changed')
+            for setting in getattr(config, change)
+        ],
+    )
 
     findings = compared.findings
     for title, listed in (('Findings new in run B', findings.new), ('Findings resolved since run A', findings.resolved)):
         if listed:
             render.print_records([finding.to_json() for finding in listed], ('finding_id', 'severity', 'title'), title=title)
-    moved_severity = [pair for pair in findings.persisting if pair.a.severity != pair.b.severity]
     render.print_list(
         'Findings in both runs whose severity moved',
-        [f'{pair.a.finding_id} → {pair.b.finding_id}: {pair.a.severity} → {pair.b.severity}' for pair in moved_severity],
+        [
+            f'{pair.a.finding_id} → {pair.b.finding_id}: {pair.a.severity} → {pair.b.severity}'
+            + ('' if pair.finished_in_b else ', on a part run B did not finish')
+            for pair in findings.severity_moved
+        ],
     )
 
     unusual = [found.to_json() for found in compared.exceptions if found.status in ('new', 'recurring')]
@@ -224,9 +235,15 @@ def _print_diff(compared: RunDiff) -> None:
         'paired stages with no notable change': still_stages,
         'stages only run A ran': len(compared.stages.only_a),
         'stages only run B ran': len(compared.stages.only_b),
-        'findings in both runs at the same severity': len(findings.persisting) - len(moved_severity),
+        'findings in both runs at the same severity': len(findings.persisting) - len(findings.severity_moved),
+        'findings of run A on parts run B did not finish, so not resolved': len(findings.on_parts_b_did_not_finish),
         'settings a run redacted, so unknown': len(config.unknown),
         'routine exceptions': sum(found.status == 'routine' for found in compared.exceptions),
         'exceptions resolved since run A': sum(found.status == 'resolved' for found in compared.exceptions),
     }
     render.print_list('Not shown, and in --json', [f'{what}: {count}' for what, count in counted.items() if count])
+
+
+def _setting_value(value: str | None) -> str:
+    """A setting's value in one run, or `unset` where that run did not set it."""
+    return 'unset' if value is None else value

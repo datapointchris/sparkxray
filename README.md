@@ -140,8 +140,8 @@ stages by the plan nodes they ran. It prints what moved by at least 10% and a fl
 plans that differ, the settings that differ, and the findings new in B or resolved since A. An
 exception B shares with a run that succeeded, A or a `--baseline LOG`, is routine, so the view
 lists only the others. `--json` carries every row, and `sparkxray schemas show diff` prints its
-schema. It exits 0 whatever changed. Given `--fail-on`, it exits 3 when B has a new finding at or
-above it:
+schema. It exits 0 whatever changed. Given `--fail-on`, it exits 3 when B has a finding at or
+above it that is new, or that was below it in A:
 
 ```bash
 sparkxray logs diff last-good-run tonights-run --fail-on high

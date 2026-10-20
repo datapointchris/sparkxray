@@ -7,6 +7,7 @@ A table shows each value in the unit its column's name ends in, as the Spark UI 
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import sys
 from collections.abc import Iterator
@@ -88,7 +89,9 @@ def print_rows(rows: Rows, columns: Sequence[str] | None = None, *, title: str |
     print_records(rows.to_json(), [column for column in (columns or rows.columns) if column in rows.columns], title=title)
 
 
-def print_records(records: Sequence[Mapping[str, Any]], columns: Sequence[str], *, title: str | None = None) -> None:
+def print_records(
+    records: Sequence[Mapping[str, Any]], columns: Sequence[str], *, title: str | None = None, numbers: Sequence[str] = ()
+) -> None:
     """Print mappings as a table of the named columns, numbers right-aligned, every row one line.
 
     A table wider than the terminal is laid out again. A number, a handle or a short one-word
@@ -97,11 +100,14 @@ def print_records(records: Sequence[Mapping[str, Any]], columns: Sequence[str], 
     wrapping. Where that would leave a text column under `_TEXT_FLOOR` characters, each record
     prints as its own block of field and value instead, as psql's expanded display does.
 
+    `numbers` names columns whose values are numbers already shown as text, as when each row's
+    unit differs. They print as numbers do.
+
     Every cell is a `Text`, so a bracket in a value, as in a plan's `Project [id#0L]`, prints
     as written rather than being read as a style.
     """
     cells = {column: [_cell(column, record.get(column)) for record in records] for column in columns}
-    numeric = {column: any(_is_number(record.get(column)) for record in records) for column in columns}
+    numeric = {column: column in numbers or any(_is_number(record.get(column)) for record in records) for column in columns}
     natural = _records_table(columns, cells, numeric, title, 'natural')
     if not records or _natural_width(natural) <= stdout.width:
         print_table(natural)
@@ -196,28 +202,25 @@ def print_described(
 
 
 def print_metric_changes(records: Sequence[Mapping[str, Any]], *, title: str) -> None:
-    """Print one row per metric that moved: the part of the run, how it was paired, the metric, each run's value, and the change.
+    """Print the metrics that moved, a table for each part of the run under a line naming the part and how it was paired.
 
     Each record carries `part`, `matched_by`, and a metric's fields as `MetricDelta.to_json` gives
-    them. Each value prints in the record's own unit, and the change as a share of run A's.
+    them, the records of one part together. Each value prints in the record's own unit, and the
+    change as a share of run A's. A part's line is never wrapped, so its pairing reads whole.
     """
-    printed = table(title=title)
-    printed.add_column('part', no_wrap=True)
-    printed.add_column(header('matched_by'), overflow='fold')
-    printed.add_column('metric', no_wrap=True)
-    for column in ('a', 'b', 'change'):
-        printed.add_column(column, justify='right', no_wrap=True)
-    for record in records:
-        share = record['delta_share']
-        printed.add_row(
-            Text(record['part']),
-            Text(record['matched_by']),
-            Text(header(record['metric'])),
-            Text(shown_in(record['unit'], record['a'])),
-            Text(shown_in(record['unit'], record['b'])),
-            Text('' if share is None else f'{share * 100:+.0f}%'),
-        )
-    print_table(printed)
+    stdout.print(Text(title, style='bold'))
+    for (part, matched_by), metrics in itertools.groupby(records, key=lambda record: (record['part'], record['matched_by'])):
+        stdout.print(Text(f'{part}, paired by {matched_by}'), soft_wrap=True)
+        rows = [
+            {
+                'metric': record['metric'],
+                'a': shown_in(record['unit'], record['a']),
+                'b': shown_in(record['unit'], record['b']),
+                'change': '' if record['delta_share'] is None else f'{record["delta_share"] * 100:+.0f}%',
+            }
+            for record in metrics
+        ]
+        print_records(rows, ('metric', 'a', 'b', 'change'), numbers=('a', 'b', 'change'))
 
 
 def print_table(printed: Table) -> None:

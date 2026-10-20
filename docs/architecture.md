@@ -357,8 +357,10 @@ codes. It reads the rule catalog, the table registry and the error registry for 
 the three has a hand-written copy to fall behind the code, and a command or error added without
 docs still appears.
 
-A command's exit codes are read from its parameters. One taking `--fail-on` exits 3 on a finding
-at or above it, and one taking a log exits 3 when the log cannot be read. A log parameter shows
+A command's exit codes are read from its parameters. One taking `--fail-on` exits 3 when it fails
+the gate that flag's help states, and one taking a log exits 3 when the log cannot be read. The
+gate is the flag's to state, because commands gate different findings: `findings list` every
+finding, and `logs diff` those run B added or raised to the bar. A log parameter shows
 as `LOG`, or `LOG_<role>` where a command takes two. Every refused input exits 2, and its error
 code says which input.
 
@@ -412,6 +414,16 @@ Findings match by rule and the paired part of the run, never by `finding_id`, wh
 run's ids. A plan node pairs first by its label in the last plan, then in node order, because
 skew-join handling rewrites a join's label. Executors have no identity across runs, so they pair
 in id order.
+
+A finding of A that B lacks is resolved only where B finished its part. That is a stage that
+completed, an execution that ended without an error, or, for the application and its executors,
+an application that ended. A B killed partway read a fraction of the data its last stage would
+have, too little to show the skew A's did. So its other findings are listed apart, under
+`on_parts_b_did_not_finish`, and a finding both report says whether B finished its part.
+
+`--fail-on` gates the findings B added, and each one both runs report that B raised to the bar
+from below it. A finding A already had at the bar does not block, so a run that kept a known
+problem passes. One that worsened past the bar fails, as `findings list` on B alone would.
 
 An exception becomes a key: its one line, with the run's hosts replaced, then its paths, UUIDs, hex
 ids and numbers. A key B shares with a run that succeeded is routine. A fetch failure a retry
