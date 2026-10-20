@@ -6,6 +6,7 @@ from sparkxray.rules.analysis import RuleRun
 from sparkxray.rules.analysis import SkippedRule
 from sparkxray.rules.analysis import analyze
 from sparkxray.rules.analysis import analyze_plan
+from sparkxray.rules.analysis import gate_findings
 from sparkxray.rules.catalog import catalog
 from sparkxray.rules.catalog import register
 from sparkxray.rules.catalog import rule_by_id
@@ -39,6 +40,7 @@ __all__ = [
     'analyze',
     'analyze_plan',
     'catalog',
+    'gate_findings',
     'register',
     'rule_by_id',
     'rule_lesson',

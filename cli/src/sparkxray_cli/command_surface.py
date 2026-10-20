@@ -42,10 +42,11 @@ def _walk(ctx: typer.Context, group: Any, path: tuple[str, ...], commands: list[
 
 def _command(path: tuple[str, ...], command: Any) -> dict[str, Any]:
     exit_codes = {'0': 'it ran', '2': _USAGE}
+    # Commands gate different findings, so each one's --fail-on help states its own gate.
     if any('--fail-on' in parameter.opts for parameter in command.params):
         exit_codes |= {
-            '0': 'it ran, and no finding is at or above --fail-on',
-            '3': 'a finding is at or above --fail-on, or the log could not be read',
+            '0': 'it ran, and passed the gate its --fail-on help states',
+            '3': 'it failed the gate its --fail-on help states, or a log could not be read',
         }
     elif any(_names_a_log(parameter) for parameter in command.params):
         exit_codes['3'] = 'the log could not be read'

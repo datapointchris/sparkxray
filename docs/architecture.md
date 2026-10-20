@@ -357,8 +357,10 @@ codes. It reads the rule catalog, the table registry and the error registry for 
 the three has a hand-written copy to fall behind the code, and a command or error added without
 docs still appears.
 
-A command's exit codes are read from its parameters. One taking `--fail-on` exits 3 on a finding
-at or above it, and one taking a log exits 3 when the log cannot be read. A log parameter shows
+A command's exit codes are read from its parameters. One taking `--fail-on` exits 3 when it fails
+the gate that flag's help states, and one taking a log exits 3 when the log cannot be read. The
+gate is the flag's to state, because commands gate different findings: `findings list` every
+finding, and `logs diff` those run B added or raised to the bar. A log parameter shows
 as `LOG`, or `LOG_<role>` where a command takes two. Every refused input exits 2, and its error
 code says which input.
 
@@ -384,3 +386,57 @@ Spark's own name for it in `ExplainUtils.generateOperatorIDs`.
 
 *Rejected:* a capabilities document written by hand. An agent trusts it most, and nothing would
 say when it went stale.
+
+## A run diff pairs executions and stages by what they ran, never by id
+
+Spark numbers jobs and stages in submission order. One extra action early in a run renumbers
+every stage after it. So `diff_logs` pairs run B's SQL executions with run A's in passes, each over
+what the passes before left unpaired:
+
+1. the description and the hash of the plan before AQE ran;
+2. the description and the operator counts of the last plan;
+3. the plan before AQE ran, alone;
+4. the description and its order among executions with that description.
+
+Two runs of one query on different data share a first plan, while AQE's last plan follows the
+sizes it saw. The third pass is for a description that changed while the query did not, as when a
+job describes a query by the settings it ran under. Each pair records the pass that made it, so a
+weak pairing reads as weak.
+
+A stage counts toward the execution of the first job listing it, which is the job that ran it. A
+later job lists it only to skip it. Inside a paired execution, stages pair by the set of plan
+nodes their tasks reported metrics to, then by name. Skew-join handling changes the nodes a join's
+stage reports to, so the name pass follows. A stage of no execution pairs by name, which is
+Spark's call site. Each log's tables are their own DuckDB connection, so each run is read with SQL
+and the pairing runs in Python.
+
+Findings match by rule and the paired part of the run, never by `finding_id`, which carries the
+run's ids. A plan node pairs first by its label in the last plan, then in node order, because
+skew-join handling rewrites a join's label. Executors have no identity across runs, so they pair
+in id order.
+
+A finding of A that B lacks is resolved only where B finished its part. That is a stage that
+completed, an execution that ended without an error, or, for the application and its executors,
+an application that ended. A B killed partway read a fraction of the data its last stage would
+have, too little to show the skew A's did. So its other findings are listed apart, under
+`on_parts_b_did_not_finish`, and a finding both report says whether B finished its part.
+
+`--fail-on` gates the findings B added, and each one both runs report that B raised to the bar
+from below it. A finding A already had at the bar does not block, so a run that kept a known
+problem passes. One that worsened past the bar fails, as `findings list` on B alone would.
+
+An exception becomes a key: its one line, with the run's hosts replaced, then its paths, UUIDs, hex
+ids and numbers. A key B shares with a run that succeeded is routine. A fetch failure a retry
+recovered is one, and so is a speculative copy killed when its twin finished. A key B shares only
+with a failed A is recurring, and one only B holds is new. The view lists new and recurring keys,
+and counts the routine ones.
+
+A metric moved notably when its change is 10% of A's value and at least its unit's floor: 5 s of
+time, 64 MiB, 1 for a max-to-median ratio, and 10% of A for a count. A share alone is noise on
+small numbers, as 40 ms to 80 ms doubles and costs nothing. No prior tool publishes a floor, so
+these are proposed.
+
+*Rejected:* pairing by id, which one warmup action breaks for every stage after it.
+
+*Rejected:* one key per exception class. A run that failed on every attempt and a run that
+recovered on retry both throw a `PythonException`, and only the line tells them apart.

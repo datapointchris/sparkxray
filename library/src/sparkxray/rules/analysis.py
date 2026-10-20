@@ -124,9 +124,7 @@ class Analysis:
 
     def gate(self, fail_on: str) -> Gate:
         """Whether no finding is at or above the severity `fail_on`, and which are. Another word raises `UnknownSeverityError`."""
-        bar = _rung(fail_on, field='fail_on')
-        blocking = tuple(finding.finding_id for finding in self.findings if SEVERITIES.index(finding.severity) >= bar)
-        return Gate(SEVERITIES[bar], not blocking, blocking)
+        return gate_findings(self.findings, fail_on)
 
     def narrowed(self, *, min_severity: str | None = None, limit: int | None = None) -> Analysis:
         """This analysis with only its findings at or above `min_severity`, and only the first `limit` of those, in its order."""
@@ -162,6 +160,13 @@ class Gate:
 
     def to_json(self) -> dict[str, Any]:
         return {'fail_on': self.fail_on, 'passed': self.passed, 'blocking': list(self.blocking)}
+
+
+def gate_findings(findings: Iterable[Finding], fail_on: str) -> Gate:
+    """Whether none of `findings` is at or above the severity `fail_on`, and which are. Another word raises `UnknownSeverityError`."""
+    bar = _rung(fail_on, field='fail_on')
+    blocking = tuple(finding.finding_id for finding in findings if SEVERITIES.index(finding.severity) >= bar)
+    return Gate(SEVERITIES[bar], not blocking, blocking)
 
 
 def _rung(severity: str, *, field: str) -> int:

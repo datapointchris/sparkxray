@@ -73,6 +73,7 @@ sparkxray plans show spark-application-1729 --sql 0
 sparkxray rules show stage.shuffle-skew
 sparkxray metrics show "Executor CPU Time"
 sparkxray reports write spark-application-1729 --out report.md
+sparkxray logs diff spark-application-1728 spark-application-1729
 ```
 
 A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and `26 s`. `--json`
@@ -132,6 +133,19 @@ the same log file, thresholds and sparkxray version write the same bytes on any 
 `--out FILE` creates FILE's directory, replaces the file only once the new one is whole, then
 prints its path. `reports write` gates on `--fail-on` as `findings list` does. It writes the
 report whether the gate passes or not, and the report states the verdict, as `gate` in the JSON.
+
+`logs diff LOG_A LOG_B` explains run B against run A, usually a good or older run of the same
+job. Stage ids shift between runs, so it pairs SQL executions by their description and plan, and
+stages by the plan nodes they ran. It prints what moved by at least 10% and a floor, the last
+plans that differ, the settings that differ, and the findings new in B or resolved since A. An
+exception B shares with a run that succeeded, A or a `--baseline LOG`, is routine, so the view
+lists only the others. `--json` carries every row, and `sparkxray schemas show diff` prints its
+schema. It exits 0 whatever changed. Given `--fail-on`, it exits 3 when B has a finding at or
+above it that is new, or that was below it in A:
+
+```bash
+sparkxray logs diff last-good-run tonights-run --fail-on high
+```
 
 ## A program or an agent drives sparkxray from what it prints
 
@@ -348,6 +362,17 @@ report = build_report(log, analysis, fail_on='critical')  # without an analysis,
 write_report(render_report(report, 'markdown'), 'report.md')
 report.gate.passed                           # False when a finding is at or above fail_on
 report.to_json()                             # the shape sparkxray/schemas/report.json pins
+```
+
+`sparkxray.run_diff.diff_logs` compares two runs as `logs diff` does:
+
+```python
+from sparkxray.run_diff import diff_logs
+
+diff = diff_logs(EventLog.open(good), EventLog.open(slow), baselines=[EventLog.open(other_good)])
+[finding.finding_id for finding in diff.findings.new]
+diff.gate('high').passed                     # False when a finding new in the slow run is at or above high
+diff.to_json()                               # the shape sparkxray/schemas/diff.json pins
 ```
 
 `sparkxray.schemas.schema_document(name)` returns any schema `schemas show` prints, and

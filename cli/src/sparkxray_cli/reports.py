@@ -59,4 +59,4 @@ def write(
     with render.status(f'Writing the report of {opened.manifest.app_id}'):
         text = render_report(build_report(opened, analysis, fail_on), report_format)
     render.emit_text(text if out is None else f'{write_report(text, out)}\n')
-    exit_if_gated(analysis, fail_on)
+    exit_if_gated(analysis.gate(fail_on))
