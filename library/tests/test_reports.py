@@ -1,4 +1,7 @@
-"""A fixture log's JSON report and tables manifest validate against their schemas, which take findings and the ingest manifest by `$ref`."""
+"""A fixture log's JSON report, tables manifest and simulation validate against their schemas.
+
+The report and the manifest take findings and the ingest manifest by `$ref`.
+"""
 
 import json
 import pathlib
@@ -11,12 +14,14 @@ from sparkxray.ingest import EventLog
 from sparkxray.reports import build_report
 from sparkxray.reports import render_json
 from sparkxray.schemas import schema_document
+from sparkxray.simulation import simulate
 
 _REFERENCED = referencing.Registry().with_resources(
     (f'{name}.json', referencing.Resource.from_contents(schema_document(name))) for name in ('findings', 'ingest-manifest')
 )
 REPORT_SCHEMA = jsonschema.Draft202012Validator(schema_document('report'), registry=_REFERENCED)
 TABLES_MANIFEST_SCHEMA = jsonschema.Draft202012Validator(schema_document('tables-manifest'), registry=_REFERENCED)
+SIMULATION_SCHEMA = jsonschema.Draft202012Validator(schema_document('simulation'))
 
 
 # One log per shape a report takes. A codec variant or a Spark 4.2 twin reports what its base log does.
@@ -33,9 +38,12 @@ SHAPES = [
 
 
 @pytest.mark.parametrize('log', SHAPES)
-def test_each_shape_of_fixture_logs_report_and_tables_manifest_validate_against_their_schemas(log: str, tmp_path: pathlib.Path) -> None:
+def test_each_shape_of_fixture_logs_report_tables_manifest_and_simulation_validate_against_their_schemas(
+    log: str, tmp_path: pathlib.Path
+) -> None:
     opened = EventLog.open(FIXTURES / 'logs' / log, cache_dir=tmp_path)
     report = build_report(opened)
 
     REPORT_SCHEMA.validate(json.loads(render_json(report)))
     TABLES_MANIFEST_SCHEMA.validate(opened.tables.manifest.to_json())
+    SIMULATION_SCHEMA.validate(simulate(opened).to_json())

@@ -2,11 +2,18 @@
 
 from pathlib import Path
 
+import jsonschema
+import referencing
 from fixture_logs import FIXTURES
 from sparkxray.ingest import EventLog
 from sparkxray.run_diff import diff_logs
+from sparkxray.schemas import schema_document
 
 BASE = FIXTURES / 'logs/spark-3.5.9/local-1792406949080.zstd'
+DIFF_SCHEMA = jsonschema.Draft202012Validator(
+    schema_document('diff'),
+    registry=referencing.Registry().with_resource('findings.json', referencing.Resource.from_contents(schema_document('findings'))),
+)
 
 
 def test_the_warmup_run_pairs_every_execution_and_stage_of_the_base_run_and_the_base_run_fails_the_gate_on_its_risen_spill(
@@ -17,6 +24,7 @@ def test_the_warmup_run_pairs_every_execution_and_stage_of_the_base_run_and_the_
 
     diff = diff_logs(base, warmup)
 
+    DIFF_SCHEMA.validate(diff.to_json())
     assert [(pair.a_execution_id, pair.b_execution_id) for pair in diff.sql.matched] == [(n, n + 1) for n in range(7)]
     assert [execution.execution_id for execution in diff.sql.only_b] == [0]
     assert diff.stages.only_a == ()
