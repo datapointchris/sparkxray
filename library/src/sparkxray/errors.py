@@ -154,3 +154,9 @@ class UnknownColumnError(SparkxrayError):
     code = 'E-QUERY-003'
     raised_when = 'a list is sorted by a column it does not have; lists its columns'
     exit_code = 2
+
+
+class UnknownMetricError(SparkxrayError):
+    code = 'E-METRIC-001'
+    raised_when = 'a metric name is no column, Spark field or plan metric the glossary describes; lists the names it holds'
+    exit_code = 2

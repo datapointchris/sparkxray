@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from sparkxray.errors import QueryError
 from sparkxray.plan.last_plans import plan_for_event
 from sparkxray.plan.tree import Plan
 from sparkxray.rules.findings import ANALYSIS_METADATA_KEY
+from sparkxray.rules.findings import findings_column_descriptions
 from sparkxray.tables.manifest import TablesManifest
 from sparkxray.tables.registry import TABLES
 from sparkxray.tables.registry import TASKS_EFFECTIVE
@@ -39,14 +41,18 @@ GROUP BY ALL
 
 @dc.dataclass(frozen=True, slots=True)
 class ListedColumn:
-    """One column of a table: its name, its DuckDB type, and the unit its name ends in, where it names one."""
+    """One column of a table: its name, its DuckDB type, the unit its name ends in, and what it holds.
+
+    `description` is None only for a `findings.parquet` column another sparkxray version wrote that this one does not describe.
+    """
 
     name: str
     type: str
     unit: str | None
+    description: str | None
 
     def to_json(self) -> dict[str, Any]:
-        return {'name': self.name, 'type': self.type, 'unit': self.unit}
+        return {'name': self.name, 'type': self.type, 'unit': self.unit, 'description': self.description}
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -112,20 +118,25 @@ class Tables:
                 table.description,
                 self.manifest.row_counts[table.name],
                 str(self.path / f'{table.name}.parquet'),
-                tuple(ListedColumn(column.name, column.type, column_unit(column.name)) for column in table.columns),
+                tuple(ListedColumn(column.name, column.type, column_unit(column.name), column.description) for column in table.columns),
             )
             for table in TABLES
         ]
         tasks = next(table for table in listed if table.name == 'tasks')
-        listed.insert(listed.index(tasks) + 1, self._view_listing('tasks_effective', _TASKS_EFFECTIVE_DESCRIPTION, tasks.path))
+        task_columns = {column.name: column.description for column in tasks.columns}
+        listed.insert(
+            listed.index(tasks) + 1, self._view_listing('tasks_effective', _TASKS_EFFECTIVE_DESCRIPTION, tasks.path, task_columns)
+        )
         if (self.path / FINDINGS_FILE).is_file():
-            listed.append(self._view_listing('findings', _FINDINGS_DESCRIPTION, str(self.path / FINDINGS_FILE)))
+            listed.append(
+                self._view_listing('findings', _FINDINGS_DESCRIPTION, str(self.path / FINDINGS_FILE), findings_column_descriptions())
+            )
         return tuple(listed)
 
-    def _view_listing(self, name: str, description: str, path: str) -> ListedTable:
+    def _view_listing(self, name: str, description: str, path: str, column_descriptions: Mapping[str, str | None]) -> ListedTable:
         described = self.connection.execute(f'DESCRIBE {name}').fetchall()
         count = self.connection.execute(f'SELECT count(*) FROM {name}').fetchone()
-        columns = tuple(ListedColumn(column, kind, column_unit(column)) for column, kind, *_ in described)
+        columns = tuple(ListedColumn(column, kind, column_unit(column), column_descriptions.get(column)) for column, kind, *_ in described)
         return ListedTable(name, description, int(count[0]) if count else 0, path, columns)
 
     def last_plans(self) -> dict[int, Plan]:

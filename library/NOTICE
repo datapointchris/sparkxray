@@ -1,9 +1,20 @@
 sparkxray
 Copyright (c) 2026 Chris Birch. Licensed under the MIT License, in LICENSE.
 
-Parts of the rule catalog adapt wording from three projects licensed under the
-Apache License, Version 2.0, a copy of which is in LICENSE-APACHE-2.0.txt
-beside this file.
+Parts of the rule catalog and the metric glossary adapt wording from four
+projects licensed under the Apache License, Version 2.0, a copy of which is in
+LICENSE-APACHE-2.0.txt beside this file.
+
+Apache Spark (https://github.com/apache/spark), tag v4.2.0
+(commit 32f7299601108917fb01920a54e084595b7b3bf8).
+Copyright 2014 and onwards The Apache Software Foundation.
+This product includes software developed at The Apache Software Foundation
+(http://www.apache.org/).
+The metric descriptions in sparkxray/metric_glossary.py and the column
+descriptions in sparkxray/tables/registry.py quote or adapt the tables of
+docs/monitoring.md (Executor Task Metrics, Executor Metrics) and
+docs/web-ui.md (SQL metrics), and the comments of the source files each entry
+cites by path and line.
 
 DataFlint (https://github.com/dataflint/spark), tag v0.9.9
 (commit 27b995bba2027c3001765642ac662ffe2174af72). It ships no NOTICE file.

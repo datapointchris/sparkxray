@@ -197,6 +197,28 @@ def print_record(record: Mapping[str, Any], keys: Sequence[str] | None = None, *
     print_table(printed)
 
 
+def print_described(
+    title: str, records: Sequence[Mapping[str, Any]], columns: Sequence[str], *, summary: str = '', location: str | None = None
+) -> None:
+    """Print a titled table whose last column is prose that wraps, every other column kept whole on its line.
+
+    `summary` and then `location` print between the title and the table. A location is never
+    wrapped, so a path pastes whole.
+    """
+    stdout.print(Text(title, style='bold'))
+    if summary:
+        stdout.print(Text(summary))
+    if location:
+        stdout.print(Text(location, style='dim'), soft_wrap=True)
+    printed = table()
+    for column in columns[:-1]:
+        printed.add_column(header(column), no_wrap=True)
+    printed.add_column(header(columns[-1]))
+    for record in records:
+        printed.add_row(*(Text(shown(column, record.get(column))) for column in columns))
+    print_table(printed)
+
+
 def print_table(printed: Table) -> None:
     """Print a table and a blank line after it, which sets it apart from the next section."""
     stdout.print(printed)

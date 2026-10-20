@@ -30,6 +30,12 @@ benchmarks/parse/ the parse benchmark, run by hand
 - **A rules module never imports `sparkxray.summaries` as it loads.** `summaries` imports
   `tables.relations`, which imports `rules.findings`, so the import would cycle. SQL a rule and a
   summary share lives in `tables/registry.py`, as `EXECUTOR_TIME_CTES` does.
+- **A registry column states what it holds, and a column whose name ends in a unit has a glossary
+  entry.** The description is the fourth field of its `_columns` tuple in `tables/registry.py`.
+  The entry is its `table.column` key in `_COLUMN_SOURCES` in `sparkxray/metric_glossary.py`,
+  which `metrics list` reads. A meaning is quoted from the Spark docs or read from Spark's source,
+  cited by page or by file and line, and credited in `library/NOTICE`. Never write one from the
+  metric's name.
 - **A library refusal reaches the terminal through the root group.** `SparkxrayGroup` in
   `sparkxray_cli/main.py` prints it on stderr and exits with the error's own `exit_code`. So a
   command never catches a `SparkxrayError` itself.

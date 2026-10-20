@@ -70,6 +70,7 @@ sparkxray stages list spark-application-1729 --sort wall_ms -n 5
 sparkxray tasks list spark-application-1729 --stage 4 --sort duration_ms -n 5
 sparkxray tables query spark-application-1729 "select stage_id, max(duration_ms) from tasks_effective group by all"
 sparkxray rules show stage.shuffle-skew
+sparkxray metrics show "Executor CPU Time"
 ```
 
 A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and `26 s`. `--json`
@@ -80,6 +81,13 @@ Progress and notes go to stderr, so stdout holds only the data.
 and how to fix it. Each threshold reads at the value the rule would apply, so `--threshold` and
 `--thresholds` take the same overrides `findings list` does. It ends with what the rule found on
 one of sparkxray's own fixture logs.
+
+`metrics show` says what one number means before anything is read into it. It takes a column, a
+plan metric as `sql show` prints it, or a Spark field such as `Executor CPU Time`. Each entry gives
+the unit sparkxray shows and the unit Spark records, which differ: Spark writes CPU time and shuffle
+write time in nanoseconds beside run time in milliseconds. It also names the event fields read,
+how a derived column such as `scheduler_delay_ms` is computed, and where the meaning comes from.
+`metrics list` prints every entry, and `tables list` prints every column with what it holds.
 
 A list keeps each row on one line. On a narrow terminal its longest text ends in `…`, and
 narrower still each row prints as a block of field and value. A `show` command and `--json`
@@ -171,7 +179,7 @@ print(tables.path)                               # the Parquet directory, for an
 plans = tables.last_plans()                      # each execution's last Plan, without the log
 initial = tables.plan(0, version=0)              # one version of one execution's plan
 rows = tables.rows('select * from stages')       # plain Python values, with columns and types
-tables.listing()                                 # every table and view, with rows and column units
+tables.listing()                                 # every table and view: rows, and each column's unit and meaning
 ```
 
 | Table | One row per |
@@ -198,6 +206,10 @@ reports CPU time in nanoseconds beside run time in milliseconds, and the names k
 An instant ends in `_epoch_ms`, milliseconds since the epoch. So `launch_epoch_ms` is when a task
 started, and `duration_ms` is how long it ran. `plan_node_metrics` holds every kind of metric in
 the same columns, so its `unit` column names each row's unit.
+
+`sparkxray.metric_glossary` describes every column with a unit and every plan metric.
+`metric_entries('Executor CPU Time')` returns each entry a name matches. Each `MetricEntry` holds
+its unit here and in Spark, the event fields it reads, any derivation, and its meaning's source.
 
 `tables.manifest.lacks` names what the log was written without, because Spark leaves it out by
 default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`. A column only
@@ -293,5 +305,6 @@ release.
 
 MIT. The Apache Spark test logs under `fixtures/logs/apache-spark-events/` are copied from Apache
 Spark and stay under the Apache License 2.0, as `fixtures/NOTICE` records. Some of the rule
-catalog's wording is adapted from DataFlint, SparkDoctor and Dr. Elephant, all under the Apache
+catalog's wording is adapted from DataFlint, SparkDoctor and Dr. Elephant, and some metric and
+column descriptions quote Apache Spark's documentation and source. All four are under the Apache
 License 2.0, as `library/NOTICE` records.
