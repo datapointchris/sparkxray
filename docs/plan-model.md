@@ -122,7 +122,8 @@ placeholder, and the parser reads it as unknown.
 ## What AQE changed is the first plan against the last, less what every re-plan adds
 
 `aqe_changes` compares the plan `SQLExecutionStart` carries, version 0, with the last version.
-Three parts make up the result.
+How many times AQE re-planned is the last version's number, which only an event log records, so
+`sql_detail` passes it in. Three parts make up the rest.
 
 - **Operator counts that changed.** AQE adds a query stage around each stage it creates, and an
   `AQEShuffleRead` over each shuffle. Its `postStageCreationRules` insert `ColumnarToRow` and

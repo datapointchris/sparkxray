@@ -80,26 +80,33 @@ class JoinChange:
 
 @dc.dataclass(frozen=True, slots=True)
 class AqeChanges:
-    """What AQE changed in one execution's plan. Node ids are numbers in each plan's `Plan.numbered()`."""
+    """What AQE changed in one execution's plan. Node ids are numbers in each plan's `Plan.numbered()`.
 
+    `update_count` is how many times AQE re-planned the execution, which only an event log records,
+    and None where the plans came from elsewhere.
+    """
+
+    update_count: int | None
     operators: tuple[OperatorChange, ...]
     shuffle_reads: tuple[ShuffleRead, ...]
     joins: tuple[JoinChange, ...]
 
     def to_json(self) -> dict[str, Any]:
         return {
+            'update_count': self.update_count,
             'operators': [change.to_json() for change in self.operators],
             'shuffle_reads': [read.to_json() for read in self.shuffle_reads],
             'joins': [join.to_json() for join in self.joins],
         }
 
 
-def aqe_changes(initial: Plan, final: Plan, metrics: Mapping[int, Mapping[str, float]]) -> AqeChanges:
+def aqe_changes(initial: Plan, final: Plan, metrics: Mapping[int, Mapping[str, float]], *, update_count: int | None = None) -> AqeChanges:
     """Compare the plan an execution started from with its last plan.
 
     `metrics` gives each node of the last plan its metric totals by name, keyed by its number in
-    `final.numbered()`, and may be empty. The operator counts leave out the query stages, shuffle
-    reads and row-column transitions every re-planned plan adds.
+    `final.numbered()`, and may be empty. `update_count` is how many times AQE re-planned, where an
+    event log recorded it. The operator counts leave out the query stages, shuffle reads and
+    row-column transitions every re-planned plan adds.
     """
     before, after = initial.operator_counts(), final.operator_counts()
     operators = tuple(
@@ -111,7 +118,7 @@ def aqe_changes(initial: Plan, final: Plan, metrics: Mapping[int, Mapping[str, f
     reads = tuple(
         _shuffle_read(nodes, numbered, metrics.get(numbered.number, {})) for numbered in nodes if numbered.node.operator == 'AQEShuffleRead'
     )
-    return AqeChanges(operators, reads, _join_changes(initial.numbered(), nodes))
+    return AqeChanges(update_count, operators, reads, _join_changes(initial.numbered(), nodes))
 
 
 def _shuffle_read(nodes: tuple[NumberedNode, ...], read: NumberedNode, metrics: Mapping[str, float]) -> ShuffleRead:

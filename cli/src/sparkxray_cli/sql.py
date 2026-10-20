@@ -92,11 +92,12 @@ def show(
     if changes is None:
         return
     printed = changes.to_json()
+    render.print_record(printed, ['update_count'], title='AQE')
     if printed['joins']:
         render.print_records(printed['joins'], _JOIN_CHANGE_KEYS, title='Joins AQE changed')
     if printed['operators']:
         render.print_records(printed['operators'], _OPERATOR_CHANGE_KEYS, title='Operators AQE added or removed')
     if printed['shuffle_reads']:
         render.print_records(printed['shuffle_reads'], _SHUFFLE_READ_KEYS, title='Shuffle reads AQE planned')
-    if not any(printed.values()):
+    if not (printed['joins'] or printed['operators'] or printed['shuffle_reads']):
         render.none_found('join, operator or shuffle read AQE changed')

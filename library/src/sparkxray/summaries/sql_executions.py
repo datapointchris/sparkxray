@@ -108,6 +108,6 @@ def sql_detail(tables: Tables, execution_id: int) -> SqlExecutionDetail:
     if execution['plan_version_count'] > 1:
         final = tables.plan(execution_id)
         metrics = tables.node_metric_totals(execution_id, final.version).get(execution_id, {})
-        changes = aqe_changes(tables.plan(execution_id, 0), final, metrics)
+        changes = aqe_changes(tables.plan(execution_id, 0), final, metrics, update_count=final.version)
     jobs, operators = rows_of(tables.query(_JOBS_SQL, parameters)), rows_of(tables.query(_OPERATORS_SQL, parameters))
     return SqlExecutionDetail(execution, jobs, operators, changes)
