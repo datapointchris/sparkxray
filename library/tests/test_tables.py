@@ -16,6 +16,7 @@ import pytest
 from fixture_logs import FIXTURES
 from fixture_logs import plain_lines
 from sparkxray.ingest import EventLog
+from sparkxray.summaries import annotated_plan
 
 
 def test_tasks_effective_keeps_the_first_success_of_each_partition_of_each_stage(tmp_path: pathlib.Path) -> None:
@@ -61,6 +62,13 @@ def test_tasks_effective_keeps_the_first_success_of_each_partition_of_each_stage
     assert stage.fetchone() == (32_536_313, 506_215, 25_607)
     cpu = tables.query('select executor_cpu_time_ns from tasks_effective where task_id = ?', [longest['Task Info']['Task ID']])
     assert cpu.fetchone() == (longest['Task Metrics']['Executor CPU Time'],)
+
+
+def test_a_sort_reading_a_join_of_two_spilling_sorts_leaves_their_spills_out_of_its_own(tmp_path: pathlib.Path) -> None:
+    """The base fixture's stage 4 runs codegen'd, as Spark does by default, and its outer Sort's `spill size` is the stage's whole spill."""
+    plan = annotated_plan(EventLog.open(FIXTURES / 'logs' / 'spark-3.5.9' / 'local-1792406949080.zstd', cache_dir=tmp_path).tables, 0)
+
+    assert sum(node.own_spill_bytes or 0 for node in plan.nodes if 4 in node.stage_ids) == 6_593_398_048
 
 
 SQL_TAB_CAPTURES = sorted((FIXTURES / 'history-server-sql').glob('*/*.json.zstd'))

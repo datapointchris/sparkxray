@@ -273,6 +273,22 @@ A subquery's plan is drawn under the node that runs it, numbered on from the mai
 `Plan.numbered()` numbers it. That node lists the subquery's root in `subqueries`, never in
 `children`, so a walk over children stays inside one plan.
 
+## A pipeline's duration and a sort's spill size cover more than the node they sit on
+
+`duration` is a whole-stage codegen pipeline's. The plan model moves it from the
+`WholeStageCodegen` wrapper onto the pipeline's top node. `BufferedRowIterator` measures it from
+the pipeline's start to its last row, so it includes the time spent reading the pipeline's inputs.
+`plans show` marks every node of a pipeline `*(N)`, as Spark's own explain text does. On the top
+node it names the nodes the duration covers, which `AnnotatedPlan.codegen_members` lists.
+
+A sort's `spill size` is the task's spill while the sort read its input (`SortExec.scala`). So it
+also counts the spills of the sorts and joins below it in the task. `own_spill_bytes` takes theirs
+off, through the `own_spills` SQL that `stage.spill` ranks nodes by. `plans show` prints both
+figures where they differ.
+
+*Rejected:* subtracting the whole subtree's spills from every node. A join, an aggregate and a
+window each record only their own buffer's spills, so only a sort's figure overlaps.
+
 A node's headline leaves out expression and exchange ids, so `SortMergeJoin [k#2L], [k#10L],
 Inner` reads `SortMergeJoin Inner k = k`. A subquery reference keeps its id, which names the
 subquery drawn below. `details` keeps each field as Spark printed it, ids included.

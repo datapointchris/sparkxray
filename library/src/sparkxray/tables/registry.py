@@ -683,6 +683,12 @@ _PLAN_NODES = Table(
         ),
         ('codegen_stage', 'BIGINT', 'codegen_stage', 'The whole-stage codegen pipeline the node runs in. Null outside one.'),
         (
+            'enclosing_sort_id',
+            'BIGINT',
+            'enclosing_sort_id',
+            "The nearest Sort above the node in the same task, whose `spill size` counts this node's spills too. Null where none.",
+        ),
+        (
             'subtree_hash',
             'VARCHAR',
             'subtree_hash',
@@ -818,6 +824,24 @@ EXECUTOR_TIME_CTES = f"""run AS ({RUN_SPAN_SQL}), task_cpus AS (
   FROM tasks GROUP BY executor_id
 ), lifetimes AS (
   SELECT executors.*, coalesce(executors.remove_epoch_ms, run.end_epoch_ms) - executors.add_epoch_ms AS lifetime_ms FROM executors, run
+)"""
+
+# Each node's `spill size` in every plan version, and the part that is its own, as `own_spills`.
+# A Sort's figure counts the spills of the nodes it encloses in its task, so theirs come off it.
+# Every other operator records only its own buffer's spills (`SortExec.scala`, `SortMergeJoinExec.scala`).
+OWN_SPILLS_CTE = """spill_sizes AS (
+  SELECT execution_id, plan_version, node_id, total AS spill_bytes
+  FROM plan_node_metrics WHERE metric_name = 'spill size'
+  QUALIFY row_number() OVER (PARTITION BY execution_id, plan_version, node_id ORDER BY accumulator_id) = 1
+), own_spills AS (
+  SELECT spill_sizes.*, greatest(spill_sizes.spill_bytes - coalesce(enclosed.spill_bytes, 0), 0) AS own_spill_bytes
+  FROM spill_sizes LEFT JOIN (
+    SELECT plan_nodes.execution_id, plan_nodes.plan_version, plan_nodes.enclosing_sort_id AS node_id,
+      sum(spill_sizes.spill_bytes) AS spill_bytes
+    FROM plan_nodes JOIN spill_sizes USING (execution_id, plan_version, node_id)
+    WHERE plan_nodes.enclosing_sort_id IS NOT NULL
+    GROUP BY ALL
+  ) AS enclosed USING (execution_id, plan_version, node_id)
 )"""
 
 # Each stage's and SQL execution's wall time, and its share of the run's. A stage runs from its

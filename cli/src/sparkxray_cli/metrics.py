@@ -39,7 +39,10 @@ def show(
         str,
         typer.Argument(
             metavar='NAME',
-            help='A column, alone or as table.column; a plan metric as sql show prints it; or a Spark field such as "Executor CPU Time".',
+            help=(
+                'A column, alone or as table.column; a plan metric as plans show prints it, such as "spill size"; '
+                'or a Spark field such as "Executor CPU Time".'
+            ),
             show_default=False,
         ),
     ],

@@ -12,19 +12,20 @@ from sparkxray.rules.rule import Threshold
 from sparkxray.rules.stage.skew import rows_outside_skewed_stages
 from sparkxray.rules.stage.statistics import SLOTS
 from sparkxray.rules.stage.statistics import STAGE_CTES
+from sparkxray.tables.registry import OWN_SPILLS_CTE
 
 _TUNING_DOCS = 'https://spark.apache.org/docs/latest/tuning.html#memory-management-overview'
-# The plan node that spilled most in each stage, by `spill size` in its execution's last plan.
-_SPILL_NODES = """spill_nodes AS (
-  SELECT node_stages.stage_id, metrics.node_id AS plan_node_id, plan_nodes.label AS plan_node_label
+# The plan node that spilled most in each stage, by its own part of `spill size` in its execution's last plan.
+_SPILL_NODES = f"""{OWN_SPILLS_CTE}, spill_nodes AS (
+  SELECT node_stages.stage_id, spills.node_id AS plan_node_id, plan_nodes.label AS plan_node_label
   FROM node_stages
   JOIN sql_executions USING (execution_id)
-  JOIN plan_node_metrics AS metrics ON metrics.execution_id = node_stages.execution_id AND metrics.node_id = node_stages.node_id
-    AND metrics.plan_version = sql_executions.plan_version_count - 1
-  JOIN plan_nodes ON plan_nodes.execution_id = metrics.execution_id AND plan_nodes.node_id = metrics.node_id
-    AND plan_nodes.plan_version = metrics.plan_version
-  WHERE metrics.metric_name = 'spill size' AND metrics.total > 0
-  QUALIFY row_number() OVER (PARTITION BY node_stages.stage_id ORDER BY metrics.total DESC, metrics.node_id) = 1
+  JOIN own_spills AS spills ON spills.execution_id = node_stages.execution_id AND spills.node_id = node_stages.node_id
+    AND spills.plan_version = sql_executions.plan_version_count - 1
+  JOIN plan_nodes ON plan_nodes.execution_id = spills.execution_id AND plan_nodes.node_id = spills.node_id
+    AND plan_nodes.plan_version = spills.plan_version
+  WHERE spills.own_spill_bytes > 0
+  QUALIFY row_number() OVER (PARTITION BY node_stages.stage_id ORDER BY spills.own_spill_bytes DESC, spills.node_id) = 1
 )"""
 
 # A single-task stage has no other task to compare with, so sparkDoctor holds it to higher floors.

@@ -79,21 +79,27 @@ prints the raw numbers instead, each under a name ending in its unit, and an emp
 Progress and notes go to stderr, so stdout holds only the data.
 
 `plans show` draws one SQL execution's plan as a tree, with the numbers the Spark UI's SQL tab
-shows on its graph. Each node gives what it does, such as a join's type and keys or a scan's
-location, then the stages it ran in and its metrics' totals. A node a finding names carries a
-mark, as `◀ stage.shuffle-skew (stage 4, high)`. `--initial` shows the plan the execution started
-from, before adaptive query execution re-planned it, and `--version N` any plan between.
+shows on its graph. Each node opens with its number, as `n9`, which finding ids and `sql show`
+use too. Then it gives what it does, such as a join's type and keys or a scan's location, then the
+stages it ran in and its metrics' totals. A node Spark compiled into a codegen pipeline carries the
+pipeline's `*(N)`, and the pipeline's `duration` names the nodes it covers. A sort's `spill size`
+counts the spills of the nodes it reads from, so the tree states its own part beside it. A node a
+finding names carries a mark, as `◀ stage.shuffle-skew (stage 4, high)`. `--initial` shows the
+plan the execution started from, before adaptive query execution re-planned it, and
+`--plan-version N` any plan between.
 
 `rules show` teaches one rule: what it measures, why it costs time, where the Spark UI shows it
-and how to fix it. Each threshold reads at the value the rule would apply, so `--threshold` and
-`--thresholds` take the same overrides `findings list` does. It ends with what the rule found on
-one of sparkxray's own fixture logs.
+and how to fix it. It takes the same `--threshold` and `--thresholds` overrides `findings list`
+does. Its Thresholds table, and any threshold the lesson states, read at the value the rule would
+apply. It ends with what the rule found on one of sparkxray's own fixture logs, at the default
+thresholds.
 
 `metrics show` says what one number means before anything is read into it. It takes a column, a
-plan metric as `sql show` prints it, or a Spark field such as `Executor CPU Time`. Each entry gives
-the unit sparkxray shows and the unit Spark records, which differ: Spark writes CPU time and shuffle
-write time in nanoseconds beside run time in milliseconds. It also names the event fields read,
-how a derived column such as `scheduler_delay_ms` is computed, and where the meaning comes from.
+plan metric as `plans show` prints it, such as `spill size`, or a Spark field such as
+`Executor CPU Time`. Each entry gives the unit sparkxray shows and the unit Spark records, which
+differ: Spark writes CPU time and shuffle write time in nanoseconds beside run time in
+milliseconds. It also names the event fields read, how a derived column such as
+`scheduler_delay_ms` is computed, and where the meaning comes from.
 `metrics list` prints every entry, and `tables list` prints every column with what it holds.
 
 A list keeps each row on one line. On a narrow terminal its longest text ends in `…`, and

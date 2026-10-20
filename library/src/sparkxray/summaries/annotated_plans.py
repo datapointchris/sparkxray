@@ -21,6 +21,7 @@ from sparkxray.plan.tree import PlanNode
 from sparkxray.plan.tree import PlanSource
 from sparkxray.rules.findings import Finding
 from sparkxray.summaries.sql_executions import SQL_SUMMARIES_SQL
+from sparkxray.tables.registry import OWN_SPILLS_CTE
 from sparkxray.tables.relations import Tables
 from sparkxray.tables.rows import rows_of
 
@@ -45,6 +46,11 @@ SELECT node_id, metric_name, metric_type, unit, coalesce(value_count, 0), total,
 FROM plan_node_metrics
 WHERE execution_id = $execution_id AND plan_version = $version
 QUALIFY row_number() OVER (PARTITION BY node_id, metric_name ORDER BY accumulator_id) = 1
+"""
+
+_OWN_SPILLS_SQL = f"""
+WITH {OWN_SPILLS_CTE}
+SELECT node_id, own_spill_bytes FROM own_spills WHERE execution_id = $execution_id AND plan_version = $version
 """
 
 
@@ -133,6 +139,11 @@ class AnnotatedNode:
     parent, and that node lists it in `subqueries` rather than `children`. `runtime_size_bytes`
     and `runtime_row_count` are what AQE measured on a finished query stage. `stage_ids` is
     empty in any plan but the last, and `finding_ids` names the findings whose scope is this node.
+
+    `codegen_stage` is the whole-stage codegen pipeline the node runs in. The pipeline's
+    `duration` metric sits on its top node and covers every node `AnnotatedPlan.codegen_members`
+    lists. `own_spill_bytes` is the part of the node's `spill size` no node below it also counts,
+    and None where it declares none.
     """
 
     number: int
@@ -142,9 +153,11 @@ class AnnotatedNode:
     operator: str
     label: str
     details: NodeDetails
+    codegen_stage: int | None
     runtime_size_bytes: int | None
     runtime_row_count: int | None
     metrics: tuple[NodeMetric, ...]
+    own_spill_bytes: float | None
     stage_ids: tuple[int, ...]
     finding_ids: tuple[str, ...] = ()
 
@@ -176,10 +189,12 @@ class AnnotatedNode:
             'label': self.label,
             'headline': self.headline(),
             'details': self.details.to_json(),
+            'codegen_stage': self.codegen_stage,
             'runtime_size_bytes': self.runtime_size_bytes,
             'runtime_row_count': self.runtime_row_count,
             'stage_ids': list(self.stage_ids),
             'metrics': [metric.to_json() for metric in self.metrics],
+            'own_spill_bytes': self.own_spill_bytes,
             'finding_ids': list(self.finding_ids),
         }
 
@@ -231,6 +246,17 @@ class AnnotatedPlan:
         nodes = tuple(dc.replace(node, finding_ids=tuple(placed.get(node.number, ()))) for node in self.nodes)
         return dc.replace(self, nodes=nodes, findings=about)
 
+    def codegen_members(self, node: AnnotatedNode) -> tuple[AnnotatedNode, ...]:
+        """The node and those below it in its codegen pipeline, top first: the nodes the pipeline's `duration` on it covers."""
+        if node.codegen_stage is None:
+            return ()
+        members, pending = [], [node.number]
+        while pending:
+            member = self.nodes[pending.pop()]
+            members.append(member)
+            pending += [child for child in reversed(member.children) if self.nodes[child].codegen_stage == node.codegen_stage]
+        return tuple(members)
+
     def unplaced_findings(self) -> tuple[Finding, ...]:
         """The findings no node lists: about the whole execution or one of its stages, or naming a node of another version."""
         placed = {finding_id for node in self.nodes for finding_id in node.finding_ids}
@@ -267,6 +293,7 @@ def annotated_plan(tables: Tables, execution_id: int, *, version: int | None = N
     metrics: dict[int, dict[str, NodeMetric]] = {}
     for node_id, name, *values in tables.query(_NODE_METRICS_SQL, {**parameters, 'version': shown}).fetchall():
         metrics.setdefault(node_id, {})[name] = NodeMetric(name, *values)
+    own_spills = dict(tables.query(_OWN_SPILLS_SQL, {**parameters, 'version': shown}).fetchall())
     roots = _subquery_roots(plan)
     hosted: dict[int, list[HostedSubquery]] = {}
     numbered = plan.numbered()
@@ -287,9 +314,11 @@ def annotated_plan(tables: Tables, execution_id: int, *, version: int | None = N
                 operator=node.operator,
                 label=node.label,
                 details=NodeDetails.of(node),
+                codegen_stage=node.codegen_stage,
                 runtime_size_bytes=None if stats is None else stats.size_bytes,
                 runtime_row_count=None if stats is None else stats.row_count,
                 metrics=tuple(declared[name] for name in names),
+                own_spill_bytes=own_spills.get(each.number),
                 stage_ids=node_stages.get(each.number, ()),
             )
         )
