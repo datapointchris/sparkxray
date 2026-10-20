@@ -144,9 +144,10 @@ prints one. `tables` gives each table's columns with their DuckDB types and unit
 the error envelope, and every code with its exit status. Every number any schema describes ends
 in its unit, as `_ms` or `_bytes`, or sits beside a `unit` field.
 
-Given `--json`, a refusal prints one line of JSON on stderr, and the command exits with the
-error's status. A code is never reused or renumbered, so a program branches on it, and `field`
-names what it passed that failed:
+Given `--json`, or `--format json` on `reports write`, a refusal prints one line of JSON on
+stderr, and the command exits with the error's status. A command line the parser refuses, such as
+`--fail-on hgih`, prints as `E-USAGE-001` and exits 2. A code is never reused or renumbered, so a
+program branches on it, and `field` names what it passed that failed:
 
 ```json
 {"error": {"code": "E-RULE-002", "message": "stage.shuffle-skew has no threshold called 'ratoi'", "field": "threshold.stage.shuffle-skew.ratoi", "valid": ["ratio", "min_bytes", "min_tasks"], "hint": "sparkxray rules show stage.shuffle-skew"}}

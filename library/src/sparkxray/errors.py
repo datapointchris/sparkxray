@@ -171,3 +171,12 @@ class UnknownSchemaError(SparkxrayError):
     code = 'E-SCHEMA-001'
     raised_when = 'a schema name is not one sparkxray ships; lists the names it does'
     exit_code = 2
+
+
+class CommandLineError(SparkxrayError):
+    code = 'E-USAGE-001'
+    raised_when = (
+        'the command names no such command or option, lacks a required one, or gives a value its parameter refuses; '
+        'names the parameter and, for a choice, its values. Only the command raises it'
+    )
+    exit_code = 2

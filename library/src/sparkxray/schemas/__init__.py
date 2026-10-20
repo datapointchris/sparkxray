@@ -155,9 +155,10 @@ def _errors_document() -> dict[str, Any]:
         '$schema': _DRAFT,
         'title': 'sparkxray error',
         'description': (
-            'What a command prints on stderr when it refuses, given --json. Without --json it prints the same content as a sentence, '
-            "the values that would have worked and the hint. The command exits with the code's x-exit-code: 2 when the input was "
-            'wrong, 3 when a person must act. A code is never reused or renumbered, and a retired one stays, marked deprecated.'
+            'What a command prints on stderr when it refuses, asked for JSON by --json or --format json. Otherwise a library '
+            'refusal prints the same content as a sentence, and a command line the parser refuses prints its own text. The command '
+            "exits with the code's x-exit-code: 2 when the input was wrong, 3 when a person must act. A code is never reused or "
+            'renumbered, and a retired one stays, marked deprecated.'
         ),
         'type': 'object',
         'additionalProperties': False,

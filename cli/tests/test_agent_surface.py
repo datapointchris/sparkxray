@@ -1,29 +1,44 @@
 """An agent drives sparkxray from what it prints: a refusal it can branch on, and a capabilities document that holds to its schema."""
 
 import json
+import shlex
 from pathlib import Path
 
 import jsonschema
+import pytest
 from sparkxray.schemas import schema_document
 from sparkxray_cli.main import app
 from typer.testing import CliRunner
 
 
-def test_an_unknown_threshold_refuses_on_stderr_as_json_naming_the_field_that_failed(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ('arguments', 'code', 'field', 'one_valid'),
+    [
+        (
+            ['rules', 'show', 'stage.shuffle-skew', '--threshold', 'stage.shuffle-skew.ratoi=3', '--json'],
+            'E-RULE-002',
+            'threshold.stage.shuffle-skew.ratoi',
+            'ratio',
+        ),
+        (['schemas', 'show', 'findigns', '--json'], 'E-SCHEMA-001', 'name', 'findings'),
+        (['findings', 'list', 'no-such-log', '--fail-on', 'hgih', '--json'], 'E-USAGE-001', '--fail-on', 'high'),
+    ],
+)
+def test_a_refusal_under_json_is_one_envelope_on_stderr_naming_the_field_and_a_hint_that_runs(
+    arguments: list[str], code: str, field: str, one_valid: str, tmp_path: Path
+) -> None:
     runner = CliRunner(env={'XDG_CACHE_HOME': str(tmp_path)})
 
-    result = runner.invoke(app, ['rules', 'show', 'stage.shuffle-skew', '--threshold', 'stage.shuffle-skew.ratoi=3', '--json'])
+    result = runner.invoke(app, arguments)
 
     assert (result.exit_code, result.stdout) == (2, '')
     envelope = json.loads(result.stderr)
     jsonschema.validate(envelope, schema_document('errors'))
     refused = envelope['error']
-    assert (refused['code'], refused['field'], refused['hint']) == (
-        'E-RULE-002',
-        'threshold.stage.shuffle-skew.ratoi',
-        'sparkxray rules show stage.shuffle-skew',
-    )
-    assert 'ratio' in refused['valid']
+    assert (refused['code'], refused['field'], one_valid in refused['valid']) == (code, field, True)
+    program, *hint = shlex.split(refused['hint'])
+    hinted = runner.invoke(app, hint)
+    assert (program, hinted.exit_code) == ('sparkxray', 0), hinted.stderr
 
 
 def test_capabilities_hold_to_their_schema_and_carry_each_commands_flags_and_exit_codes(tmp_path: Path) -> None:
