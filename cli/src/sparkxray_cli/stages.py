@@ -44,9 +44,11 @@ def list_stages(log: LogArgument, sort: SortOption = None, limit: LimitOption = 
     """List every stage: its tasks, wall time and share of the run, task durations, shuffle, spill, GC and core-hours.
 
     Totals count each partition once, from its first successful task. A stage's available
-    core-hours are the run's cores over its wall time, as if it held every core, and the used ones
-    are its tasks' run time. Its parallelism ratio is its partitions over the run's cores, so one
-    under 1 left cores idle. `--sort wasted_core_hours` puts the stage that idled the most first.
+    core-hours are the run's cores times the time from its first task's launch to its end. The
+    used ones are its tasks' run time times spark.task.cpus. The wasted ones are the core time in
+    that window no task of any stage held. Its parallelism ratio is its partitions over the run's
+    task slots, so one under 1 left slots idle. `--sort wasted_core_hours` puts the stage that
+    idled the most first.
     """
     rows = stage_summaries(open_tables(log), sort=sort, limit=limit)
     if as_json:

@@ -17,9 +17,11 @@ from sparkxray.tables.rows import rows_of
 
 # A stage's status is its highest attempt's. Metric totals and task durations come from
 # `tasks_effective`, so a partition a retry ran again counts once. The task counts are every
-# attempt's, so a retry shows as a failed task. A stage's core-hours are Sparklens's
-# (`analyzer/StageSkewAnalyzer.scala`): the run's cores over the stage's wall time, against its
-# tasks' run time, and its parallelism is its partitions over the run's cores.
+# attempt's, so a retry shows as a failed task. A stage's core-hours follow Sparklens's
+# (`analyzer/StageSkewAnalyzer.scala`) within a window from its first task's launch to its end: the
+# run's cores times that window, against its tasks' run time times spark.task.cpus. Its waste is the
+# core time in the window that no task of any stage held, where Sparklens charges a stage the time
+# other stages held too. Its parallelism is its partitions over the run's task slots.
 STAGE_SUMMARIES_SQL = f"""
 WITH {EXECUTOR_TIME_CTES}, {EXECUTOR_POOL_CTE}, walls AS (
   SELECT id AS stage_id, wall_ms, share AS wall_share FROM ({WALL_SHARES_SQL}) WHERE level = 'stage'
@@ -47,7 +49,28 @@ WITH {EXECUTOR_TIME_CTES}, {EXECUTOR_POOL_CTE}, walls AS (
     coalesce(sum(executor_run_time_ms), 0) AS run_time_ms
   FROM tasks_effective GROUP BY stage_id
 ), run_cores AS (
-  SELECT nullif(executor_count * executor_core_count, 0) AS core_count FROM pool
+  SELECT nullif(executor_count * executor_core_count, 0) AS core_count,
+    nullif(executor_count * (executor_core_count // task_cpus.cpus), 0) AS slot_count, task_cpus.cpus AS task_cpus
+  FROM pool, task_cpus
+), windows AS (
+  SELECT launches.stage_id, launches.opened_epoch_ms,
+    coalesce(ends.completed_epoch_ms, launches.last_finish_epoch_ms, run.end_epoch_ms) AS closed_epoch_ms
+  FROM (
+    SELECT stage_id, min(launch_epoch_ms) AS opened_epoch_ms, max(finish_epoch_ms) AS last_finish_epoch_ms FROM tasks
+    WHERE launch_epoch_ms IS NOT NULL GROUP BY stage_id
+  ) AS launches
+  LEFT JOIN (SELECT stage_id, max(complete_epoch_ms) AS completed_epoch_ms FROM stages GROUP BY stage_id) AS ends USING (stage_id)
+  CROSS JOIN run
+), held_spans AS (
+  SELECT launch_epoch_ms AS held_from, coalesce(finish_epoch_ms, run.end_epoch_ms) AS held_until FROM tasks, run
+  WHERE launch_epoch_ms IS NOT NULL
+), held AS (
+  SELECT windows.stage_id, windows.closed_epoch_ms - windows.opened_epoch_ms AS window_ms,
+    coalesce(sum(least(held_spans.held_until, windows.closed_epoch_ms) - greatest(held_spans.held_from, windows.opened_epoch_ms)), 0)
+      AS held_ms
+  FROM windows LEFT JOIN held_spans
+    ON held_spans.held_from < windows.closed_epoch_ms AND held_spans.held_until > windows.opened_epoch_ms
+  GROUP BY windows.stage_id, windows.opened_epoch_ms, windows.closed_epoch_ms
 )
 SELECT attempts.stage_id, attempts.name, attempts.status, attempts.attempt_count,
   coalesce(task_attempts.task_count, 0) AS task_count, coalesce(task_attempts.failed_task_count, 0) AS failed_task_count,
@@ -56,15 +79,16 @@ SELECT attempts.stage_id, attempts.name, attempts.status, attempts.attempt_count
   list_max(effective.durations) AS max_task_duration_ms,
   effective.input_bytes, effective.output_bytes, effective.shuffle_read_bytes, effective.shuffle_write_bytes,
   effective.memory_spilled_bytes, effective.disk_spilled_bytes, effective.gc_time_ms, effective.gc_share,
-  round(run_cores.core_count * walls.wall_ms / 3600000, 4) AS available_core_hours,
-  round(coalesce(effective.run_time_ms, 0) / 3600000, 4) AS used_core_hours,
-  round((run_cores.core_count * walls.wall_ms - coalesce(effective.run_time_ms, 0)) / 3600000, 4) AS wasted_core_hours,
-  round(coalesce(effective.partition_count, 0) / run_cores.core_count, 2) AS parallelism_ratio
+  round(run_cores.core_count * held.window_ms / 3600000, 4) AS available_core_hours,
+  round(coalesce(effective.run_time_ms, 0) * run_cores.task_cpus / 3600000, 4) AS used_core_hours,
+  round(greatest(run_cores.core_count * held.window_ms - held.held_ms * run_cores.task_cpus, 0) / 3600000, 4) AS wasted_core_hours,
+  round(coalesce(effective.partition_count, 0) / run_cores.slot_count, 2) AS parallelism_ratio
 FROM attempts
 CROSS JOIN run_cores
 LEFT JOIN task_attempts USING (stage_id)
 LEFT JOIN effective USING (stage_id)
 LEFT JOIN walls USING (stage_id)
+LEFT JOIN held USING (stage_id)
 """
 
 _SHUFFLE_READ = (
