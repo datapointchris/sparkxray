@@ -84,11 +84,55 @@ DuckDB's Python wheel links `json` and `parquet` statically. Its `httpfs` extens
 `s3://`, is downloaded from `extensions.duckdb.org` the first time a query touches S3. Locked-down
 networks block that host, and a Glue job without internet cannot reach it.
 
-So ingest copies objects with boto3 into `$XDG_CACHE_HOME/sparkxray/logs/`, and DuckDB only reads
-local files. An object is keyed by its ETag plus its size. An unchanged object is never downloaded
-twice, and a log Glue is still appending to is downloaded again. One module makes every AWS call.
+So ingest copies objects with boto3 into the cache, and DuckDB only reads local files. An object
+is keyed by its ETag plus its size. An unchanged object is never downloaded twice, and a log Glue
+is still appending to is downloaded again. One module, `ingest/aws.py`, makes every AWS call.
 
-## Spark's lz4 and snappy logs need two small decoders
+```text
+$XDG_CACHE_HOME/sparkxray/logs/
+├── s3/<bucket>/<key>/<etag>-<size>     one downloaded object, as S3 holds it
+└── decoded/<uri hash>/<version hash>.jsonl   one file's events as plain lines
+```
+
+A local file that DuckDB can read as it stands is never copied. The manifest records, per file,
+the `read_path` holding its events and the `read_codec` it is compressed with.
+
+An entry for an older version of a file is removed by a later open, once it has gone a day
+unused. An `EventLog` opened before the file changed still reads its copy. So nothing is removed
+the moment a newer version lands.
+
+## The resolver finds a log by Spark's names, and confirms it by its first line
+
+No platform's folder layout is written into the code. Glue, EMR and a local run each write one of
+Spark's two layouts somewhere, and the resolver recognizes the layout:
+
+- a single file `<appId>[.<codec>][.inprogress]`;
+- a Spark 4 rolling directory `eventlog_v2_<appId>/`, holding `events_<N>_<appId>[.<codec>]` files
+  and an `appstatus_<appId>[.inprogress]` marker.
+
+A rolling log is its files in order of `N` as an integer, so `events_10` follows `events_9`. Glue
+leaves the `.inprogress` copy beside the finished log, and the finished one is read.
+
+A name only proposes a log. Its decoded first line must be `SparkListenerLogStart`, which Spark
+writes first in every log. So a `LICENSE` beside a log is passed over. The first line comes from
+a file's first 64 KiB, or its first MiB when that holds no whole line. Candidates are checked
+eight at a time, and checking stops once two are logs. So a Glue prefix holding every run of a
+job costs one batch of reads.
+
+A History Server can compact a rolling log, replacing its early files with one
+`events_<N>_<appId>.<codec>.compact`. Spark's compactor copies every kept line of files 1 to N
+into it, in order, so it too starts with `SparkListenerLogStart`. Reading starts at the last
+compacted file, and the manifest records `compacted`, because finished tasks were dropped.
+
+A location naming one log that is not a log is `E-INGEST-003`. A directory or prefix holding no
+log is `E-INGEST-001`, which lists what it does hold and why each file was passed over. One
+holding several logs is `E-INGEST-005`, listing each.
+
+A log beside files that start with some other Spark event is `E-INGEST-005` too. Those files are
+likely pieces of a log split across several, which sparkxray cannot order. Reading the log alone
+would drop them without a word. The caller picks; the resolver never guesses.
+
+## Spark's lz4 and snappy logs need two small decoders, and zstd a streaming one
 
 Spark writes a compressed log through its own `CompressionCodec`. Only zstd, Spark 4's default,
 writes standard frames that DuckDB opens directly. Spark closes a frame on every flush, so one log
@@ -99,6 +143,26 @@ Both are length-prefixed block streams around a standard block codec. So sparkxr
 small decoders over cramjam's raw block functions, and decodes those logs into the cache as plain
 JSON lines first. lzf is refused with an error that suggests zstd.
 
-A truncated final line is expected. Glue's periodic log backups and killed applications can both
-leave one. The reader drops it and records `truncated_tail` in the manifest. An unparsable line
-anywhere else is an error naming the file and line.
+zstd is decoded with `zstandard` rather than cramjam. cramjam decodes a zstd buffer whole, and
+fails on a frame cut short. `zstandard` decodes one frame at a time and returns every whole block
+a cut frame holds. It also reports whether each frame ended, which is how a cut frame is found.
+
+A cut end is expected. Glue's periodic log backups, killed applications and copies interrupted
+partway can each leave one. DuckDB fails on a cut last line with `Malformed JSON … unexpected end
+of data`. So every file's end is checked before anything reads it:
+
+- a plain file from its last bytes;
+- a compressed file by decoding all of it, once per version, with the answer kept in the cache.
+
+A zstd frame or gzip member that never ends is a cut, and so is a last line that does not parse.
+A cut last file is decoded or trimmed into the cache without its partial line, and the manifest
+records `truncated_tail`. A cut in any other file is `E-INGEST-006`, as is a block that does not
+decode.
+
+A local log Spark is still writing, by its `.inprogress` name or its `appstatus` marker, grows
+after it is opened. So its last file is copied into the cache, a plain one at the size it was
+listed with. The reader and the table build both read that copy, so neither sees a line Spark
+appended later.
+
+Ingest parses only a log's first events and the end of each file. The table build parses every
+line, once, and names the file and line of one that does not parse.

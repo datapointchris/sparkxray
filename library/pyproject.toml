@@ -17,15 +17,19 @@ classifiers = [
 ]
 
 # AWS Glue 5.0 and 5.1 run Python 3.11, and the library is imported inside Glue
-# jobs. Each dependency's floor is the oldest release the tests pass against, so
-# installing into a Glue job upgrades as little of its environment as it can.
+# jobs. Each dependency's floor is the oldest release verified against the code
+# that imports it, so installing into a Glue job upgrades as little of its
+# environment as it can.
 requires-python = ">=3.11"
-dependencies = []
-
-# The tests read the committed fixture logs, most of them zstd, and Python's
-# standard library reads zstd only from 3.14.
-[dependency-groups]
-dev = ["cramjam>=2.8.0"]
+dependencies = [
+    # S3 listing and downloads, imported only when a log is on S3. 1.28.0 is the
+    # first release to read AWS_ENDPOINT_URL_S3, which reaches an S3-compatible store.
+    "boto3>=1.28.0",
+    # The raw lz4 and snappy blocks inside Spark's lz4-java and snappy-java streams.
+    "cramjam>=2.8.0",
+    # zstd read across frames and from a cut frame, which cramjam cannot stream.
+    "zstandard>=0.19.0",
+]
 
 [project.urls]
 Repository = "https://github.com/datapointchris/sparkxray"
