@@ -27,6 +27,12 @@ def plain_lines(path: pathlib.Path) -> list[bytes]:
     return lines[:-1] if lines and not lines[-1] else lines
 
 
+def driver_logs(log: pathlib.Path) -> list[str]:
+    """The structured driver logs a fixture log's run wrote, under driver-logs/ by the log's variant."""
+    variant = log.relative_to(FIXTURES / 'logs').parts[0]
+    return sorted(str(path) for path in (FIXTURES / 'driver-logs' / variant).glob('*'))
+
+
 def rolled_files(directory: pathlib.Path) -> list[pathlib.Path]:
     """A rolling log's `events_<N>_*` files in order of N as an integer."""
     return sorted(directory.glob('events_*'), key=lambda part: int(part.name.split('_')[1]))

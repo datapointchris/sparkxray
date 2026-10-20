@@ -30,6 +30,15 @@ WITH {STAGE_CTES}, skewed AS (
   WHERE tasks_effective.executor_run_time_ms - skewed.median_run_time_ms >= $min_gap_ms
     AND tasks_effective.executor_run_time_ms >= $ratio * skewed.median_run_time_ms
   GROUP BY tasks_effective.stage_id
+), stage_windows AS (
+  SELECT stage_id, min(submit_epoch_ms) AS submit_epoch_ms, max(complete_epoch_ms) AS complete_epoch_ms FROM stages GROUP BY stage_id
+), glue_reported AS (
+  -- Glue's own stage skewness, the highest any datapoint held over a period the stage ran in.
+  SELECT stage_windows.stage_id, round(max(glue_metrics.value), 2) AS skewness
+  FROM stage_windows JOIN glue_metrics ON glue_metrics.metric = 'glue.driver.skewness.stage'
+    AND glue_metrics.period_start_epoch_ms + glue_metrics.period_ms > stage_windows.submit_epoch_ms
+    AND glue_metrics.period_start_epoch_ms < stage_windows.complete_epoch_ms
+  GROUP BY stage_windows.stage_id
 )
 SELECT skewed.stage_id, skewed.stage_attempt, stage_owners.job_id, stage_owners.sql_execution_id, worst.worst_task_ids,
   CASE WHEN skewed.max_run_time_ms - skewed.median_run_time_ms >= 300000 THEN 'high' ELSE 'medium' END AS severity,
@@ -38,10 +47,12 @@ SELECT skewed.stage_id, skewed.stage_attempt, stage_owners.job_id, stage_owners.
   skewed.max_run_time_ms - skewed.median_run_time_ms AS run_time_gap_ms,
   round(skewed.max_run_time_ms / nullif(skewed.median_run_time_ms, 0), 2) AS run_time_ratio,
   -- AWS Glue's stage skewness, over task duration as Glue takes it: 0 while the ratio is under 5, and 1 at twice that.
-  round(greatest(0, skewed.max_duration_ms / nullif(skewed.median_duration_ms, 0) / 5 - 1), 2) AS glue_skewness_ratio
+  round(greatest(0, skewed.max_duration_ms / nullif(skewed.median_duration_ms, 0) / 5 - 1), 2) AS glue_skewness_ratio,
+  glue_reported.skewness AS glue_metrics_skewness_ratio
 FROM skewed
 JOIN worst USING (stage_id)
 LEFT JOIN stage_owners USING (stage_id)
+LEFT JOIN glue_reported USING (stage_id)
 ORDER BY skewed.stage_id
 """
 
@@ -51,7 +62,10 @@ _TASK_SKEW_LESSON = """\
 Each task's `Executor Run Time`: the milliseconds it spent running on an executor, leaving out
 scheduling and deserializing it. The rule compares the slowest task of a stage with the median
 one, taken over every successful task. `glue_skewness_ratio` is AWS Glue's stage skewness over
-task duration: 0 below a ratio of 5, and 1 at a ratio of 10.
+task duration: 0 below a ratio of 5, and 1 at a ratio of 10. Where `logs ingest --glue-run`
+joined the run's Glue metrics, `glue_metrics_skewness_ratio` is the highest stage skewness Glue
+itself reported while the stage ran. Glue reports one value for whatever stages run at once, so
+it reads beside the rule's own figure rather than in place of it.
 
 ## Why it costs time
 
@@ -97,6 +111,7 @@ TASK_SKEW = Rule(
     docs=(GLUE_OBSERVABILITY,),
     lesson=_TASK_SKEW_LESSON,
     sql=_TASK_SKEW_SQL,
+    rule_version=2,
 )
 
 # Every successful task of a stage counts, those that read nothing included, as in the Stages tab's

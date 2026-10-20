@@ -7,6 +7,8 @@ run `job/plan_rules_job.py`, with one query that fires each `plan.*` rule and on
 silent. The stage-rules variants run `job/stage_rules_job.py`, with one job seeding each stage,
 executor, application and config rule a small cluster can reach. The edited-events variant runs
 `job/edited_events_job.py`, then `edit_events.py` edits its log to seed the rules one host cannot.
+The driver-OOM variant runs `job/driver_oom_job.py`, which collects more rows than its driver's
+heap holds.
 
 ## Each variant exercises one way Spark writes a log
 
@@ -25,6 +27,7 @@ executor, application and config rule a small cluster can reach. The edited-even
 | `spark-3.5.9-plan-rules`, `spark-4.2.0-plan-rules` | each Spark version, broadcast joins off, a 6 GiB driver, one plain file, then zstd'd | every `plan.*` rule firing and kept silent, a pandas UDF, and a broadcast over 1 GiB |
 | `spark-3.5.9-stage-rules`, `spark-4.2.0-stage-rules` | each Spark version on `local-cluster[2,2,1024]`, two executors of two cores and a 1 GiB heap, with stage executor metrics on and shuffle compression off | an executor lost to an `OutOfMemoryError` and replaced, failed and retried tasks, a failed job, a driver gap, AQE and its skew join turned off for one query, and a standalone `app-*` id |
 | `spark-3.5.9-edited-events` | Spark 3.5.9 on `local-cluster[2,2,1024]` with stage executor metrics on, then edited by `edit_events.py` and zstd'd | GC pressure, scheduler delay, deserialization, fetch wait, speculation, executor and host imbalance, oversized shuffle partitions, too few shuffle partitions, and executor and driver heaps used to 97% |
+| `spark-4.2.0-driver-oom` | Spark 4.2.0 on `local[2]`, a 512 MiB driver, `spark.driver.maxResultSize=0` and `spark.log.structuredLogging.enabled=true` | a driver `OutOfMemoryError` the event log records as a succeeded job, with the driver's structured log under `driver-logs/` |
 | `glue-5.0` | AWS's Glue 5.0 image (Spark 3.5.4), under Glue's own Spark defaults | a log as Glue's runtime configures it |
 | `apache-spark-events` | Apache Spark's own test logs at v4.2.0, zstd'd | a YARN application id, multi-attempt logs ending with no final newline, a standalone app id and older event shapes, and Spark's own rolling directory |
 
@@ -46,6 +49,11 @@ and reads the rebuild's tables against the log's.
 `explain(mode='cost')` text, each beside a description in the job's `fires=` form. No event log
 carries the optimizer's size estimates, which `plan.estimate-unreliable` reads. So the job prints
 them itself.
+
+`driver-logs/` holds, for the driver-OOM variant, `stderr.log.zstd`: the driver's stderr, zstd'd.
+Structured logging writes it as JSON lines. Two plain lines the JVM and Spark print come before
+them, and the plain-text trace of an uncaught error sits among them. The rules test and
+`write_lesson_examples.py` join a variant's driver logs to its log before analyzing it.
 
 Every plain log is committed zstd'd, Apache's included, under the name Spark gives a log it
 compressed itself. `local-1` becomes `local-1.zstd`, and `local-1.inprogress` becomes
@@ -88,6 +96,7 @@ source also claims rule families:
 
 - `plan.` for the base logs, the warmup log, the plan-rules logs and the captures;
 - `stage.` and `config.` for the stage-rules logs and the edited-events log;
+- none for the driver-OOM log, whose run's property names `app.driver-oom`;
 - none for Apache's `application_1553914137147_0018`, which carries no descriptions and is read
   for the lesson example taken from it.
 
@@ -173,7 +182,8 @@ fixtures/regenerate.sh spark-3.5.9-lz4      # one
 
 It needs docker, zstd, gzip, curl and jq, and the images `apache/spark:3.5.9-python3`,
 `apache/spark:4.2.0-python3` and `public.ecr.aws/glue/aws-glue-libs:5`. Each Spark run takes a
-2 GiB driver heap and about a minute. A plan-rules run takes 6 GiB instead. A stage-rules run
+2 GiB driver heap and about a minute. A plan-rules run takes 6 GiB instead. The driver-OOM run
+takes 512 MiB and exits non-zero, which the script requires of it. A stage-rules run
 takes about three minutes, most of them seeded sleeps, and its out-of-memory seed has one Python
 worker build a 1.1 GB string and pickle it. Neither Spark image
 ships pyarrow or pandas, so a plan-rules run installs both from PyPI for its pandas UDF. Each run

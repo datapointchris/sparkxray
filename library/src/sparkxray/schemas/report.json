@@ -1,10 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "sparkxray report",
-  "description": "One analyzed Spark log: the application, its log, the core time it held, what the rules found, its longest stages, every SQL execution with its last plan, every executor and the settings the rules reason about, as sparkxray reports write --format json writes it. The same log, thresholds and sparkxray version give the same bytes. A field removed or a meaning changed raises schema_version, and a field added does not.",
+  "description": "One analyzed Spark log: the application, its log, the core time it held, Glue's job run insights where it failed on Glue, what the rules found, its longest stages, every SQL execution with its last plan, every executor, what each source read and each sink wrote, and the settings the rules reason about, as sparkxray reports write --format json writes it. The same log, thresholds and sparkxray version give the same bytes. A field removed or a meaning changed raises schema_version, and a field added does not.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "generated_by", "app", "log", "usage", "gate", "findings", "skipped_rules", "stages", "sql", "executors", "config"],
+  "required": [
+    "schema_version", "generated_by", "app", "log", "usage", "job_run_insights", "gate", "findings", "skipped_rules", "stages", "sql",
+    "executors", "throughput", "config"
+  ],
   "properties": {
     "schema_version": {"const": 2},
     "generated_by": {"type": "string", "description": "The sparkxray version that wrote it, as `sparkxray 0.9.0`."},
@@ -25,7 +28,7 @@
     "log": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source", "layout", "files", "size_bytes", "compacted", "in_progress", "truncated_tail", "lacks"],
+      "required": ["source", "layout", "files", "size_bytes", "compacted", "in_progress", "truncated_tail", "lacks", "enriched"],
       "properties": {
         "source": {"type": "string", "description": "The location read: a local log's file or directory name, or an s3:// or server URI whole."},
         "layout": {"type": "string"},
@@ -46,7 +49,8 @@
         "compacted": {"type": "boolean"},
         "in_progress": {"type": "boolean"},
         "truncated_tail": {"type": "boolean"},
-        "lacks": {"type": "array", "items": {"type": "string"}, "description": "What the log was written without, as the tables manifest names it: stage_executor_metrics, block_updates and process_tree_metrics by Spark's defaults, and stage_parents, task_executor_metrics, task_accumulators and execution_configs where it was rebuilt from a server's REST JSON."}
+        "lacks": {"type": "array", "items": {"type": "string"}, "description": "What the log was written without, as the tables manifest names it: stage_executor_metrics, block_updates and process_tree_metrics by Spark's defaults, and stage_parents, task_executor_metrics, task_accumulators and execution_configs where it was rebuilt from a server's REST JSON."},
+        "enriched": {"type": "array", "items": {"enum": ["glue_metrics", "glue_insights", "driver_log"]}, "description": "The tables sparkxray logs ingest joined to the log from other sources: Glue's metrics and job run insights with --glue-run, and structured driver logs with --driver-log."}
       }
     },
     "usage": {
@@ -61,6 +65,23 @@
         "idle_core_share": {"type": ["number", "null"]},
         "dpu_hours": {"type": ["number", "null"]},
         "idle_dpu_hours": {"type": ["number", "null"]}
+      }
+    },
+    "job_run_insights": {
+      "type": "array",
+      "description": "Glue's job run insights for a failed run, in the order CloudWatch Logs recorded them: each event of its exception analysis and its rule-based root cause. Empty where none was joined.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logged_epoch_ms", "event", "failure_reason", "root_cause", "cause_issue", "recommended_action"],
+        "properties": {
+          "logged_epoch_ms": {"type": "integer"},
+          "event": {"type": ["string", "null"], "description": "The exception analysis's event, as GlueExceptionAnalysisTaskFailed."},
+          "failure_reason": {"type": ["string", "null"], "description": "The first line of the exception the event carried, or of a Python traceback the error it ends with. The glue_insights table holds it whole."},
+          "root_cause": {"type": ["string", "null"], "description": "The script line the exception analysis names, or the rule-based insight's root cause."},
+          "cause_issue": {"type": ["string", "null"], "description": "The exception the rule-based insight matched."},
+          "recommended_action": {"type": ["string", "null"], "description": "What the rule-based insight recommends."}
+        }
       }
     },
     "gate": {"$ref": "findings.json#/properties/gate"},
@@ -155,6 +176,23 @@
           "peak_jvm_heap_bytes": {"type": ["integer", "null"]},
           "peak_memory_source": {"type": ["string", "null"]},
           "remove_reason": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "throughput": {
+      "type": "array",
+      "description": "What each source read and each sink wrote, as Glue's throughput metrics report it: reads, then writes, each with ALL first. The event log names only where a scan read. Empty where no Glue metrics were joined, and where the run read only through RDD-based DynamicFrames, which publish none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["direction", "location", "total_bytes", "total_records", "file_count", "partition_count"],
+        "properties": {
+          "direction": {"enum": ["read", "write"]},
+          "location": {"type": "string", "description": "The S3 path or table, cut to 500 characters, or ALL for every source or every sink."},
+          "total_bytes": {"type": ["integer", "null"]},
+          "total_records": {"type": ["integer", "null"]},
+          "file_count": {"type": ["integer", "null"]},
+          "partition_count": {"type": ["integer", "null"], "description": "The S3 partitions a source read. Null for a sink."}
         }
       }
     },

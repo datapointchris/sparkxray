@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regenerate the event log fixtures. Runs the fixture jobs under each Spark image and each setting
 # that changes what Spark writes, then rewrites logs/, decoded-by-spark/, history-server-sql/,
-# history-server-rest/ and explain/ from the output.
+# history-server-rest/, explain/ and driver-logs/ from the output.
 #
 #   fixtures/regenerate.sh              every variant
 #   fixtures/regenerate.sh VARIANT...   only these, e.g. spark-3.5.9-lz4
@@ -33,6 +33,7 @@ readonly VARIANTS=(
   spark-3.5.9-stage-rules
   spark-4.2.0-stage-rules
   spark-3.5.9-edited-events
+  spark-4.2.0-driver-oom
   glue-5.0
   apache-spark-events
 )
@@ -114,6 +115,17 @@ readonly EDITED_EVENTS_CONF=(
   --conf spark.eventLog.enabled=true
   --conf spark.eventLog.dir=file:///out
   --conf spark.eventLog.logStageExecutorMetrics=true
+)
+
+# Settings the driver-OOM job runs under: a 512 MiB driver heap, no cap on what one action returns,
+# and Spark's structured logging, which writes the driver's log to stderr as JSON lines.
+readonly DRIVER_OOM_CONF=(
+  --master 'local[2]'
+  --driver-memory 512m
+  --conf spark.eventLog.enabled=true
+  --conf spark.eventLog.dir=file:///out
+  --conf spark.log.structuredLogging.enabled=true
+  --conf spark.driver.maxResultSize=0
 )
 
 # A pandas UDF needs pyarrow and pandas, and neither Spark image ships them. Spark 4.2 refuses a
@@ -310,6 +322,16 @@ run_variant() {
       done
       zstd_plain "$out"/app-*
       ;;
+    spark-4.2.0-driver-oom)
+      # The run fails by design. Its stderr is the driver's structured log, kept under driver-logs/.
+      mkdir -p "$work/driver-logs/$variant"
+      if submit "$SPARK_4" "$out" /opt/spark/bin/spark-submit "${DRIVER_OOM_CONF[@]}" /job/driver_oom_job.py \
+        2>"$work/driver-logs/$variant/stderr.log"; then
+        echo "regenerate.sh: $variant was to run its driver out of memory, and it succeeded" >&2
+        exit 1
+      fi
+      zstd -19 -q --rm "$work/driver-logs/$variant/stderr.log" -o "$work/driver-logs/$variant/stderr.log.zstd"
+      ;;
     glue-5.0)
       # Glue's own spark-defaults.conf stays in force, apart from where the log goes.
       submit "$GLUE_5" "$out" /usr/lib/spark/bin/spark-submit --master 'local[4]' \
@@ -346,7 +368,7 @@ main() {
     rm -rf "${fixtures:?}/logs/$variant"
     mkdir -p "$fixtures/logs"
     mv "$work/$variant" "$fixtures/logs/$variant"
-    for beside in decoded-by-spark history-server-sql history-server-rest explain; do
+    for beside in decoded-by-spark history-server-sql history-server-rest explain driver-logs; do
       rm -rf "${fixtures:?}/$beside/$variant"
       if [ -d "$work/$beside/$variant" ]; then
         mkdir -p "$fixtures/$beside"

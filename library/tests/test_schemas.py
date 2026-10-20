@@ -6,8 +6,8 @@ from sparkxray.rules.findings import UNIT_SUFFIXES
 from sparkxray.schemas import schema_document
 from sparkxray.schemas import schema_names
 
-# An attempt, a version or an index identifies something rather than measuring it, so it has no unit.
-_IDENTIFIERS = ('attempt', 'version', '_index')
+# An attempt, a version, an index or a line number identifies something rather than measuring it, so it has no unit.
+_IDENTIFIERS = ('attempt', 'version', '_index', 'line_number')
 
 
 def test_every_numeric_property_of_every_schema_ends_in_its_unit_or_sits_beside_one() -> None:

@@ -22,6 +22,7 @@ from sparkxray.errors import registered
 from sparkxray.rules.findings import FINDINGS_PARQUET_COLUMNS
 from sparkxray.rules.findings import FINDINGS_TABLE_DESCRIPTION
 from sparkxray.rules.findings import findings_column_descriptions
+from sparkxray.tables.registry import ENRICHMENT_TABLES
 from sparkxray.tables.registry import TABLES
 from sparkxray.tables.registry import TASKS_EFFECTIVE_DESCRIPTION
 from sparkxray.tables.registry import column_unit
@@ -62,11 +63,12 @@ class SchemaSummary:
 def queryable_tables() -> tuple[QueryableTable, ...]:
     """Every table and view a query reads, in the order the build writes them: `tasks_effective` after `tasks`, `findings` last.
 
-    `findings` exists in a log's tables once the log is analyzed.
+    The enrichment's tables come before `findings`. Each holds rows once `logs ingest` joined its
+    source, and is empty before. `findings` exists in a log's tables once the log is analyzed.
     """
     tables = [
         QueryableTable(table.name, table.description, tuple(QueryableColumn(c.name, c.type, c.description) for c in table.columns))
-        for table in TABLES
+        for table in (*TABLES, *ENRICHMENT_TABLES)
     ]
     tasks = next(table for table in tables if table.name == 'tasks')
     tables.insert(tables.index(tasks) + 1, QueryableTable('tasks_effective', TASKS_EFFECTIVE_DESCRIPTION, tasks.columns))
@@ -136,9 +138,29 @@ def _value_schema(kind: str) -> dict[str, Any]:
     if kind.endswith('[]'):
         return {'type': ['array', 'null'], 'items': _value_schema(kind[:-2])}
     if kind.startswith('MAP('):
-        _, value = kind.removeprefix('MAP(').removesuffix(')').split(', ')
+        _, value = _type_arguments(kind.removeprefix('MAP(').removesuffix(')'))
         return {'type': ['object', 'null'], 'additionalProperties': _value_schema(value)}
+    if kind.startswith('STRUCT('):
+        fields = dict(argument.split(' ', 1) for argument in _type_arguments(kind.removeprefix('STRUCT(').removesuffix(')')))
+        return {
+            'type': ['object', 'null'],
+            'additionalProperties': False,
+            'required': list(fields),
+            'properties': {name: _value_schema(field_kind) for name, field_kind in fields.items()},
+        }
     return {'type': [_JSON_TYPES[kind], 'null']}
+
+
+def _type_arguments(text: str) -> list[str]:
+    """A DuckDB type's comma-separated arguments, leaving each nested type's own commas alone."""
+    arguments, depth, start = [], 0, 0
+    for index, character in enumerate(text):
+        depth += {'(': 1, ')': -1}.get(character, 0)
+        if character == ',' and depth == 0:
+            arguments.append(text[start:index].strip())
+            start = index + 1
+    arguments.append(text[start:].strip())
+    return arguments
 
 
 def _errors_document() -> dict[str, Any]:

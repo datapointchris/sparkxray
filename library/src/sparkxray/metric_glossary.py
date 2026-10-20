@@ -3,7 +3,8 @@
 The glossary holds every column whose name ends in a unit, and every metric a plan node declares.
 A column's description is the one the table registry carries, which `tables list` prints too, so
 the two never disagree. A meaning quoted from the Spark 4.2 documentation names its page and
-section. One read from the Apache Spark source names its file and line at tag v4.2.0.
+section. One read from the Apache Spark source names its file and line at tag v4.2.0. A column
+of the tables Glue's metrics and insights fill names the AWS reference page it is read from.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import dataclasses as dc
 from typing import Any
 
 from sparkxray.errors import UnknownMetricError
+from sparkxray.tables.registry import ENRICHMENT_TABLES
 from sparkxray.tables.registry import TABLES
 from sparkxray.tables.registry import column_unit
 
@@ -46,7 +48,8 @@ class MetricEntry:
 
     `table` is None for a plan metric. `unit` is the unit sparkxray shows it in, and `spark_unit`
     the one Spark records it in, which differ for an `nsTiming` plan metric and for a resource
-    profile's memory. `spark_fields` are the event fields it is read from, each level of a field
+    profile's memory. For a column CloudWatch fills, `spark_unit` is the one AWS records it in.
+    `spark_fields` are the event fields it is read from, each level of a field
     after a `›`. `derivation` says how sparkxray computes it where it is not one field as Spark
     wrote it. `metric_type` is a plan metric's kind in Spark, and `declared_by` the operators that
     declare it, as the cited source names them. `description` is None for a metric no published
@@ -106,6 +109,8 @@ def _documented(*levels: str) -> _ColumnSource:
 
 
 _TASK_PEAKS = f'{_EXECUTOR_METRICS_DOC}; {_CORE}executor/ExecutorMetricsPoller.scala:30'
+_GET_METRIC_DATA = 'Amazon CloudWatch API Reference, GetMetricData'
+_CLOUDWATCH_CONCEPTS = 'Amazon CloudWatch User Guide, Metrics concepts › Statistics'
 _STATISTICS = 'SparkListenerSQLAdaptiveExecutionUpdate › physicalPlanDescription'
 
 _COLUMN_SOURCES: dict[str, _ColumnSource] = {
@@ -238,6 +243,29 @@ _COLUMN_SOURCES: dict[str, _ColumnSource] = {
             "Each task's last report from the stage's latest attempt, a 0 for each of its tasks that reported none, and the driver's "
             'reports. A sum counts every value, an average those above 0, and a size or time those at or above 0, as the SQL tab does.'
         ),
+    ),
+    'glue_metrics.period_ms': _ColumnSource(
+        ('GetMetricData › MetricDataQueries › MetricStat › Period',),
+        _GET_METRIC_DATA,
+        derivation=(
+            'The period sparkxray asks for: 60 seconds for a run that started in the last 15 days, 300 to 63 days, and 3600 after, '
+            'the finest CloudWatch keeps at each age.'
+        ),
+        spark_unit='s',
+    ),
+    'glue_metrics.period_start_epoch_ms': _ColumnSource(
+        ('GetMetricData › MetricDataResults › Timestamps',),
+        f'{_GET_METRIC_DATA}; {_CLOUDWATCH_CONCEPTS}',
+        derivation='CloudWatch stamps a statistic aggregated over a period with the time the period began.',
+    ),
+    'glue_insights.logged_epoch_ms': _ColumnSource(
+        ('GetLogEvents › events › timestamp',),
+        'Amazon CloudWatch Logs API Reference, OutputLogEvent',
+    ),
+    'driver_log.logged_epoch_ms': _ColumnSource(
+        ('ts',),
+        'Apache Spark v4.2.0 source, common/utils-java/src/main/resources/org/apache/spark/SparkLayout.json:5',
+        derivation="The record's ts, which Spark writes in UTC as yyyy-MM-dd'T'HH:mm:ss.SSS'Z'.",
     ),
 }
 
@@ -555,9 +583,9 @@ _PLAN_METRICS: tuple[_PlanMetric, ...] = (
 
 
 def metric_glossary() -> tuple[MetricEntry, ...]:
-    """Every column whose name ends in a unit, table by table in build order, then every plan metric by name."""
+    """Every column whose name ends in a unit, table by table in build order and then the enrichment's, then every plan metric by name."""
     columns = []
-    for table in TABLES:
+    for table in (*TABLES, *ENRICHMENT_TABLES):
         for column in table.columns:
             unit = column_unit(column.name)
             if unit is None:

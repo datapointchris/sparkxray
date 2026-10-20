@@ -39,8 +39,8 @@
   },
   "$defs": {
     "signal": {
-      "description": "plan: a physical plan. plan_metrics: its nodes' measured metrics. plan_stages: which stages ran each node, which a log rebuilt from REST JSON lacks. whole_run: every job, stage, SQL execution and task of the run, which a server past its spark.ui.retained* limits had dropped part of. plan_estimates: the optimizer's size estimates, which only explain(mode='cost') text prints and no event log carries. tasks: task metrics. executors: executor lifetimes and sizes. environment: the run's configuration. timeline: when stages ran.",
-      "enum": ["plan", "plan_metrics", "plan_stages", "plan_estimates", "tasks", "executors", "environment", "timeline", "whole_run"]
+      "description": "plan: a physical plan. plan_metrics: its nodes' measured metrics. plan_stages: which stages ran each node, which a log rebuilt from REST JSON lacks. whole_run: every job, stage, SQL execution and task of the run, which a server past its spark.ui.retained* limits had dropped part of. plan_estimates: the optimizer's size estimates, which only explain(mode='cost') text prints and no event log carries. tasks: task metrics. executors: executor lifetimes and sizes. environment: the run's configuration. timeline: when stages ran. glue_metrics: Glue's observability metrics for the run, read from CloudWatch. glue_insights: Glue's job run insights for a failed run, read from CloudWatch Logs. driver_log: records of Spark's structured logging, read from the logs given.",
+      "enum": ["plan", "plan_metrics", "plan_stages", "plan_estimates", "tasks", "executors", "environment", "timeline", "whole_run", "glue_metrics", "glue_insights", "driver_log"]
     },
     "severity": {"enum": ["info", "low", "medium", "high", "critical"]},
     "evidence_value": {

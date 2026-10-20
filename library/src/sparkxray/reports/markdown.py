@@ -33,16 +33,23 @@ _HELD_WITHOUT = {
     'execution_configs': "SQL executions' changed settings",
     'evicted_records': 'the jobs, stages, SQL executions or tasks the server had dropped',
 }
+_JOINED = {
+    'glue_metrics': "Glue's metrics",
+    'glue_insights': "Glue's job run insights",
+    'driver_log': "the driver's log",
+}
 
 
 def render_markdown(report: Report) -> str:
     """The report as Markdown, ending in one newline."""
     sections = [
         _header(report),
+        _job_run_insights(report),
         _findings(report.findings, report.gate),
         _skipped(report),
         _stages(report),
         _sql(report),
+        _throughput(report),
         _config(report),
     ]
     return '\n\n'.join(section for section in sections if section) + '\n'
@@ -72,8 +79,31 @@ def _header(report: Report) -> str:
         caveats.append(f'it holds no {_listed(held_without)}')
     if caveats:
         lines += ['', f'The log: {"; ".join(caveats)}.']
-    lines += ['', f'{report.generated_by}, from `{report.log.source}`.']
+    joined = f', with {_listed([_JOINED[name] for name in report.log.enriched])} joined' if report.log.enriched else ''
+    lines += ['', f'{report.generated_by}, from `{report.log.source}`{joined}.']
     return '\n'.join(lines)
+
+
+def _job_run_insights(report: Report) -> str:
+    if not report.job_run_insights:
+        return ''
+    columns = (
+        ('Logged', 'logged_epoch_ms'),
+        ('Event', 'event'),
+        ('Failure', 'failure_reason'),
+        ('Root cause', 'root_cause'),
+        ('What Glue recommends', 'recommended_action'),
+    )
+    rows = [tuple(_shown(key, insight[key]) for _, key in columns) for insight in report.job_run_insights]
+    return '\n'.join(
+        [
+            '## Glue job run insights',
+            '',
+            "Glue's own account of why the run failed, from its job run insights streams.",
+            '',
+            *_table(tuple(title for title, _ in columns), rows),
+        ]
+    )
 
 
 def _findings(findings: Sequence[Finding], gate: Gate) -> str:
@@ -264,6 +294,29 @@ def plan_lines(plan: AnnotatedPlan) -> list[str]:
         if node.parent is None:
             draw(node, '', '', '')
     return [line.rstrip() for line in lines]
+
+
+def _throughput(report: Report) -> str:
+    if not report.throughput:
+        return ''
+    columns = (
+        ('Direction', 'direction'),
+        ('Location', 'location'),
+        ('Bytes', 'total_bytes'),
+        ('Records', 'total_records'),
+        ('Files', 'file_count'),
+        ('Partitions', 'partition_count'),
+    )
+    rows = [tuple(_shown(key, row[key]) for _, key in columns) for row in report.throughput]
+    return '\n'.join(
+        [
+            '## Reads and writes',
+            '',
+            "What each source read and each sink wrote, as Glue's throughput metrics report it. ALL is every source or every sink.",
+            '',
+            *_table(tuple(title for title, _ in columns), rows),
+        ]
+    )
 
 
 def _config(report: Report) -> str:

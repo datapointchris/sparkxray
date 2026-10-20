@@ -18,6 +18,7 @@ from sparkxray.rules.spark_settings import memory_setting_bytes
 from sparkxray.rules.spark_settings import spark_settings_cte
 from sparkxray.tables.registry import CORE_TIME_CTES
 from sparkxray.tables.registry import GLUE_DPU_CORES
+from sparkxray.tables.registry import glue_shares_cte
 
 if TYPE_CHECKING:
     from sparkxray.tables.relations import Tables
@@ -32,7 +33,8 @@ _TASK_PEAKS_REASON = (
 )
 
 _IDLE_CORES_SQL = f"""
-WITH {CORE_TIME_CTES}, {spark_settings_cte(DYNAMIC_ALLOCATION)}, totals AS (SELECT * FROM core_totals)
+WITH {CORE_TIME_CTES}, {spark_settings_cte(DYNAMIC_ALLOCATION)}, {glue_shares_cte('glue.driver.workerUtilization')},
+totals AS (SELECT * FROM core_totals)
 SELECT 'medium' AS severity, totals.executor_count, totals.driver_ran_tasks,
   round(totals.core_time_ms / 3600000, 4) AS core_hours,
   round(totals.task_core_time_ms / 3600000, 4) AS task_core_hours,
@@ -40,6 +42,7 @@ SELECT 'medium' AS severity, totals.executor_count, totals.driver_ran_tasks,
   round(1 - totals.task_core_time_ms / totals.core_time_ms, 4) AS idle_core_share,
   CASE WHEN application.platform = 'glue'
     THEN round((totals.core_time_ms - totals.task_core_time_ms) / 3600000 / {GLUE_DPU_CORES}, 4) END AS idle_dpu_hours,
+  (SELECT round(avg(share), 4) FROM glue_shares) AS glue_worker_utilization_share,
   lower(coalesce(spark_settings."{DYNAMIC_ALLOCATION}", 'false')) = 'true' AS dynamic_allocation_enabled
 FROM totals, application, spark_settings
 WHERE totals.core_time_ms > 0 AND 1 - totals.task_core_time_ms / totals.core_time_ms > $min_idle_share
@@ -53,7 +56,9 @@ Each executor's core time, its lifetime times its cores, against the time its ta
 those cores, every attempt counted and each holding `spark.task.cpus` cores. The rule sums both
 over every executor, or over the driver where there are none, as in local mode, where the driver
 runs the tasks. `idle_core_hours` is the difference, and on Glue `idle_dpu_hours` prices it in
-DPUs of 4 vCPUs.
+DPUs of 4 vCPUs. Where `logs ingest --glue-run` joined the run's Glue metrics,
+`glue_worker_utilization_share` is the mean of Glue's own `glue.driver.workerUtilization` over
+the run. It measures the same waste from Glue's side, so the two should roughly agree.
 
 ## Why it costs time
 
@@ -100,6 +105,7 @@ IDLE_CORES = Rule(
     docs=(_ALLOCATION_DOCS,),
     lesson=_IDLE_CORES_LESSON,
     sql=_IDLE_CORES_SQL,
+    rule_version=2,
 )
 
 _EXECUTOR_MEMORY_SQL = f"""

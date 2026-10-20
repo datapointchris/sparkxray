@@ -6,6 +6,7 @@ from typing import Annotated
 from typing import Any
 
 import typer
+from sparkxray.enrichment import GlueRun
 from sparkxray.rules import Severity
 from sparkxray.run_diff import RunDiff
 from sparkxray.run_diff import diff_logs
@@ -46,6 +47,14 @@ _APPLICATION_KEYS = (
 )
 
 
+def glue_run(text: str) -> GlueRun:
+    """`JOB_NAME:RUN_ID`, split at the last colon, because a job's name may hold one and a run id never does."""
+    job_name, _, run_id = text.rpartition(':')
+    if not job_name or not run_id.startswith('jr_'):
+        raise typer.BadParameter("give the job's name and its run id, as my-job:jr_0123abcd")
+    return GlueRun(job_name, run_id)
+
+
 @app.command('ingest')
 def ingest(
     log: LogArgument,
@@ -58,6 +67,27 @@ def ingest(
             show_default=False,
         ),
     ] = None,
+    glue: Annotated[
+        GlueRun | None,
+        typer.Option(
+            '--glue-run',
+            metavar='JOB_NAME:RUN_ID',
+            parser=glue_run,
+            help='The Glue job run LOG is from. Joins its observability metrics from CloudWatch and its job run insights '
+            "from CloudWatch Logs, read with boto3's credentials, in the region AWS_DEFAULT_REGION or the profile names.",
+            show_default=False,
+        ),
+    ] = None,
+    driver_logs: Annotated[
+        list[str] | None,
+        typer.Option(
+            '--driver-log',
+            metavar='LOCATION',
+            help='A log Spark 4 wrote with spark.log.structuredLogging.enabled=true: a file, an s3:// object, '
+            'or cloudwatch:GROUP:STREAM. Repeat it for each log.',
+            show_default=False,
+        ),
+    ] = None,
     as_json: JsonOption = False,
 ) -> None:
     """Read a log, build its tables, and print the directory that holds them.
@@ -65,8 +95,17 @@ def ingest(
     Reading an unchanged log again reads the tables already built, so every other command is
     as fast on the second run as the first was slow. A server's address reads the event log it
     serves, or rebuilds one from its REST JSON where it serves none, as a live driver UI does.
+
+    --glue-run and --driver-log join what the event log does not hold, each as a table of its own
+    that rules read. Giving one again replaces its table.
     """
-    cached = CachedLog.of(tables_of(open_log(log, app=app_id)))
+    opened = open_log(log, app=app_id)
+    tables = tables_of(opened)
+    if glue is not None or driver_logs:
+        with render.status(f'Joining sources to {opened.manifest.app_id}'):
+            enrichment = opened.enrich(glue_run=glue, driver_logs=driver_logs or ())
+        render.enrichment_notes(opened.manifest.app_id, enrichment)
+    cached = CachedLog.of(tables)
     if as_json:
         render.emit_json(cached.to_json())
     else:

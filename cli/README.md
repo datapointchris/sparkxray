@@ -12,9 +12,11 @@ Every release is published to that package index, and nothing else is. The comma
 3.13 or later. It pins the `sparkxray` library to its own release, so the two always match.
 
 Every command is `sparkxray <resource> <verb> LOG`, where `LOG` is a log file or directory, an
-`s3://` URI, or the app id of a log already read:
+`s3://` URI, a History Server's or driver UI's `http(s)://` address, or the app id of a log
+already read:
 
 ```bash
+sparkxray logs ingest LOG --glue-run JOB:RUN_ID --driver-log stderr.log   # join a Glue run's metrics and the driver's log
 sparkxray findings list LOG                  # what slowed the run, costliest first
 sparkxray findings list LOG --fail-on critical   # exit 3 on a critical finding, for a CI step
 sparkxray reports write LOG --out report.md      # the findings and the run behind them, as Markdown

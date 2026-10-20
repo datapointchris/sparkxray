@@ -1,4 +1,4 @@
-"""Rules over the application's job timeline: the driver alone between jobs, jobs too short to schedule, and jobs that failed."""
+"""Rules over the whole application: its job timeline, its failed jobs, and the driver's memory where its log or Glue's metrics show it."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ from sparkxray.rules.failure_reasons import failure_line
 from sparkxray.rules.failure_reasons import is_cancellation
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import Threshold
+from sparkxray.rules.stage.skew import GLUE_OBSERVABILITY
 from sparkxray.tables.registry import RUN_SPAN_SQL
+from sparkxray.tables.registry import glue_shares_cte
 
 _DATABRICKS_GUIDE = 'https://docs.databricks.com/aws/en/optimizations/spark-ui-guide/jobs-timeline'
 
@@ -204,4 +206,150 @@ FAILED_JOBS = Rule(
     sql=_FAILED_JOBS_SQL,
 )
 
-RULES = (DRIVER_GAPS, MANY_SMALL_JOBS, FAILED_JOBS)
+# The first OutOfMemoryError the driver logged, across every log given, in the order the records were logged.
+_DRIVER_OOM_SQL = """
+WITH ooms AS (
+  SELECT *, row_number() OVER (ORDER BY logged_epoch_ms NULLS LAST, log_file, line_number) AS position
+  FROM driver_log WHERE exception.class = 'java.lang.OutOfMemoryError'
+)
+SELECT 'high' AS severity, count(*) AS oom_record_count,
+  any_value(logged_epoch_ms) FILTER (WHERE position = 1) AS first_oom_epoch_ms,
+  any_value(coalesce(exception.msg, 'no message')) FILTER (WHERE position = 1) AS first_oom_reason,
+  any_value(left(message, 500)) FILTER (WHERE position = 1) AS first_oom_message,
+  any_value(context['thread_name']) FILTER (WHERE position = 1) AS first_oom_thread
+FROM ooms
+HAVING count(*) > 0
+"""
+
+_DRIVER_OOM_LESSON = """\
+## What it measures
+
+The records of the driver's structured log that carry a `java.lang.OutOfMemoryError`.
+`first_oom_reason` is the first one's message, as `Java heap space`, and `first_oom_thread` the
+thread that threw it, from the record's `context`. The rule reads the logs `logs ingest
+--driver-log` joined. Spark writes them as JSON lines with
+`spark.log.structuredLogging.enabled=true`, on Spark 4.0 or later.
+
+## Why it costs time
+
+A driver out of memory ends the application, and the event log does not say so. An executor's
+OOM fails a task, so its end reason carries it, and `stage.task-oom` reports it. The driver's
+fails no task. A `collect` whose rows all arrived ends its job as succeeded, and the driver then
+dies building them into one result. The log can end with the application's end event, as a clean
+run's does. The driver runs out holding what the application brought to it: a `collect` or
+`toPandas` result, or a table it built to broadcast.
+
+## Where the Spark UI shows it
+
+Nowhere. The UI reads the event log, which holds no record of it. The driver's own log holds it,
+as an ERROR record whose exception is the error.
+
+## How to fix it
+
+- Bring less to the driver: write a large result out rather than collecting it, or `limit` it
+  before `collect` or `toPandas`.
+- Cap what one action may return with `spark.driver.maxResultSize`, so an oversized result fails
+  its job rather than the driver.
+- Where a broadcast filled the heap, lower `spark.sql.autoBroadcastJoinThreshold`.
+- Raise `spark.driver.memory`, or on Glue choose a larger worker type, which sizes the driver too.
+"""
+
+DRIVER_OOM = Rule(
+    rule_id='app.driver-oom',
+    title='The driver ran out of memory: {first_oom_reason}',
+    signals=frozenset({'driver_log'}),
+    scope='application',
+    thresholds=(),
+    severity_ladder={'high': 'the driver logged a java.lang.OutOfMemoryError'},
+    remediation=(
+        'write a large result out rather than collecting it, or limit it before collect or toPandas',
+        'cap what one action may return with spark.driver.maxResultSize',
+        'where a broadcast filled the heap, lower spark.sql.autoBroadcastJoinThreshold',
+        'raise spark.driver.memory, or on Glue choose a larger worker type',
+    ),
+    docs=('https://spark.apache.org/docs/latest/configuration.html#application-properties',),
+    lesson=_DRIVER_OOM_LESSON,
+    sql=_DRIVER_OOM_SQL,
+)
+
+_HEAP_USED = 'glue.driver.memory.heap.used.percentage'
+
+# Each span of consecutive periods the driver's heap stayed at or over the floor, kept where it lasted long enough.
+_DRIVER_MEMORY_PRESSURE_SQL = f"""
+WITH {glue_shares_cte(_HEAP_USED)}, full_periods AS (
+  SELECT period_start_epoch_ms, period_ms, share,
+    lag(period_start_epoch_ms + period_ms) OVER (ORDER BY period_start_epoch_ms) AS previous_end_epoch_ms
+  FROM glue_shares WHERE share >= $min_heap_used_fraction
+), islands AS (
+  SELECT *, sum(CASE WHEN previous_end_epoch_ms IS NULL OR period_start_epoch_ms > previous_end_epoch_ms THEN 1 ELSE 0 END)
+    OVER (ORDER BY period_start_epoch_ms) AS island
+  FROM full_periods
+), spans AS (
+  SELECT min(period_start_epoch_ms) AS start_epoch_ms, max(period_start_epoch_ms + period_ms) - min(period_start_epoch_ms) AS span_ms
+  FROM islands GROUP BY island
+), sustained AS (
+  SELECT * FROM spans WHERE span_ms >= $min_sustained_ms
+)
+SELECT 'medium' AS severity, count(*) AS sustained_span_count, max(span_ms) AS longest_sustained_ms, sum(span_ms) AS sustained_ms,
+  min(start_epoch_ms) AS first_sustained_start_epoch_ms,
+  (SELECT round(max(share), 4) FROM glue_shares) AS peak_heap_used_share,
+  CASE WHEN (SELECT max(value) FROM glue_metrics WHERE metric = '{_HEAP_USED}') > 1 THEN 'percent' ELSE 'fraction' END
+    AS heap_percentage_scale
+FROM sustained
+HAVING count(*) > 0
+"""
+
+_DRIVER_MEMORY_PRESSURE_LESSON = """\
+## What it measures
+
+Glue's `glue.driver.memory.heap.used.percentage`, the share of the driver's heap in use, as one
+CloudWatch average per period. The rule reports each run of consecutive periods at or over
+{min_heap_used_fraction} that lasted at least {min_sustained_ms}. AWS gives the metric's unit
+only as Percentage, and the values it publishes for its percentage metrics run from 0 to 1. So
+a series reads as 0 to 100 only where one of its values passes 1, and `heap_percentage_scale`
+says which reading applied. The metric exists only where `logs ingest --glue-run` joined a run
+that had Glue's observability metrics on.
+
+## Why it costs time
+
+A heap that stays nearly full makes the JVM collect garbage again and again, each pass freeing
+little. The driver's own work waits while it does: scheduling tasks, gathering results and
+building broadcast tables. Past that, an allocation fails and the driver dies, which
+`app.driver-oom` reports where the driver's log was joined. The event log records driver memory
+only as per-stage peaks, and only with `spark.eventLog.logStageExecutorMetrics` on. So this rule
+needs Glue's metric.
+
+## Where the Spark UI shows it
+
+Executors tab: the driver's row, with its peak JVM heap where executor metrics are on.
+CloudWatch charts the metric itself in its Glue namespace, under the job's name and run id.
+
+## How to fix it
+
+- Bring less to the driver: write a large result out rather than collecting it, or `limit` it
+  before `collect` or `toPandas`.
+- Where a broadcast fills the heap, lower `spark.sql.autoBroadcastJoinThreshold`.
+- Choose a larger worker type, which sizes the driver too.
+"""
+
+DRIVER_MEMORY_PRESSURE = Rule(
+    rule_id='app.driver-memory-pressure',
+    title="The driver's heap stayed nearly full for {longest_sustained_ms:duration}",
+    signals=frozenset({'glue_metrics'}),
+    scope='application',
+    thresholds=(
+        Threshold('min_heap_used_fraction', 0.9, 'fraction', 'proposed'),
+        Threshold('min_sustained_ms', 90000, 'ms', 'proposed: three of the 30-second samples Glue publishes'),
+    ),
+    severity_ladder={'medium': "the driver's heap stayed at or over min_heap_used_fraction for at least min_sustained_ms"},
+    remediation=(
+        'write a large result out rather than collecting it, or limit it before collect or toPandas',
+        'where a broadcast fills the heap, lower spark.sql.autoBroadcastJoinThreshold',
+        'choose a larger worker type, which sizes the driver too',
+    ),
+    docs=(GLUE_OBSERVABILITY,),
+    lesson=_DRIVER_MEMORY_PRESSURE_LESSON,
+    sql=_DRIVER_MEMORY_PRESSURE_SQL,
+)
+
+RULES = (DRIVER_GAPS, MANY_SMALL_JOBS, FAILED_JOBS, DRIVER_OOM, DRIVER_MEMORY_PRESSURE)
