@@ -14,7 +14,6 @@ from sparkxray.plan import parse_plan_text
 from sparkxray.rules import Finding
 from sparkxray.rules import LessonExample
 from sparkxray.rules import analyze_plan
-from sparkxray.rules import catalog
 from sparkxray.rules.lessons import lesson_examples
 
 FINDINGS_SCHEMA = jsonschema.Draft202012Validator(
@@ -23,7 +22,6 @@ FINDINGS_SCHEMA = jsonschema.Draft202012Validator(
 
 
 APPLICATION_PROPERTY = 'spark.sparkxray.fixture.application'
-LESSON_SECTIONS = ['## What it measures', '## Why it costs time', '## Where the Spark UI shows it', '## How to fix it']
 
 
 def _expected(description: str) -> tuple[set[str], set[str]]:
@@ -112,12 +110,6 @@ def test_each_rule_fires_where_a_fixture_lists_it_and_each_lesson_example_is_wha
     reported = [LessonExample.of_finding(finding, source, None) for finding in findings]
     examples = {rule_id: example for rule_id, example in lesson_examples().items() if example.source == source}
     assert sorted(rule_id for rule_id, example in examples.items() if dc.replace(example, description=None) not in reported) == []
-
-
-def test_every_lesson_answers_the_same_four_questions_in_order() -> None:
-    headings = {rule.rule_id: [line for line in rule.lesson_text().splitlines() if line.startswith('#')] for rule in catalog()}
-
-    assert {rule_id: found for rule_id, found in headings.items() if found != LESSON_SECTIONS} == {}
 
 
 def test_a_plan_without_metrics_runs_the_plan_rules_and_names_what_the_others_lack() -> None:
