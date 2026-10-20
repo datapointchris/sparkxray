@@ -26,7 +26,7 @@ ORDER BY stage_statistics.stage_id
 
 
 # Dr. Elephant's ladder over GC time against run time, from 8% up.
-_GC_SHARE = 'stage_statistics.gc_time_ms / nullif(stage_statistics.run_time_ms, 0)'
+_GC_SHARE = 'stage_statistics.gc_share'
 _GC_PRESSURE_SQL = _stage_rule_sql(
     f'stage_statistics.gc_time_ms >= $min_gc_ms AND {_GC_SHARE} >= $min_share',
     f"""CASE WHEN {_GC_SHARE} >= 0.2 THEN 'critical' WHEN {_GC_SHARE} >= 0.15 THEN 'high'

@@ -7,6 +7,7 @@ from typing import Any
 
 from sparkxray.errors import NotInRunError
 from sparkxray.summaries.ordering import ordered_rows
+from sparkxray.tables.registry import GC_SHARE
 from sparkxray.tables.registry import WALL_SHARES_SQL
 from sparkxray.tables.relations import Tables
 from sparkxray.tables.rows import Rows
@@ -37,7 +38,7 @@ WITH walls AS (
     sum(memory_spilled_bytes)::BIGINT AS memory_spilled_bytes,
     sum(disk_spilled_bytes)::BIGINT AS disk_spilled_bytes,
     sum(jvm_gc_time_ms)::BIGINT AS gc_time_ms,
-    round(sum(jvm_gc_time_ms) / nullif(sum(executor_run_time_ms), 0), 4) AS gc_share
+    round({GC_SHARE}, 4) AS gc_share
   FROM tasks_effective GROUP BY stage_id
 )
 SELECT attempts.stage_id, attempts.name, attempts.status, attempts.attempt_count,

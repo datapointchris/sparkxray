@@ -2,8 +2,10 @@
 
 from sparkxray.summaries.annotated_plans import AnnotatedNode
 from sparkxray.summaries.annotated_plans import AnnotatedPlan
+from sparkxray.summaries.annotated_plans import FindingMark
 from sparkxray.summaries.annotated_plans import HostedSubquery
 from sparkxray.summaries.annotated_plans import NodeDetails
+from sparkxray.summaries.annotated_plans import NodeLine
 from sparkxray.summaries.annotated_plans import NodeMetric
 from sparkxray.summaries.annotated_plans import annotated_plan
 from sparkxray.summaries.application import ApplicationDetail
@@ -21,8 +23,10 @@ __all__ = [
     'AnnotatedNode',
     'AnnotatedPlan',
     'ApplicationDetail',
+    'FindingMark',
     'HostedSubquery',
     'NodeDetails',
+    'NodeLine',
     'NodeMetric',
     'SqlExecutionDetail',
     'StageDetail',

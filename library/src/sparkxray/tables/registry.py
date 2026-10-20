@@ -812,11 +812,16 @@ SELECT start_epoch_ms, coalesce(end_epoch_ms, greatest(
 FROM application
 """
 
+TASK_CPUS = 'spark.task.cpus'
+
+# A stage's GC time over its run time, aggregated over its effective tasks. `stage.gc-pressure` grades it, and stage summaries carry it.
+GC_SHARE = 'sum(jvm_gc_time_ms) / nullif(sum(executor_run_time_ms), 0)'
+
 # Each executor's lifetime and the task time it ran, as common table expressions: `lifetimes`,
 # `task_totals`, and `task_cpus`, the cores each task holds. An executor never removed lives to the
 # run's end. Task time counts every attempt, failed and speculative ones included.
 EXECUTOR_TIME_CTES = f"""run AS ({RUN_SPAN_SQL}), task_cpus AS (
-  SELECT coalesce(max(try_cast(value AS BIGINT)) FILTER (WHERE key = 'spark.task.cpus'), 1) AS cpus
+  SELECT coalesce(max(try_cast(value AS BIGINT)) FILTER (WHERE key = '{TASK_CPUS}'), 1) AS cpus
   FROM environment WHERE section = 'spark'
 ), task_totals AS (
   SELECT executor_id, count(*) AS task_count, count(*) FILTER (WHERE failed) AS failed_task_count,
