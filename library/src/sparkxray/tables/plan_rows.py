@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import dataclasses as dc
 import json
-from collections.abc import Iterator
 from typing import Any
 
 import duckdb
 import pyarrow as pa
 
 from sparkxray.plan.last_plans import plan_for_event
-from sparkxray.plan.tree import Plan
 from sparkxray.plan.tree import PlanNode
 
 _NODE_SCHEMA = pa.schema(
@@ -91,11 +89,11 @@ def plan_rows(connection: duckdb.DuckDBPyConnection) -> PlanRows:
             if plan is None:
                 continue
             versions.append({'execution_id': execution_id, 'plan_version': version, 'is_final': plan.is_final, 'truncated': plan.truncated})
-            for node_id, parent_id, node in _flattened(plan):
-                nodes.append(_node_row(execution_id, version, plan.is_final, node_id, parent_id, node))
+            for numbered in plan.numbered():
+                nodes.append(_node_row(execution_id, version, plan.is_final, numbered.number, numbered.parent, numbered.node))
                 metrics.extend(
-                    _metric_row(execution_id, version, node_id, metric.name, metric.metric_type, metric.accumulator_id)
-                    for metric in node.metrics
+                    _metric_row(execution_id, version, numbered.number, metric.name, metric.metric_type, metric.accumulator_id)
+                    for metric in numbered.node.metrics
                     if metric.accumulator_id is not None
                 )
     return PlanRows(
@@ -103,23 +101,6 @@ def plan_rows(connection: duckdb.DuckDBPyConnection) -> PlanRows:
         metrics=pa.Table.from_pylist(metrics, schema=_METRIC_SCHEMA),
         versions=pa.Table.from_pylist(versions, schema=_VERSION_SCHEMA),
     )
-
-
-def _flattened(plan: Plan) -> Iterator[tuple[int, int | None, PlanNode]]:
-    """Each node with its id and parent in one numbering: the plan's own nodes, then each subquery's, numbered on from the last."""
-    count = 0
-
-    def walk(part: Plan, root_parent: int | None) -> Iterator[tuple[int, int | None, PlanNode]]:
-        nonlocal count
-        offset = count
-        count += len(part.nodes)
-        for node in part.nodes:
-            yield node.node_id + offset, root_parent if node.parent_id is None else node.parent_id + offset, node
-        for subquery in part.subqueries:
-            hosting = None if subquery.hosting_node_id is None else subquery.hosting_node_id + offset
-            yield from walk(subquery, hosting)
-
-    yield from walk(plan, None)
 
 
 def _node_row(execution_id: int, version: int, is_final: bool, node_id: int, parent_id: int | None, node: PlanNode) -> dict[str, Any]:

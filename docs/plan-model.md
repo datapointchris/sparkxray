@@ -46,6 +46,12 @@ The JSON tree holds wrappers the text never shows, and the text holds lines JSON
 With those folded, one plan read from JSON and from formatted text gives equal operator counts.
 Without them, one plan read two ways reports `FileScan +1, Scan -1`.
 
+`Plan.numbered()` numbers a plan's nodes and its subqueries' in one sequence. The plan's own nodes
+keep their `node_id`, and each subquery's follow on from the last number before them. A
+subquery's root takes its hosting node as parent. `plan_nodes` uses these numbers, so
+`(execution_id, plan_version, node_id)` names any node, and a rule reading a plan names the same
+node the tables do.
+
 Labels are normalized by rewriting ids only. Each rewrite is anchored to the syntax that carries
 the id, so two builds of one transform compare equal. The ids themselves stay on each node as
 fields: expression ids, the plan id, the query stage id and subquery ids.

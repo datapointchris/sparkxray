@@ -124,6 +124,7 @@ skew = tables.query(
 print(skew.fetchall())
 tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
 print(tables.path)                               # the Parquet directory, for any Parquet reader
+plans = tables.last_plans()                      # each execution's last Plan, without the log
 ```
 
 | Table | One row per |
@@ -152,6 +153,43 @@ row's unit.
 `tables.manifest.lacks` names what the log was written without, because Spark leaves it out by
 default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`. A column only
 those settings fill, such as `peak_python_rss_bytes`, is null in a log written without them.
+
+## Find what slowed a run
+
+`log.analyze()` runs every rule over the log's tables and plans. Each finding names its rule, the
+stage, execution or plan node it is about, the evidence, the thresholds it was judged against, and
+the seconds a fix could recover.
+
+```python
+import json
+
+from sparkxray.ingest import EventLog
+
+log = EventLog.open('eventlog.zstd')
+analysis = log.analyze(thresholds={'stage.shuffle-skew': {'ratio': 8}})
+for finding in analysis.findings:            # the most recoverable time first
+    print(finding.finding_id, finding.severity, finding.impact_seconds, finding.title)
+print(analysis.skipped)                      # rules the log held too little to run
+json.dumps(analysis.to_json())               # the shape sparkxray/schemas/findings.json pins
+log.tables.findings.filter("severity = 'high'").fetchall()
+```
+
+Thresholds also come from a TOML file, `log.analyze(threshold_file=path)`. A size reads as
+Spark's own settings do, so `"512m"` and `"512MiB"` are both 536,870,912 bytes:
+
+```toml
+["stage.shuffle-skew"]
+ratio = 8
+min_bytes = "512MiB"
+```
+
+`sparkxray.rules.analyze_plan` runs the rules over one plan, such as one read from `explain()`
+text, with no log. Only the rules reading a plan alone run, and `skipped` names what each other
+rule lacked. Other code adds its own rules with `sparkxray.rules.register`.
+
+`findings.parquet` is written beside the tables, and holds the last analysis's findings.
+`log.tables.stored_analysis()` says which rules that analysis ran, under which thresholds, and
+which it skipped.
 
 ## Layout
 

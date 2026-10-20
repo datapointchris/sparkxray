@@ -104,6 +104,39 @@ class Plan:
         """The plan AQE started from, where the text printed an `== Initial Plan ==` block."""
         return self._initial
 
+    def numbered(self) -> tuple[NumberedNode, ...]:
+        """Every node of this plan and of its subqueries, numbered in one sequence, at its number's position.
+
+        This plan's own nodes keep their `node_id`. Each subquery's nodes follow, numbered on from
+        the last node before them. The tables number `plan_nodes` this way.
+        """
+        numbered: list[NumberedNode] = []
+
+        def add(part: Plan, root_parent: int | None) -> None:
+            offset = len(numbered)
+            for node in part.nodes:
+                parent = root_parent if node.parent_id is None else node.parent_id + offset
+                numbered.append(NumberedNode(node.node_id + offset, parent, tuple(child + offset for child in node.children), node))
+            for subquery in part.subqueries:
+                add(subquery, None if subquery.hosting_node_id is None else subquery.hosting_node_id + offset)
+
+        add(self, None)
+        return tuple(numbered)
+
+
+@dc.dataclass(frozen=True, slots=True)
+class NumberedNode:
+    """A node of a plan or of one of its subqueries, with its number in `Plan.numbered`.
+
+    `parent` and `children` are numbers in the same sequence. A subquery's root has the node
+    hosting it as its parent, and that node does not list it among its children.
+    """
+
+    number: int
+    parent: int | None
+    children: tuple[int, ...]
+    node: PlanNode
+
 
 @dc.dataclass(eq=False)
 class RawNode:

@@ -228,3 +228,14 @@ So after a stage retry, its totals can fall short of the same metric summed over
 Without stage executor metrics, each task's peaks are the log's only memory figures. Without
 process-tree metrics, `peak_python_rss_bytes` is null. Spark writes 0 for a metric it never
 measured, and the table does not pass that off as a measurement.
+
+## Rules read the tables, and a plan alone needs neither DuckDB nor pyarrow
+
+`analyze` reads everything from the tables, plans included. `sql_executions.final_plan_json` holds
+each execution's last `sparkPlanInfo`, which `Tables.last_plans()` reads back into a `Plan`. So
+analyzing a cached log parses no event line. The findings go into the table directory as
+`findings.parquet`, through a `.part-` file renamed into place.
+
+`analyze_plan` runs the rules over one `Plan` and reads no table. Importing `sparkxray.rules` loads
+neither DuckDB nor pyarrow, and pyarrow loads only to write `findings.parquet`. So code checking a
+plan captured from `explain()` pays for neither.
