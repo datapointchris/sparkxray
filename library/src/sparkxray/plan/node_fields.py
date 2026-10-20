@@ -91,6 +91,13 @@ def partitioning(node: PlanNode) -> str | None:
     return None
 
 
+def shuffle_read_kind(node: PlanNode) -> str | None:
+    """What an `AQEShuffleRead` printed beside its name, such as `coalesced` or `skewed`, or None for any other node."""
+    if node.operator != 'AQEShuffleRead':
+        return None
+    return field(node, 'Arguments') or node.label.removeprefix('AQEShuffleRead').strip() or None
+
+
 def partition_count(node: PlanNode) -> int | None:
     """How many partitions an `Exchange` writes: the count its partitioning ends with, or 1 for `SinglePartition`."""
     printed = partitioning(node)

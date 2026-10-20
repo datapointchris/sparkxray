@@ -200,12 +200,14 @@ reads the minimum, median and maximum, and the stage and task that held the maxi
 Each node in `sparkPlanInfo` lists its metrics with an accumulator id. Tasks report updates to
 those ids, and each stage lists the ids it touched. Joining the two maps nodes to stages.
 
-AQE allocates fresh accumulators every time it re-plans a node, and even the first update
-re-allocates every node. A query stage that finished before a re-plan then keeps its node and ids.
-So the last plan lists the ids of everything that actually ran.
+AQE gives most nodes fresh accumulators each time it re-plans. A node it carries over keeps its
+node and ids into each later plan: a query stage that finished before the re-plan, and a scan or
+filter below the first exchanges. So the last plan lists the ids of everything that actually ran.
 
-That is why rules read metrics through the last plan's nodes. A node of the version 0 plan
-`SQLExecutionStart` logs has no updates, which is expected, not missing data.
+That is why rules read metrics through the last plan's nodes. A node of an earlier version has
+values only where a later plan kept its ids. So every valued metric of the version 0 plan
+`SQLExecutionStart` logs shares its accumulator with the last plan, and the rest have no updates.
+That is expected, not missing data.
 
 Driver-side values, such as broadcast build time and file listing, arrive in
 `SparkListenerDriverAccumUpdates`. Metric definitions for a subquery AQE re-planned arrive in
@@ -247,3 +249,29 @@ where the SQL tab prints `(driver)`.
 `fixtures/history-server-sql/` holds what the SQL tab serves for the plan-shapes logs, metric
 strings included. The tables test prints each execution's `plan_node_metrics` the way the SQL tab
 prints them, and requires the two to match.
+
+## An annotated plan places a finding only on the node its scope names
+
+`sparkxray.summaries.annotated_plan` reads one version of an execution's plan with the numbers the
+SQL tab shows on its graph: each node's metrics from `plan_node_metrics`, the stages it ran in
+from `node_stages`, and the size and rows AQE measured on each finished query stage.
+`with_findings` then places an analysis's findings. `plans show` reads the plan first, so an
+execution or version the run lacks is refused before the rules run.
+
+A finding's `plan_node_id` numbers the last plan's nodes, as `node_stages` does. So only the last
+version places findings on nodes, and only `node_stages` gives a node its stages there. An earlier
+version lists its execution's findings below the tree, beside those about the whole execution or
+one of its stages. Its nodes still show the metrics of the nodes the last plan kept, because those
+keep their accumulators.
+
+A finding naming no node stays off every node. `stage.shuffle-skew` names its stage's join only
+where exactly one sort-merge or shuffled hash join ran there. Marking the stage's other nodes would
+guess at what the rule declined to say.
+
+A subquery's plan is drawn under the node that runs it, numbered on from the main plan as
+`Plan.numbered()` numbers it. That node lists the subquery's root in `subqueries`, never in
+`children`, so a walk over children stays inside one plan.
+
+A node's headline leaves out expression and exchange ids, so `SortMergeJoin [k#2L], [k#10L],
+Inner` reads `SortMergeJoin Inner k = k`. A subquery reference keeps its id, which names the
+subquery drawn below. `details` keeps each field as Spark printed it, ids included.

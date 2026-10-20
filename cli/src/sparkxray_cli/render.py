@@ -79,7 +79,7 @@ def shown_in(unit: str | None, value: Any) -> str:
     if unit == 'x':
         return f'{value:g}x'
     if unit in _GROUPED_UNITS:
-        return f'{value:,}'
+        return f'{int(value):,}' if float(value).is_integer() else f'{value:,}'
     return str(value)
 
 

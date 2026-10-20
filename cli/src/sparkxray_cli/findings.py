@@ -12,6 +12,7 @@ from sparkxray.rules import Analysis
 from sparkxray.rules import Severity
 
 from sparkxray_cli import render
+from sparkxray_cli.log_opening import analyze_log
 from sparkxray_cli.log_opening import open_log
 from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import LimitOption
@@ -60,13 +61,15 @@ def list_findings(
     and a scheduled report stays green while it lists medium findings. `--json` carries the
     gate it was judged by.
     """
-    analysis = _analysis(log, rule, threshold, thresholds)
+    analysis = analyze_log(open_log(log), rule, threshold, thresholds)
     gate = analysis.gate(fail_on)
     listed = analysis.narrowed(min_severity=min_severity, limit=limit)
     if as_json:
         render.emit_json({**listed.to_json(), 'gate': gate.to_json()})
     else:
-        _print_findings(listed, len(analysis.findings), _show_command(log, threshold, thresholds))
+        _print_findings(listed, len(analysis.findings))
+        if listed.findings:
+            render.note(f'one in full: {show_command(log, listed.findings[0].finding_id, threshold, thresholds)}')
     for skipped in analysis.skipped:
         if 'plan_estimates' in skipped.missing_signals:
             render.note(f"skipped {skipped.rule_id}: it runs on explain(mode='cost') text only")
@@ -86,7 +89,7 @@ def show(
     as_json: JsonOption = False,
 ) -> None:
     """Show one finding: its evidence, the thresholds it was judged by and where each came from, and how to fix it."""
-    finding = _analysis(log, None, threshold, thresholds).finding(finding_id)
+    finding = analyze_log(open_log(log), None, threshold, thresholds).finding(finding_id)
     if as_json:
         render.emit_json(finding.to_json())
         return
@@ -124,13 +127,7 @@ def show(
     render.note(f'how the rule decides: sparkxray rules show {finding.rule_id}')
 
 
-def _analysis(log: str, rules: list[str] | None, flags: list[str] | None, file: Path | None) -> Analysis:
-    event_log = open_log(log)
-    with render.status(f'Analyzing {event_log.manifest.app_id}'):
-        return event_log.analyze(rules=rules or None, threshold_file=file, threshold_flags=flags or ())
-
-
-def _print_findings(listed: Analysis, found: int, show_command: list[str]) -> None:
+def _print_findings(listed: Analysis, found: int) -> None:
     if not found:
         render.none_found('findings')
         return
@@ -150,14 +147,13 @@ def _print_findings(listed: Analysis, found: int, show_command: list[str]) -> No
         ],
         ('severity', 'finding_id', 'scope', 'title', 'impact_seconds'),
     )
-    render.note(f'one in full: {shlex.join([*show_command[:4], listed.findings[0].finding_id, *show_command[4:]])}')
 
 
-def _show_command(log: str, flags: list[str] | None, file: Path | None) -> list[str]:
-    """`findings show` with the same thresholds, so it shows the finding as this list judged it. The finding id goes fifth."""
-    command = ['sparkxray', 'findings', 'show', log]
+def show_command(log: str, finding_id: str, flags: list[str] | None, file: Path | None) -> str:
+    """`findings show` for one finding with the same thresholds, so it shows the finding as the command printing this judged it."""
+    command = ['sparkxray', 'findings', 'show', log, finding_id]
     for flag in flags or ():
         command += ['--threshold', flag]
     if file is not None:
         command += ['--thresholds', str(file)]
-    return command
+    return shlex.join(command)

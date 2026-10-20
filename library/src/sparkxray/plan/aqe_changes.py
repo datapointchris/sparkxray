@@ -18,6 +18,7 @@ from sparkxray.plan.labels import QUERY_STAGE_OPERATORS
 from sparkxray.plan.node_fields import join_keys
 from sparkxray.plan.node_fields import join_type
 from sparkxray.plan.node_fields import partition_count
+from sparkxray.plan.node_fields import shuffle_read_kind
 from sparkxray.plan.tree import NumberedNode
 from sparkxray.plan.tree import Plan
 
@@ -125,7 +126,6 @@ def _shuffle_read(nodes: tuple[NumberedNode, ...], read: NumberedNode, metrics: 
     below = nodes[read.children[0]] if len(read.children) == 1 else read
     while below.node.operator in QUERY_STAGE_OPERATORS and len(below.children) == 1:
         below = nodes[below.children[0]]
-    kind = read.node.details.get('Arguments') or read.node.label.removeprefix('AQEShuffleRead').strip()
 
     def count(name: str) -> int | None:
         value = metrics.get(name)
@@ -133,7 +133,7 @@ def _shuffle_read(nodes: tuple[NumberedNode, ...], read: NumberedNode, metrics: 
 
     return ShuffleRead(
         node_id=read.number,
-        kind=kind or None,
+        kind=shuffle_read_kind(read.node),
         exchange_partition_count=partition_count(below.node),
         partition_count=count('number of partitions'),
         coalesced_partition_count=count('number of coalesced partitions'),

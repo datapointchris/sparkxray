@@ -24,6 +24,7 @@ _TRUNCATION = re.compile(r'\.\.\. \d+ more (?:fields|characters)|Truncated plan 
 _SUBQUERY_REFERENCE = re.compile(r'(?<![\w])(?:subquery|dynamicpruning)#(\d+)')
 _EXPRESSION_ID = re.compile(r'(?<=[\w)\]`])#(\d+)L?(?!\w)')
 _TRAILING_PLAN_ID = re.compile(r'\[(?:plan_id=|id=#)(\d+)\]\s*$')
+_UNSHOWN_ID = re.compile(r'(?<!subquery)(?<!dynamicpruning)(?<=[\w)\]`])#\d+L?(?!\w)|(?:, )?\[(?:plan_id=|id=#)\d+\]')
 _QUERY_STAGE_NUMBER = re.compile(r'QueryStage (\d+)')
 _LEADING_NUMBER = re.compile(r'\s*(\d+)')
 
@@ -75,6 +76,15 @@ def normalize_label(text: str) -> str:
         elif in_stage_block and _STAGE_BLOCK_ARGUMENTS.match(line):
             lines[index] = _STAGE_BLOCK_ARGUMENTS.sub('Arguments: N', line)
     return '\n'.join(lines)
+
+
+def without_ids(text: str) -> str:
+    """The text without its expression ids or exchange ids: `hashpartitioning(k#2L, 16)` reads `hashpartitioning(k, 16)`.
+
+    A subquery reference keeps its id, which names the subquery a plan runs. Two columns of one
+    name read alike without theirs, so a reader telling them apart reads the text as Spark printed it.
+    """
+    return _UNSHOWN_ID.sub('', text)
 
 
 def normalize_detail(operator: str, key: str, value: str) -> str:

@@ -69,6 +69,7 @@ sparkxray findings show spark-application-1729 stage.shuffle-skew:s4
 sparkxray stages list spark-application-1729 --sort wall_ms -n 5
 sparkxray tasks list spark-application-1729 --stage 4 --sort duration_ms -n 5
 sparkxray tables query spark-application-1729 "select stage_id, max(duration_ms) from tasks_effective group by all"
+sparkxray plans show spark-application-1729 --sql 0
 sparkxray rules show stage.shuffle-skew
 sparkxray metrics show "Executor CPU Time"
 ```
@@ -76,6 +77,12 @@ sparkxray metrics show "Executor CPU Time"
 A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and `26 s`. `--json`
 prints the raw numbers instead, each under a name ending in its unit, and an empty list as `[]`.
 Progress and notes go to stderr, so stdout holds only the data.
+
+`plans show` draws one SQL execution's plan as a tree, with the numbers the Spark UI's SQL tab
+shows on its graph. Each node gives what it does, such as a join's type and keys or a scan's
+location, then the stages it ran in and its metrics' totals. A node a finding names carries a
+mark, as `◀ stage.shuffle-skew (stage 4, high)`. `--initial` shows the plan the execution started
+from, before adaptive query execution re-planned it, and `--version N` any plan between.
 
 `rules show` teaches one rule: what it measures, why it costs time, where the Spark UI shows it
 and how to fix it. Each threshold reads at the value the rule would apply, so `--threshold` and
@@ -225,6 +232,7 @@ those settings fill, such as `peak_python_rss_bytes`, is null in a log written w
 | `executor_summaries` | one row per executor and the driver: lifetime, cores, memory, task time, idle share |
 | `sql_summaries` | one row per SQL execution: duration, jobs, stages, the operators of its last plan |
 | `sql_detail` | one SQL execution, its jobs, how many of each operator its last plan holds, and what AQE changed: joins it switched or split for skew, operators it added or removed, and how it read each shuffle |
+| `annotated_plan` | one version of one SQL execution's plan, each node with what it does, its metrics and the stages it ran in; `with_findings` adds an analysis's findings on the nodes they name |
 | `application_detail` | the application, its duration and its manifest |
 
 A stage's quantiles are taken as the Stages tab takes its summary metrics, so they print the
