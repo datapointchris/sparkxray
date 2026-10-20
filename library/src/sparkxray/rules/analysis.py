@@ -15,8 +15,8 @@ from typing import Any
 
 from sparkxray.errors import InvalidRuleError
 from sparkxray.errors import NotInRunError
-from sparkxray.errors import UnknownRuleError
 from sparkxray.errors import UnknownSeverityError
+from sparkxray.errors import suggest_nearest
 from sparkxray.plan.tree import NumberedNode
 from sparkxray.plan.tree import Plan
 from sparkxray.rules.catalog import catalog
@@ -36,6 +36,7 @@ from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Severity
 from sparkxray.rules.rule import Signal
 from sparkxray.rules.thresholds import resolve_thresholds
+from sparkxray.rules.thresholds import unknown_rule
 from sparkxray.spark_ui_format import bytes_to_string
 from sparkxray.spark_ui_format import format_duration
 
@@ -158,10 +159,12 @@ class Analysis:
         for finding in self.findings:
             if finding.finding_id == finding_id:
                 return finding
+        found = [finding.finding_id for finding in self.findings]
         raise NotInRunError(
-            f'this analysis found nothing with the id {finding_id!r}',
+            suggest_nearest(f'this analysis found nothing with the id {finding_id!r}', finding_id, found),
             field='finding_id',
-            valid=[finding.finding_id for finding in self.findings],
+            valid=found,
+            hint='sparkxray findings list' + ('' if self.app_id is None else f' {self.app_id}'),
         )
 
 
@@ -315,7 +318,7 @@ def _selected(
         wanted = {rules} if isinstance(rules, str) else set(rules)
         for rule_id in sorted(wanted):
             if rule_id not in known:
-                raise UnknownRuleError(f'no rule is called {rule_id!r}', field='rules', valid=sorted(known))
+                raise unknown_rule(rule_id, sorted(known), field='rules')
     ordered: dict[str, Rule] = {}
 
     def visit(rule_id: str) -> None:

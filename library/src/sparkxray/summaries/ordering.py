@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from sparkxray.errors import UnknownColumnError
+from sparkxray.errors import suggest_nearest
 from sparkxray.tables.relations import Tables
 from sparkxray.tables.rows import Rows
 from sparkxray.tables.rows import rows_of
@@ -25,7 +26,12 @@ def ordered_rows(
     """
     columns = tables.query(sql, parameters).columns
     if sort is not None and sort not in columns:
-        raise UnknownColumnError(f'this list has no column called {sort!r}', field='sort', valid=columns)
+        raise UnknownColumnError(
+            suggest_nearest(f'this list has no column called {sort!r} to sort by', sort, columns),
+            field='sort',
+            valid=columns,
+            hint='every column is a name the list prints with --json',
+        )
     if limit is not None and limit < 0:
         raise ValueError(f'limit is {limit}, and a list cannot keep fewer than 0 rows')
     order = f'{_identifier(sort)} DESC NULLS LAST, {order_by}' if sort is not None else order_by

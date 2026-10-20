@@ -19,6 +19,7 @@ from typing import Any
 
 from sparkxray.errors import UnknownSchemaError
 from sparkxray.errors import registered
+from sparkxray.errors import suggest_nearest
 from sparkxray.rules.findings import FINDINGS_PARQUET_COLUMNS
 from sparkxray.rules.findings import FINDINGS_TABLE_DESCRIPTION
 from sparkxray.rules.findings import findings_column_descriptions
@@ -51,13 +52,19 @@ class QueryableTable:
 
 @dc.dataclass(frozen=True, slots=True)
 class SchemaSummary:
-    """One schema sparkxray ships: the name `schemas show` takes, and its title."""
+    """One schema sparkxray ships: the name `schemas show` takes, its title, and its description, which names what prints it."""
 
     name: str
     title: str
+    description: str
+
+    @property
+    def summary(self) -> str:
+        """The description's first sentence: what the document is, and the command printing it."""
+        return self.description.split('. ', 1)[0].removesuffix('.')
 
     def to_json(self) -> dict[str, Any]:
-        return {'name': self.name, 'title': self.title}
+        return {'name': self.name, 'title': self.title, 'description': self.description}
 
 
 def queryable_tables() -> tuple[QueryableTable, ...]:
@@ -88,7 +95,12 @@ def schema_document(name: str) -> dict[str, Any]:
     """One JSON Schema, draft 2020-12. A name sparkxray ships no schema for raises `UnknownSchemaError`, listing those it does."""
     names = schema_names()
     if name not in names:
-        raise UnknownSchemaError(f'sparkxray ships no schema called {name!r}', field='name', valid=names, hint='sparkxray schemas list')
+        raise UnknownSchemaError(
+            suggest_nearest(f'sparkxray ships no schema called {name!r}', name, names),
+            field='name',
+            valid=names,
+            hint='sparkxray schemas list',
+        )
     if name in _BUILT:
         return _BUILT[name]()
     document: dict[str, Any] = json.loads(importlib.resources.files(__name__).joinpath(f'{name}.json').read_text())
@@ -96,8 +108,9 @@ def schema_document(name: str) -> dict[str, Any]:
 
 
 def schema_summaries() -> tuple[SchemaSummary, ...]:
-    """Every schema sparkxray ships, by name, with its title."""
-    return tuple(SchemaSummary(name, schema_document(name)['title']) for name in schema_names())
+    """Every schema sparkxray ships, by name, with its title and description."""
+    documents = {name: schema_document(name) for name in schema_names()}
+    return tuple(SchemaSummary(name, document['title'], document['description']) for name, document in documents.items())
 
 
 def _tables_document() -> dict[str, Any]:
@@ -200,7 +213,10 @@ def _errors_document() -> dict[str, Any]:
                         'description': 'What the caller passed that failed, as a path, such as threshold.stage.shuffle-skew.ratio.',
                     },
                     'valid': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Every value field would have taken.'},
-                    'hint': {'type': ['string', 'null'], 'description': 'The next thing to try, often a command.'},
+                    'hint': {
+                        'type': ['string', 'null'],
+                        'description': 'The next thing to try. One starting sparkxray is a command that runs as written.',
+                    },
                 },
             }
         },

@@ -122,13 +122,24 @@ class Tables:
         return self.connection.sql(sql, params=parameters)
 
     def rows(self, sql: str, parameters: object = None) -> Rows:
-        """The rows of a caller's SQL over the tables. SQL DuckDB refuses raises `QueryError` with DuckDB's message."""
+        """The rows of a caller's SQL over the tables. SQL DuckDB refuses raises `QueryError` with DuckDB's message.
+
+        Reading `findings` before any analysis wrote it raises `NotAnalyzedError` instead. Only a
+        table DuckDB could not find lists the tables as the valid values.
+        """
         try:
             return rows_of(self.connection.sql(sql, params=parameters))
         except duckdb.Error as error:
-            names = [table.name for table in (*TABLES, *self.enriched())] + ['tasks_effective']
-            names += ['findings'] if (self.path / FINDINGS_FILE).is_file() else []
-            raise QueryError(str(error), field='sql', valid=names) from None
+            analyzed = (self.path / FINDINGS_FILE).is_file()
+            if isinstance(error, duckdb.CatalogException) and not analyzed and 'with name findings ' in str(error):
+                self._analyzed()
+            names = [table.name for table in (*TABLES, *self.enriched())] + ['tasks_effective'] + (['findings'] if analyzed else [])
+            raise QueryError(
+                str(error),
+                field='sql',
+                valid=names if isinstance(error, duckdb.CatalogException) else (),
+                hint=f'sparkxray tables list {self.manifest.ingest.app_id}',
+            ) from None
 
     def listing(self) -> tuple[ListedTable, ...]:
         """Every table and view a query can read, in the order the build writes them.
@@ -188,7 +199,10 @@ class Tables:
         if not held:
             executions = self.connection.execute('SELECT DISTINCT execution_id FROM plan_versions ORDER BY execution_id').fetchall()
             raise NotInRunError(
-                f'the run holds no plan for SQL execution {execution_id}', field='execution_id', valid=[str(row[0]) for row in executions]
+                f'the run holds no plan for SQL execution {execution_id}',
+                field='execution_id',
+                valid=[str(row[0]) for row in executions],
+                hint=f'sparkxray sql list {self.manifest.ingest.app_id}',
             )
         chosen = held[-1] if version is None else next((row for row in held if row[0] == version), None)
         plan = None
@@ -199,7 +213,10 @@ class Tables:
         if plan is None:
             missing = held[-1][0] if version is None else version
             raise NotInRunError(
-                f'SQL execution {execution_id} has no plan version {missing}', field='version', valid=[str(row[0]) for row in held]
+                f'SQL execution {execution_id} has no plan version {missing}',
+                field='version',
+                valid=[str(row[0]) for row in held],
+                hint=f'sparkxray sql show {self.manifest.ingest.app_id} {execution_id}',
             )
         return plan
 
@@ -290,9 +307,10 @@ class Tables:
     def _analyzed(self) -> Path:
         path = self.path / FINDINGS_FILE
         if not path.is_file():
+            app_id = self.manifest.ingest.app_id
             raise NotAnalyzedError(
-                f'the log {self.manifest.ingest.app_id} has not been analyzed, so it has no findings yet',
-                hint='call analyze() on its EventLog',
+                f'the log {app_id} has not been analyzed, so it has no findings yet; findings list or EventLog.analyze() analyzes it',
+                hint=f'sparkxray findings list {app_id}',
             )
         return path
 

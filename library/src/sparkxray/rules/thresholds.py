@@ -14,6 +14,7 @@ from pathlib import Path
 from sparkxray.errors import ThresholdValueError
 from sparkxray.errors import UnknownRuleError
 from sparkxray.errors import UnknownThresholdError
+from sparkxray.errors import suggest_nearest
 from sparkxray.rules.findings import AppliedThreshold
 from sparkxray.rules.findings import ThresholdLayer
 from sparkxray.rules.rule import Rule
@@ -140,8 +141,15 @@ def _flag(flag: str, known: Mapping[str, Rule]) -> tuple[str, str, str]:
 
 def _rule(rule_id: str, known: Mapping[str, Rule], *, field: str) -> Rule:
     if rule_id not in known:
-        raise UnknownRuleError(f'no rule is called {rule_id!r}', field=field, valid=sorted(known))
+        raise unknown_rule(rule_id, sorted(known), field=field)
     return known[rule_id]
+
+
+def unknown_rule(rule_id: str, known: list[str], *, field: str) -> UnknownRuleError:
+    """The refusal of a rule id the catalog does not hold, led by the nearest id it does."""
+    return UnknownRuleError(
+        suggest_nearest(f'no rule is called {rule_id!r}', rule_id, known), field=field, valid=known, hint='sparkxray rules list'
+    )
 
 
 def _value(raw: object, rule: Rule, name: str) -> float:
@@ -149,7 +157,7 @@ def _value(raw: object, rule: Rule, name: str) -> float:
     if threshold is None:
         names = [known.name for known in rule.thresholds]
         raise UnknownThresholdError(
-            f'{rule.rule_id} has no threshold called {name!r}',
+            suggest_nearest(f'{rule.rule_id} has no threshold called {name!r}', name, names),
             field=f'threshold.{rule.rule_id}.{name}',
             valid=names,
             hint=f'sparkxray rules show {rule.rule_id}',

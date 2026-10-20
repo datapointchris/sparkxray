@@ -188,6 +188,22 @@ def stage_tasks(tables: Tables, stage_id: int, *, sort: str | None = None, limit
 
 
 def _require_stage(tables: Tables, stage_id: int) -> None:
+    """Refuse a stage the run did not run. A stage a job listed and never submitted is one Spark skipped."""
     held = [row[0] for row in tables.query('SELECT DISTINCT stage_id FROM stages ORDER BY stage_id').fetchall()]
-    if stage_id not in held:
-        raise NotInRunError(f'the run has no stage {stage_id}', field='stage_id', valid=[str(held_id) for held_id in held])
+    if stage_id in held:
+        return
+    listed = tables.query(
+        'SELECT job_id, result FROM jobs WHERE list_contains(stage_ids, $stage_id) ORDER BY job_id LIMIT 1', {'stage_id': stage_id}
+    ).fetchone()
+    if listed is None:
+        message = f'the run has no stage {stage_id}'
+    elif listed[1] == 'JobSucceeded':
+        message = f'job {listed[0]} skipped stage {stage_id}, because an earlier stage had already written the shuffle output it would have'
+    else:
+        message = f'job {listed[0]} planned stage {stage_id}, and ended before running it'
+    raise NotInRunError(
+        message,
+        field='stage_id',
+        valid=[str(held_id) for held_id in held],
+        hint=f'sparkxray stages list {tables.manifest.ingest.app_id}',
+    )

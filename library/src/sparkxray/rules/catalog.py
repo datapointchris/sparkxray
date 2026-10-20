@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from sparkxray.errors import InvalidRuleError
-from sparkxray.errors import UnknownRuleError
 from sparkxray.rules import app
 from sparkxray.rules import config
 from sparkxray.rules import executor
 from sparkxray.rules import plan
 from sparkxray.rules import stage
 from sparkxray.rules.rule import Rule
+from sparkxray.rules.thresholds import unknown_rule
 
 _RULES: dict[str, Rule] = {rule.rule_id: rule for rule in (*plan.RULES, *stage.RULES, *executor.RULES, *app.RULES, *config.RULES)}
 
@@ -22,7 +22,7 @@ def catalog() -> list[Rule]:
 def rule_by_id(rule_id: str) -> Rule:
     """The rule with this id. An id the catalog does not hold raises `UnknownRuleError`, listing those it does."""
     if rule_id not in _RULES:
-        raise UnknownRuleError(f'no rule is called {rule_id!r}', field='rule_id', valid=sorted(_RULES))
+        raise unknown_rule(rule_id, sorted(_RULES), field='rule_id')
     return _RULES[rule_id]
 
 

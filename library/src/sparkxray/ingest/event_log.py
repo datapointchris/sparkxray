@@ -226,9 +226,9 @@ def _resolve(source: Location) -> layouts.Candidate:
         raise NoEventLogError(f'{source.uri} holds no Spark event log. {_found(passed_over + unrecognized)}', field='location')
     if len(confirmed) > 1:
         logs = confirmed + unchecked
-        by_name = f' {len(unchecked)} of them are known only by their names.' if unchecked else ''
+        by_name = f' {len(unchecked)} were not opened, so they are listed by file name alone.' if unchecked else ''
         raise AmbiguousLocationError(
-            f'{source.uri} holds {len(logs)} logs, and ingest reads one.{by_name}',
+            f'{source.uri} holds {len(logs)} logs, and a command reads one.{by_name}',
             field='location',
             valid=[candidate.uri for candidate in logs],
             hint='pass one of the listed locations',

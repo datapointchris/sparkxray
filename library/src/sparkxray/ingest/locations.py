@@ -79,7 +79,9 @@ class LocalLocation:
     def list(self) -> tuple[list[ListedFile], ListedFile | None]:
         path = self._path
         if not path.exists():
-            raise NoEventLogError(f'{path} does not exist', field='location')
+            raise NoEventLogError(
+                f'{path} does not exist, and a log already read opens by its app id', field='location', hint='sparkxray logs list'
+            )
         if path.is_file():
             listed = self._listed(path, path.parent)
             return [listed], listed

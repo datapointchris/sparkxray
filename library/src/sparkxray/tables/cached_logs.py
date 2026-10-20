@@ -15,6 +15,7 @@ import duckdb
 from sparkxray.cache_directory import cache_root
 from sparkxray.errors import AmbiguousLocationError
 from sparkxray.errors import NoEventLogError
+from sparkxray.errors import suggest_nearest
 from sparkxray.ingest.manifest import IngestManifest
 from sparkxray.tables.build import tables_key
 from sparkxray.tables.manifest import TablesManifest
@@ -90,7 +91,10 @@ def cached_ingest(app_id: str, cache: Path) -> IngestManifest | str:
     if not matches:
         held = sorted({build.manifest.ingest.app_id for build in builds})
         raise NoEventLogError(
-            f'{app_id!r} names no file or directory, and no log in the cache has that app id', field='location', valid=held
+            suggest_nearest(f'{app_id!r} names no file or directory, and no log in the cache has that app id', app_id, held),
+            field='location',
+            valid=held,
+            hint='sparkxray logs list',
         )
     if len(matches) > 1:
         raise AmbiguousLocationError(

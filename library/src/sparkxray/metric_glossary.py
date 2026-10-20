@@ -13,6 +13,7 @@ import dataclasses as dc
 from typing import Any
 
 from sparkxray.errors import UnknownMetricError
+from sparkxray.errors import suggest_nearest
 from sparkxray.tables.registry import ENRICHMENT_TABLES
 from sparkxray.tables.registry import TABLES
 from sparkxray.tables.registry import column_unit
@@ -636,10 +637,15 @@ def metric_entries(name: str) -> tuple[MetricEntry, ...]:
     if not matched:
         held = sorted({entry.name for entry in entries}, key=str.casefold)
         raise UnknownMetricError(
-            f'the glossary describes no metric called {name!r}',
+            suggest_nearest(
+                f'{name!r} is no table column, plan metric or Spark field sparkxray describes. '
+                "A summary's own numbers, as wall_ms in stages list, are defined on that command's --help",
+                name,
+                held,
+            ),
             field='name',
             valid=held,
-            hint='a Spark field matches too, by its whole path or its last level, as Executor CPU Time',
+            hint='sparkxray metrics list',
         )
     return matched
 

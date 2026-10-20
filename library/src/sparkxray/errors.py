@@ -6,6 +6,7 @@ registry still lists it. `registered()` is the registry, so a code is declared i
 
 from __future__ import annotations
 
+import difflib
 from collections.abc import Sequence
 from typing import Any
 from typing import ClassVar
@@ -18,8 +19,9 @@ class SparkxrayError(Exception):
     """Base of every error sparkxray raises.
 
     `field` names what the caller passed that failed, `valid` lists what would have been
-    accepted there, and `hint` is the next thing to try. `exit_code` is the status a command
-    exits with on this error: 2 when the input was wrong, 3 when a person must act.
+    accepted there, and `hint` is the next thing to try. A hint starting `sparkxray` is a command
+    that runs as written. `exit_code` is the status a command exits with on this error: 2 when
+    the input was wrong, 3 when a person must act.
     """
 
     code: ClassVar[str]
@@ -58,6 +60,12 @@ class SparkxrayError(Exception):
 def registered() -> tuple[type[SparkxrayError], ...]:
     """Every error class, retired ones included, in code order."""
     return tuple(_CODES[code] for code in sorted(_CODES))
+
+
+def suggest_nearest(message: str, typed: str, valid: Sequence[str]) -> str:
+    """`message`, asking after the valid value nearest `typed` where one is close enough to be a typo of it."""
+    nearest = difflib.get_close_matches(typed, valid, n=1)
+    return f'{message}; did you mean {nearest[0]}?' if nearest else message
 
 
 class NoEventLogError(SparkxrayError):
