@@ -20,6 +20,8 @@ from sparkxray.plan.tree import Plan
 from sparkxray.plan.tree import PlanNode
 from sparkxray.plan.tree import PlanSource
 from sparkxray.rules.findings import Finding
+from sparkxray.rules.rule import Severity
+from sparkxray.spark_ui_format import shown_in
 from sparkxray.summaries.sql_executions import SQL_SUMMARIES_SQL
 from sparkxray.tables.registry import OWN_SPILLS_CTE
 from sparkxray.tables.relations import Tables
@@ -200,6 +202,38 @@ class AnnotatedNode:
 
 
 @dc.dataclass(frozen=True, slots=True)
+class FindingMark:
+    """A finding on a node, as a plan drawing marks it: `◀ stage.spill (stage 4, critical)`."""
+
+    text: str
+    severity: Severity
+
+
+@dc.dataclass(frozen=True, slots=True)
+class NodeLine:
+    """A node as every plan drawing prints it, in the parts a drawer styles.
+
+    Its first line is `number`, `codegen` where it runs in a pipeline, `operator` and `rest`, then
+    `runtime` and each mark. `measured` is the line under it: its stages and metrics.
+    """
+
+    number: str
+    codegen: str | None
+    operator: str
+    rest: str
+    runtime: str | None
+    marks: tuple[FindingMark, ...]
+    measured: str | None
+
+    def headline(self) -> str:
+        """The first line as plain text."""
+        line = f'{self.number} {f"{self.codegen} " if self.codegen else ""}{self.operator}{self.rest}'
+        if self.runtime:
+            line += f'  {self.runtime}'
+        return line + ''.join(f'  {mark.text}' for mark in self.marks)
+
+
+@dc.dataclass(frozen=True, slots=True)
 class AnnotatedPlan:
     """One version of a SQL execution's plan, with its nodes' numbers and the findings about the execution.
 
@@ -256,6 +290,53 @@ class AnnotatedPlan:
             members.append(member)
             pending += [child for child in reversed(member.children) if self.nodes[child].codegen_stage == node.codegen_stage]
         return tuple(members)
+
+    def shown_metric(self, node: AnnotatedNode, metric: NodeMetric) -> str | None:
+        """One of a node's metrics as a person reads it: its name and total, or for an average its min, median and max.
+
+        Zero, and an average nothing reported, give None. A pipeline's `duration` names the nodes it
+        covers, and a `spill size` the nodes below also count states the node's own part.
+        """
+        if metric.total is None:
+            if not metric.max:
+                return None
+            return f'{metric.name} ({", ".join(shown_in(metric.unit, value) for value in (metric.min, metric.median, metric.max))})'
+        if not metric.total:
+            return None
+        shown = f'{metric.name} {shown_in(metric.unit, metric.total)}'
+        members = self.codegen_members(node) if metric.name == 'duration' else ()
+        if len(members) > 1:
+            covered = ', '.join(f'n{member.number} {member.operator}' for member in members)
+            return f'*({node.codegen_stage}) {shown}: {covered} and their inputs'
+        if metric.name == 'spill size' and node.own_spill_bytes is not None and node.own_spill_bytes != metric.total:
+            return f'{shown} with the nodes below, {shown_in(metric.unit, node.own_spill_bytes)} its own'
+        return shown
+
+    def node_line(self, node: AnnotatedNode) -> NodeLine:
+        """The node as `plans show` and a report draw it, in parts: its first line, then its stages and metrics."""
+        headline = node.headline()
+        runtime = []
+        if node.runtime_size_bytes is not None:
+            runtime.append(shown_in('bytes', node.runtime_size_bytes))
+        if node.runtime_row_count is not None:
+            runtime.append(f'{shown_in("rows", node.runtime_row_count)} rows')
+        findings = {finding.finding_id: finding for finding in self.findings}
+        marks = []
+        for finding_id in node.finding_ids:
+            finding = findings[finding_id]
+            stage = f'stage {finding.scope.stage_id}, ' if finding.scope.stage_id is not None else ''
+            marks.append(FindingMark(f'◀ {finding.rule_id} ({stage}{finding.severity})', finding.severity))
+        measured = [f'stage{"s" if len(node.stage_ids) > 1 else ""} {shown_in(None, list(node.stage_ids))}'] if node.stage_ids else []
+        measured += [shown for shown in (self.shown_metric(node, metric) for metric in node.metrics) if shown]
+        return NodeLine(
+            number=f'n{node.number}',
+            codegen=f'*({node.codegen_stage})' if node.codegen_stage is not None else None,
+            operator=node.operator,
+            rest=headline[len(node.operator) :],
+            runtime=f'{" · ".join(runtime)} (runtime)' if runtime else None,
+            marks=tuple(marks),
+            measured=' · '.join(measured) or None,
+        )
 
     def unplaced_findings(self) -> tuple[Finding, ...]:
         """The findings no node lists: about the whole execution or one of its stages, or naming a node of another version."""

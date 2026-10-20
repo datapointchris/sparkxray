@@ -7,10 +7,8 @@ from typing import Annotated
 import typer
 from rich.text import Text
 from rich.tree import Tree
-from sparkxray.rules import Finding
 from sparkxray.summaries import AnnotatedNode
 from sparkxray.summaries import AnnotatedPlan
-from sparkxray.summaries import NodeMetric
 from sparkxray.summaries import annotated_plan
 
 from sparkxray_cli import render
@@ -78,12 +76,11 @@ def show(
 
 
 def _print_plan(plan: AnnotatedPlan) -> None:
-    findings = {finding.finding_id: finding for finding in plan.findings}
     render.stdout.print(Text(_title(plan), style='bold'))
     for node in plan.nodes:
         if node.parent is None:
-            tree = Tree(_label(plan, node, findings), guide_style='dim')
-            _add_branches(tree, plan, node, findings)
+            tree = Tree(_label(plan, node), guide_style='dim')
+            _add_branches(tree, plan, node)
             render.stdout.print(tree)
     render.stdout.print()
     if plan.truncated:
@@ -113,58 +110,27 @@ def _title(plan: AnnotatedPlan) -> str:
     return ' · '.join(part for part in parts if part)
 
 
-def _add_branches(tree: Tree, plan: AnnotatedPlan, node: AnnotatedNode, findings: dict[str, Finding]) -> None:
+def _add_branches(tree: Tree, plan: AnnotatedPlan, node: AnnotatedNode) -> None:
     for number in node.children:
         child = plan.nodes[number]
-        _add_branches(tree.add(_label(plan, child, findings)), plan, child, findings)
+        _add_branches(tree.add(_label(plan, child)), plan, child)
     for subquery in node.subqueries:
         root = plan.nodes[subquery.root]
         named = Text(f'subquery {subquery.subquery_id}  ' if subquery.subquery_id is not None else 'subquery  ', style='dim')
-        _add_branches(tree.add(named + _label(plan, root, findings)), plan, root, findings)
+        _add_branches(tree.add(named + _label(plan, root)), plan, root)
 
 
-def _label(plan: AnnotatedPlan, node: AnnotatedNode, findings: dict[str, Finding]) -> Text:
-    """The node's number, codegen pipeline and headline, its runtime statistics and finding marks, then a line of its stages and metrics."""
-    headline = node.headline()
-    label = Text(f'n{node.number} ', style='dim')
-    if node.codegen_stage is not None:
-        label.append(f'*({node.codegen_stage}) ', style='dim')
-    label += Text(node.operator, style='bold') + Text(headline[len(node.operator) :])
-    runtime = []
-    if node.runtime_size_bytes is not None:
-        runtime.append(render.shown_in('bytes', node.runtime_size_bytes))
-    if node.runtime_row_count is not None:
-        runtime.append(f'{render.shown_in("rows", node.runtime_row_count)} rows')
-    if runtime:
-        label.append(f'  {" · ".join(runtime)} (runtime)', style='cyan')
-    for finding_id in node.finding_ids:
-        finding = findings[finding_id]
-        stage = f'stage {finding.scope.stage_id}, ' if finding.scope.stage_id is not None else ''
-        label.append(f'  ◀ {finding.rule_id} ({stage}{finding.severity})', style=render.SEVERITY_STYLES[finding.severity])
-    measured = [f'stage{"s" if len(node.stage_ids) > 1 else ""} {render.shown_in(None, list(node.stage_ids))}'] if node.stage_ids else []
-    measured += [shown for shown in (_shown_metric(plan, node, metric) for metric in node.metrics) if shown]
-    if measured:
-        label.append('\n' + ' · '.join(measured), style='dim')
+def _label(plan: AnnotatedPlan, node: AnnotatedNode) -> Text:
+    """The node's line as the report draws it, styled: number and pipeline dim, operator bold, runtime cyan, marks by severity."""
+    line = plan.node_line(node)
+    label = Text(f'{line.number} ', style='dim')
+    if line.codegen:
+        label.append(f'{line.codegen} ', style='dim')
+    label += Text(line.operator, style='bold') + Text(line.rest)
+    if line.runtime:
+        label.append(f'  {line.runtime}', style='cyan')
+    for mark in line.marks:
+        label.append(f'  {mark.text}', style=render.SEVERITY_STYLES[mark.severity])
+    if line.measured:
+        label.append('\n' + line.measured, style='dim')
     return label
-
-
-def _shown_metric(plan: AnnotatedPlan, node: AnnotatedNode, metric: NodeMetric) -> str | None:
-    """A metric as its name and total, or for an average its min, median and max. Zero, and an average nothing reported, print nothing.
-
-    A pipeline's `duration` names the operators it covers, and a `spill size` others count too states the node's own part.
-    """
-    if metric.total is None:
-        if not metric.max:
-            return None
-        spread = ', '.join(render.shown_in(metric.unit, value) for value in (metric.min, metric.median, metric.max))
-        return f'{metric.name} ({spread})'
-    if not metric.total:
-        return None
-    shown = f'{metric.name} {render.shown_in(metric.unit, metric.total)}'
-    members = plan.codegen_members(node) if metric.name == 'duration' else ()
-    if len(members) > 1:
-        covered = ', '.join(f'n{member.number} {member.operator}' for member in members)
-        return f'*({node.codegen_stage}) {shown}: {covered} and their inputs'
-    if metric.name == 'spill size' and node.own_spill_bytes is not None and node.own_spill_bytes != metric.total:
-        return f'{shown} with the nodes below, {render.shown_in(metric.unit, node.own_spill_bytes)} its own'
-    return shown

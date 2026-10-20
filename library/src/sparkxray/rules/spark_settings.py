@@ -9,13 +9,28 @@ from __future__ import annotations
 
 import re
 
+from sparkxray.tables.registry import TASK_CPUS
+
 ADAPTIVE = 'spark.sql.adaptive.enabled'
 SKEW_JOIN = 'spark.sql.adaptive.skewJoin.enabled'
 SHUFFLE_PARTITIONS = 'spark.sql.shuffle.partitions'
+EXCHANGE_REUSE = 'spark.sql.exchange.reuse'
 LOG_STAGE_EXECUTOR_METRICS = 'spark.eventLog.logStageExecutorMetrics'
 EXECUTOR_MEMORY = 'spark.executor.memory'
 DRIVER_MEMORY = 'spark.driver.memory'
 DYNAMIC_ALLOCATION = 'spark.dynamicAllocation.enabled'
+# Every setting a rule's SQL reads, `spark.task.cpus` through the core time the registry counts.
+READ_BY_RULES = (
+    ADAPTIVE,
+    SKEW_JOIN,
+    SHUFFLE_PARTITIONS,
+    EXCHANGE_REUSE,
+    LOG_STAGE_EXECUTOR_METRICS,
+    EXECUTOR_MEMORY,
+    DRIVER_MEMORY,
+    DYNAMIC_ALLOCATION,
+    TASK_CPUS,
+)
 
 # Both memory settings default to 1g.
 DEFAULT_MEMORY_BYTES = 1073741824

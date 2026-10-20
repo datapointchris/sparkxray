@@ -6,9 +6,45 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import decimal
+from typing import Any
 
 _BYTE_UNITS = ((1 << 60, 'EiB'), (1 << 50, 'PiB'), (1 << 40, 'TiB'), (1 << 30, 'GiB'), (1 << 20, 'MiB'), (1 << 10, 'KiB'), (1, 'B'))
+_GROUPED_UNITS = frozenset({'count', 'records', 'rows'})
+
+
+def shown_in(unit: str | None, value: Any, *, local_time: bool = False) -> str:
+    """A value as a person reads it, in a unit `column_unit` or a threshold names. An instant reads in UTC, or local time."""
+    if value is None:
+        return ''
+    if isinstance(value, bool):
+        return 'yes' if value else 'no'
+    if isinstance(value, list | tuple):
+        return ', '.join(shown_in(unit, item, local_time=local_time) for item in value)
+    if isinstance(value, dict):
+        return ', '.join(f'{key}={item}' for key, item in value.items())
+    if not isinstance(value, int | float):
+        return str(value)
+    if unit == 'bytes':
+        return bytes_to_string(int(value))
+    if unit == 'ms':
+        return format_duration(int(value))
+    if unit == 'ns':
+        return format_duration(int(value) // 1_000_000)
+    if unit == 's':
+        return format_duration(round(value * 1000))
+    if unit == 'epoch_ms':
+        if local_time:
+            return dt.datetime.fromtimestamp(value / 1000).strftime('%Y-%m-%d %H:%M:%S')
+        return dt.datetime.fromtimestamp(value / 1000, dt.UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+    if unit == 'fraction':
+        return f'{value * 100:.1f}%'
+    if unit == 'x':
+        return f'{value:g}x'
+    if unit in _GROUPED_UNITS:
+        return f'{int(value):,}' if float(value).is_integer() else f'{value:,}'
+    return str(value)
 
 
 def bytes_to_string(size: int) -> str:

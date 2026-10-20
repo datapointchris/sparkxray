@@ -323,3 +323,28 @@ planned but never ran is what the Spark UI lists as skipped, and no summary hold
 A query DuckDB refuses is `E-QUERY-001`, carrying DuckDB's message. A stage, SQL execution or
 finding the run does not hold is `E-QUERY-002`, and a sort column a list lacks is `E-QUERY-003`.
 Each lists the values that would have worked.
+
+## A report is one value rendered twice, and holds nothing that changes between runs
+
+`build_report` reads one analysis and the tables into a `Report`. `render_markdown` and
+`render_json` each print that one value, so the two formats never disagree. Both live in the
+library, plan drawing included, so a Glue job writes the same report without the command line's
+Typer and rich.
+
+A report carries no timestamp and prints every instant in UTC. It names a local log by its file
+name, and each of its files by the path from the directory holding it. It leaves out the tables'
+cache key, which hashes each file's modification time. So the same log file, thresholds and
+sparkxray version write the same bytes on any machine, and a committed report diffs only where the
+run did. `generated_by` names the version, which is what changes the output.
+
+The Markdown shows the plan only of an execution a finding names, folded under `<details>`. A run
+with dozens of executions would otherwise bury its findings under trees nobody asked about. The
+JSON carries every execution's last plan, because a program reading it chooses for itself.
+
+The core-hours and idle share come from `CORE_TIME_CTES`, the SQL `executor.idle-cores` grades
+by. So a report never states an idle share the rule did not judge.
+
+*Rejected:* a timestamp in the report. Two runs on one log would never compare equal.
+
+*Rejected:* drawing plans with rich in both. The library would then import it, and every consumer's
+cluster would install it.

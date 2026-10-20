@@ -25,15 +25,16 @@ from sparkxray.rules.plan.node_reading import subtree
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Threshold
+from sparkxray.rules.spark_settings import EXCHANGE_REUSE
 
 REUSABLE_EXCHANGES = frozenset({'Exchange', 'BroadcastExchange'})
 _REPEATED_SUBTREE_SOURCE = 'sparkDoctor docs/detections.md'
 _MIN_REPEATED_BYTES = Threshold('min_repeated_bytes', 128 * 2**20, 'bytes', 'proposed')
 _PLAN_ONLY = "an event log holds the physical plan without the optimizer's reasons, so two subtrees that print alike may still differ"
-_EXCHANGE_REUSE_SQL = """
+_EXCHANGE_REUSE_SQL = f"""
 SELECT coalesce(
-  (SELECT modified_configs['spark.sql.exchange.reuse'] FROM sql_executions WHERE execution_id = $execution_id),
-  (SELECT max(value) FROM environment WHERE section = 'spark' AND key = 'spark.sql.exchange.reuse')
+  (SELECT modified_configs['{EXCHANGE_REUSE}'] FROM sql_executions WHERE execution_id = $execution_id),
+  (SELECT max(value) FROM environment WHERE section = 'spark' AND key = '{EXCHANGE_REUSE}')
 )
 """
 

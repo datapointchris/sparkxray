@@ -72,6 +72,7 @@ sparkxray tables query spark-application-1729 "select stage_id, max(duration_ms)
 sparkxray plans show spark-application-1729 --sql 0
 sparkxray rules show stage.shuffle-skew
 sparkxray metrics show "Executor CPU Time"
+sparkxray reports write spark-application-1729 --out report.md
 ```
 
 A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and `26 s`. `--json`
@@ -118,6 +119,19 @@ sparkxray findings list "$LOG" --fail-on critical
 `--json` carries the verdict as
 `"gate": {"fail_on": "high", "passed": false, "blocking": ["stage.shuffle-skew:s4"]}`. So an exit 3
 with nothing on stdout means the log was not read.
+
+`reports write` puts one run into one document to read, attach to a ticket or keep. It lists the
+findings as `findings list` orders them, the most wall time a fix could recover first. Each comes
+with its evidence, thresholds and fixes folded under it. Then come the longest stages, each SQL
+execution with the settings it set, and the plan of each execution a finding names. Last come the
+launch values of the settings the rules read and the fixes name. `--format markdown` is the default, and reads on GitHub. `--format json`
+carries every plan, and `sparkxray/schemas/report.json` pins its shape.
+
+A report holds no timestamp, prints its times in UTC, and names a local log by its file name. So
+the same log file, thresholds and sparkxray version write the same bytes on any machine.
+`--out FILE` creates FILE's directory, replaces the file only once the new one is whole, then
+prints its path. `reports write` gates on `--fail-on` as `findings list` does. It writes the
+report whether the gate passes or not.
 
 ## Open an event log from a path or S3
 
@@ -301,6 +315,19 @@ which it skipped.
 
 `sparkxray.rules.rule_lesson('stage.shuffle-skew', thresholds=...)` returns a rule's lesson as
 Markdown, at the thresholds it would apply, beside the finding it reported on a fixture log.
+
+`sparkxray.reports` builds the document `reports write` prints. A report takes its findings, and
+the thresholds they were judged by, from one analysis:
+
+```python
+from sparkxray.reports import build_report
+from sparkxray.reports import render_report
+from sparkxray.reports import write_report
+
+report = build_report(log, analysis)         # without an analysis, log.analyze() at the defaults
+write_report(render_report(report, 'markdown'), 'report.md')
+report.to_json()                             # the shape sparkxray/schemas/report.json pins
+```
 
 ## Layout
 

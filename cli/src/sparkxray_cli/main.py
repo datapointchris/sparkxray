@@ -15,6 +15,7 @@ from sparkxray_cli import logs
 from sparkxray_cli import metrics
 from sparkxray_cli import plans
 from sparkxray_cli import render
+from sparkxray_cli import reports
 from sparkxray_cli import rules
 from sparkxray_cli import sql
 from sparkxray_cli import stages
@@ -47,6 +48,7 @@ app.add_typer(sql.app, name='sql', rich_help_panel=_READING)
 app.add_typer(plans.app, name='plans', rich_help_panel=_READING)
 app.add_typer(tables.app, name='tables', rich_help_panel=_READING)
 app.add_typer(findings.app, name='findings', rich_help_panel=_FINDING)
+app.add_typer(reports.app, name='reports', rich_help_panel=_FINDING)
 app.add_typer(rules.app, name='rules', rich_help_panel=_LEARNING)
 app.add_typer(metrics.app, name='metrics', rich_help_panel=_LEARNING)
 
@@ -94,7 +96,7 @@ def main(
     `LOG` is a log file or directory, an `s3://` URI, or the app id of a log already read. The
     first command on a log reads it into the cache, and every later one opens the cache.
 
-    `sparkxray findings list LOG` runs the rules, worst first, and exits 3 when a finding is
-    at or above `--fail-on`. Run any partial command with no arguments or `--help` to see what
+    `sparkxray findings list LOG` runs the rules, the most wall time a fix could recover first,
+    and exits 3 when a finding is at or above `--fail-on`. Run any partial command with no arguments or `--help` to see what
     comes next.
     """

@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from sparkxray.tables.registry import GC_SHARE
+
 
 def quantile(expression: str, fraction: float) -> str:
     """SQL for a quantile as the Stages tab takes one: the value at sorted index min(n × fraction, n − 1), over non-null values."""
@@ -28,7 +30,7 @@ stage_statistics AS (
     {quantile('duration_ms', 0.95)} AS p95_duration_ms,
     sum(executor_run_time_ms) AS run_time_ms, max(executor_run_time_ms) AS max_run_time_ms,
     {quantile('executor_run_time_ms', 0.5)} AS median_run_time_ms,
-    sum(jvm_gc_time_ms) AS gc_time_ms,
+    sum(jvm_gc_time_ms) AS gc_time_ms, {GC_SHARE} AS gc_share,
     sum(memory_spilled_bytes) AS memory_spilled_bytes, max(memory_spilled_bytes) AS max_memory_spilled_bytes,
     {quantile('memory_spilled_bytes', 0.5)} AS median_memory_spilled_bytes,
     sum(disk_spilled_bytes) AS disk_spilled_bytes, max(disk_spilled_bytes) AS max_disk_spilled_bytes,
