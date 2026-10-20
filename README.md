@@ -1,6 +1,12 @@
 # sparkxray
 
-Read a Spark event log and find out why a run was slow.
+Read a Spark event log offline, with no JVM, and find out why a run was slow.
+
+Spark logs every job, stage and task a run executed. sparkxray reads that log from a file, S3 or a
+History Server, and lists what slowed the run. A finding names a skewed partition, a spill, a join
+that shuffled a side it could have broadcast, or cores left idle. Each one carries its evidence, the
+seconds a fix could recover, and the fix. The same reading is a Python library, so a job or a test
+can check its own run.
 
 ## Install
 
@@ -8,7 +14,7 @@ The command line:
 
 ```bash
 uv tool install --index https://pypi.ichrisbirch.com/simple/ sparkxray-cli
-sparkxray --version     # the installed release
+sparkxray --version     # prints the installed release
 ```
 
 Every release is published to that package index, and nothing else is. Name it on every install.
@@ -22,145 +28,78 @@ uv add --index https://pypi.ichrisbirch.com/simple/ sparkxray
 
 The library runs on Python 3.11 and later, and the command line on 3.13 and later. The command
 line is a separate distribution, so a project importing the library installs no CLI dependencies.
+An AWS Glue job installs the library from a wheel, as
+[Run the library inside an AWS Glue job](#run-the-library-inside-an-aws-glue-job) shows.
 
-### Inside an AWS Glue job
+## Get an event log
 
-Glue 5.0 and 5.1 run Python 3.11, so the library installs into a Glue job. Glue 4.0 runs 3.10 and
-cannot. Download the wheel from the index alone, and upload it to S3:
+Spark writes an event log when `spark.eventLog.enabled=true`, into the directory
+`spark.eventLog.dir` names. Before Spark 4.0 it writes one uncompressed file per application. From
+4.0 it writes a directory of zstd'd files, named `eventlog_v2_` and the app id. sparkxray reads
+either, and a log compressed by hand.
 
-```bash
-pip download --no-deps --index-url https://pypi.ichrisbirch.com/simple/ --dest wheels sparkxray
-aws s3 cp --recursive wheels/ s3://your-bucket/glue/
-```
-
-Then pass its path in the job's parameters, with the version pip downloaded. Glue installs the
-wheel, and its dependencies from PyPI:
+A History Server reads the same directory, and sparkxray takes the server's address too. An AWS
+Glue job writes its log to S3 when it runs with these job parameters:
 
 ```text
---additional-python-modules  s3://your-bucket/glue/sparkxray-<version>-py3-none-any.whl
+--enable-spark-ui        true
+--spark-event-logs-path  s3://your-bucket/spark-logs/
 ```
-
-Never give pip the package index as an extra index beside PyPI. pip installs the highest version it
-finds on either, so anyone uploading a `sparkxray` to PyPI would run their code in the job.
-
-A job with no internet access installs from a zip of wheels instead. Build it on Amazon Linux 2023,
-as AWS's guide to a zip of wheels does. Name the downloaded wheel by its path, so pip never asks
-PyPI for sparkxray:
-
-```bash
-pip download --dest wheels --platform manylinux2014_x86_64 --python-version 311 \
-  --only-binary=:all: wheels/sparkxray-<version>-py3-none-any.whl
-echo sparkxray > wheels/requirements.txt
-zip -r sparkxray-<version>.gluewheels.zip wheels/
-```
-
-Upload the zip, pass its `s3://` path to `--additional-python-modules`, and pass `--no-index` to
-`--python-modules-installer-option`. Glue then resolves every dependency from the zip.
 
 ## Find what slowed a run from a terminal
 
-Every command is `sparkxray <resource> <verb> LOG`. `LOG` is a log file or directory, an `s3://`
-URI, the `http(s)://` address of a History Server or driver UI, or the app id of a log already
-read. The first command on a log reads it into the cache, and every later one opens the cache.
-
 ```bash
-sparkxray findings list s3://your-bucket/spark-logs/spark-application-1729
-sparkxray findings show spark-application-1729 stage.shuffle-skew:s4
-sparkxray stages list spark-application-1729 --sort wall_ms -n 5
-sparkxray tasks list spark-application-1729 --stage 4 --sort duration_ms -n 5
-sparkxray tables query spark-application-1729 "select stage_id, max(duration_ms) from tasks_effective group by all"
-sparkxray plans show spark-application-1729 --sql 0
-sparkxray rules show stage.shuffle-skew
-sparkxray metrics show "Executor CPU Time"
-sparkxray reports write spark-application-1729 --out report.md
-sparkxray logs diff spark-application-1728 spark-application-1729
-sparkxray executors simulate spark-application-1729 --executors 4,8,16
+sparkxray findings list ./eventlog.zstd                        # what slowed the run, the most time a fix could recover first
+sparkxray findings show ./eventlog.zstd stage.shuffle-skew:s4  # one finding: its evidence, its thresholds and how to fix it
+sparkxray rules show stage.shuffle-skew                        # what the rule measures, why it costs time, where the Spark UI shows it
+sparkxray plans show ./eventlog.zstd --sql 0                   # the query's plan, with the finding marked on the node it names
+sparkxray logs list                                            # every log read so far, by the app id each command also takes
 ```
 
-A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and `26 s`. `--json`
-prints the raw numbers instead, each under a name ending in its unit, and an empty list as `[]`.
-Progress and notes go to stderr, so stdout holds only the data.
+The first command lists every finding with its id, then prints the `findings show` command for the
+first. The ids above are from one of sparkxray's own test runs, so yours will differ. That run has
+high findings, so `findings list` exits 3 on it.
 
-`plans show` draws one SQL execution's plan as a tree, with the numbers the Spark UI's SQL tab
-shows on its graph. Each node opens with its number, as `n9`, which finding ids and `sql show`
-use too. Then it gives what it does, such as a join's type and keys or a scan's location, then the
-stages it ran in and its metrics' totals. A node Spark compiled into a codegen pipeline carries the
-pipeline's `*(N)`, and the pipeline's `duration` names the nodes it covers. A sort's `spill size`
-counts the spills of the nodes it reads from, so the tree states its own part beside it. A node a
-finding names carries a mark, as `◀ stage.shuffle-skew (stage 4, high)`. `--initial` shows the
-plan the execution started from, before adaptive query execution re-planned it, and
-`--plan-version N` any plan between.
+`LOG` is a log file or directory, an `s3://` URI, a History Server's or driver UI's `http(s)://`
+address, or the app id of a log already read. The first command on a log reads it into the cache
+under `$XDG_CACHE_HOME/sparkxray/`. Every later command opens the cache rather than the log.
+Deleting that directory empties the cache.
 
-`rules show` teaches one rule: what it measures, why it costs time, where the Spark UI shows it
-and how to fix it. It takes the same `--threshold` and `--thresholds` overrides `findings list`
-does. Its Thresholds table, and any threshold the lesson states, read at the value the rule would
-apply. It ends with what the rule found on one of sparkxray's own fixture logs, at the default
-thresholds.
+A command is `sparkxray <resource> <verb>`, and one that reads a run takes `LOG` first. `list`
+prints a set and `show` prints one. So `stages list`, then `stages show LOG 4`, then
+`tasks list LOG --stage 4` walks from the run down to one stage's tasks. `sql show LOG ID`, then
+`plans show LOG --sql ID`, does the same for a query. `sparkxray --help` lists every resource. A
+command's `--help` says what it takes, what each column means, and what it prints.
 
-`metrics show` says what one number means before anything is read into it. It takes a column, a
-plan metric as `plans show` prints it, such as `spill size`, or a Spark field such as
-`Executor CPU Time`. Each entry gives the unit sparkxray shows and the unit Spark records, which
-differ: Spark writes CPU time and shuffle write time in nanoseconds beside run time in
-milliseconds. It also names the event fields read, how a derived column such as
-`scheduler_delay_ms` is computed, and where the meaning comes from.
-`metrics list` prints every entry, and `tables list` prints every column with what it holds.
+Beside the findings, sparkxray does these:
 
-A list keeps each row on one line. On a narrow terminal its longest text ends in `…`, and
-narrower still each row prints as a block of field and value. A `show` command and `--json`
-print every value whole.
+```bash
+sparkxray reports write LOG --out report.md    # the findings and the run behind them, as one Markdown document
+sparkxray logs diff GOOD_LOG SLOW_LOG          # what changed in a slow run against a good run of the same job
+sparkxray executors simulate LOG               # the run's wall time at other executor counts
+sparkxray tables query LOG "SELECT ..."        # DuckDB SQL over the run's tables
+sparkxray logs ingest LOG --glue-run JOB_NAME:RUN_ID --driver-log FILE   # join a Glue run's metrics and the driver's own log
+```
 
-`findings list` exits 0 when no finding is at or above `--fail-on`, which defaults to `high`. It
-exits 3 when one is, or when the log cannot be read, and 2 on a usage error. So a CI step gates
-on the severity it names:
+A table prints bytes and durations as the Spark UI does, as `702.5 MiB` and `26 s`. It names each
+column as `--json` does, with spaces for underscores. `--json` prints the raw numbers, each under a
+name ending in its unit, and an empty list as `[]`. Progress and notes go to stderr, so stdout
+holds only the data. A table fits the terminal by cutting its longest text with `…`. On a narrow
+terminal each row prints as a block of field and value. `--json` prints every value whole.
+
+A finding's severity is `info`, `low`, `medium`, `high` or `critical`. Its rule grades it, then
+moves it a step by the share of the run its stage or query took. `findings list` exits 0 when no
+finding is at or above `--fail-on`, which defaults to `high`. It exits 3 when one is, or when the
+log cannot be read, and 2 on a usage error. `reports write` gates the same way, and `logs diff`
+does when given `--fail-on`. So a CI step gates on the bar it names:
 
 ```bash
 sparkxray findings list "$LOG" --fail-on critical
 ```
 
-`--min-severity` and `--limit` narrow what is listed, never what gates. Whenever the log was read,
-`--json` carries the verdict as
+Whenever the log was read, `--json` carries the verdict as
 `"gate": {"fail_on": "high", "passed": false, "blocking": ["stage.shuffle-skew:s4"]}`. So an exit 3
 with nothing on stdout means the log was not read.
-
-`reports write` puts one run into one document to read, attach to a ticket or keep. It lists the
-findings as `findings list` orders them, the most wall time a fix could recover first. Each comes
-with its evidence, thresholds and fixes folded under it. Then come the longest stages, each SQL
-execution with the settings it set, and the plan of each execution a finding names. Last come the
-launch values of the settings the rules read and the fixes name. A Glue run's insights, where
-joined, come first, and what each source read and wrote comes before the settings.
-`--format markdown` is the default, and reads on GitHub. `--format json`
-carries every plan, and `sparkxray schemas show report` prints its schema.
-
-A report holds no timestamp, prints its times in UTC, and names a local log by its file name. So
-the same log file, thresholds and sparkxray version write the same bytes on any machine.
-`--out FILE` creates FILE's directory, replaces the file only once the new one is whole, then
-prints its path. `reports write` gates on `--fail-on` as `findings list` does. It writes the
-report whether the gate passes or not, and the report states the verdict, as `gate` in the JSON.
-
-`logs diff LOG_A LOG_B` explains run B against run A, usually a good or older run of the same
-job. Stage ids shift between runs, so it pairs SQL executions by their description and plan, and
-stages by the plan nodes they ran. It prints what moved by at least 10% and a floor, the last
-plans that differ, the settings that differ, and the findings new in B or resolved since A. An
-exception B shares with a run that succeeded, A or a `--baseline LOG`, is routine, so the view
-lists only the others. `--json` carries every row, and `sparkxray schemas show diff` prints its
-schema. It exits 0 whatever changed. Given `--fail-on`, it exits 3 when B has a finding at or
-above it that is new, or that was below it in A:
-
-```bash
-sparkxray logs diff last-good-run tonights-run --fail-on high
-```
-
-`executors simulate` estimates the run's wall time at other executor counts, with Sparklens's
-model. Each group of jobs that ran together is replayed onto the executors' task slots, every
-task taking the time it took, and the time no job ran stays the same. An executor has its cores
-over `spark.task.cpus` slots. The counts default to
-10% to 500% of the most executors the run had alive at once. `--executors 2..64` or
-`--executors 4,8,16` names others, and `--cores` sets each executor's cores. Beside the curve it
-prints the run on unlimited executors, at today's size with no skew, and one task at a time, and the
-core-hours the driver and the executors left idle. Its model error compares the estimate at the
-run's own size with the wall time. A large one, as dynamic allocation gives, says to trust the
-curve less. A task's time is held fixed, so the spill fewer executors cause and the shuffle more
-of them fetch never show.
 
 ## A program or an agent drives sparkxray from what it prints
 
@@ -176,10 +115,11 @@ in its unit, as `_ms` or `_bytes`, or sits beside a `unit` field.
 Given `--json`, or `--format json` on `reports write`, a refusal prints one line of JSON on
 stderr, and the command exits with the error's status. A command line the parser refuses, such as
 `--fail-on hgih`, prints as `E-USAGE-001` and exits 2. A code is never reused or renumbered, so a
-program branches on it, and `field` names what it passed that failed:
+program branches on it. `field` names what it passed that failed, and `valid` what would have
+worked there. A `hint` that starts `sparkxray` is a command that runs as written:
 
 ```json
-{"error": {"code": "E-RULE-002", "message": "stage.shuffle-skew has no threshold called 'ratoi'", "field": "threshold.stage.shuffle-skew.ratoi", "valid": ["ratio", "min_bytes", "min_tasks"], "hint": "sparkxray rules show stage.shuffle-skew"}}
+{"error": {"code": "E-RULE-002", "message": "stage.shuffle-skew has no threshold called 'ratoi'; did you mean ratio?", "field": "threshold.stage.shuffle-skew.ratoi", "valid": ["ratio", "min_bytes", "min_tasks"], "hint": "sparkxray rules show stage.shuffle-skew"}}
 ```
 
 ## Open an event log
@@ -214,173 +154,30 @@ file changed still reads.
 `EventLog.open` also takes the address of a Spark History Server or a live driver UI. That can be
 its root, an application's page, or its REST API address with an attempt id. `app=` picks one
 application where the server holds several, and `sparkxray logs ingest URL --app APP_ID` does the
-same. A History Server's log is downloaded. A driver UI serves none, so sparkxray rebuilds one from
-its REST JSON. That rebuild lacks each stage's parents, each task's accumulator updates and
-executor peaks, and the settings a query changed. The manifest's `lacks` names them, and the rule
-that needs one is skipped.
+same.
+
+sparkxray downloads a History Server's log where the server serves one. A driver UI serves none,
+and a History Server whose log is unreadable answers 404 or 503. sparkxray then rebuilds the log
+from the application's REST JSON. The rebuild lacks each stage's parents, each task's accumulator
+updates and executor peaks, and the settings a query changed. It also lacks whatever the server
+dropped past its `spark.ui.retained*` limits. The manifest's `lacks` names each. A rule reading
+which stages ran a plan node is then skipped, and so is `app.failed-jobs` where the server dropped
+part of the run.
 
 ```python
 log = EventLog.open('http://localhost:18080', app='spark-application-1729')
-log = EventLog.open('http://driver-host:4040')  # a running application, never cached
+log = EventLog.open('http://driver-host:4040')  # a running application, rebuilt afresh on every open
 ```
 
 A refusal raises a `sparkxray.errors.SparkxrayError` subclass, whose `code` never changes meaning.
 Printed, it gives its message, the values that would have worked, and a hint. `E-INGEST-005`, for
 one, is a location holding more than one log, and it lists each.
 
-## Read a query's physical plan
+## Find what slowed a run from Python
 
-`sparkxray.plan` reads a plan from an event log, from `df.explain()` text in simple or formatted
-mode, or from a History Server's SQL graph. Every form reads into one tree of nodes.
-
-```python
-import json
-
-from sparkxray.ingest import EventLog
-from sparkxray.plan import last_plans
-
-events = [json.loads(line) for line in EventLog.open('eventlog.zstd').lines()]
-for execution_id, plan in last_plans(events).items():
-    print(execution_id, plan.is_final, plan.operator_counts().most_common(3))
-```
-
-`last_plans` keeps each SQL execution's last plan, after adaptive query execution re-planned it.
-For an execution that never finished, as in a killed application, `is_final` is False.
-`parse_plan_text` reads `explain()` output. From `explain(mode='cost')` it also reads the
-optimizer's size estimates into `plan.estimates`, which no event log carries. `normalize_label`
-rewrites a node's ids, so two builds of one query compare equal.
-
-## Query a log's tables with SQL
-
-`log.tables` reads the log into Parquet tables with DuckDB, the first time it is asked. A later
-open of the unchanged log reads them from the cache.
-
-```python
-from sparkxray.ingest import EventLog
-
-tables = EventLog.open('eventlog.zstd').tables
-skew = tables.query(
-    'select stage_id, median(shuffle_read_records), max(shuffle_read_records) from tasks_effective group by all'
-)
-print(skew.fetchall())
-tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
-print(tables.path)                               # the Parquet directory, for any Parquet reader
-plans = tables.last_plans()                      # each execution's last Plan, without the log
-initial = tables.plan(0, version=0)              # one version of one execution's plan
-rows = tables.rows('select * from stages')       # plain Python values, with columns and types
-tables.listing()                                 # every table and view: rows, and each column's unit and meaning
-```
-
-| Table | One row per |
-| --- | --- |
-| `application` | the application |
-| `environment` | property, by section: `jvm`, `spark`, `hadoop`, `system`, `classpath`, `metrics` |
-| `executors` | executor, and the driver |
-| `jobs` | job |
-| `stages` | stage attempt |
-| `tasks` | task attempt, failed, killed and still running included |
-| `sql_executions` | SQL execution |
-| `plan_versions` | version of an execution's plan, as the event that logged it |
-| `plan_nodes` | node of every plan version of every SQL execution |
-| `plan_node_metrics` | metric a plan node declares, aggregated as the History Server's SQL tab does |
-| `node_stages` | stage a node of an execution's last plan ran in |
-
-Read task metrics through `tasks_effective`. It keeps the first success of each partition of each
-stage, so a retried or speculative task counts once, and a stage retry keeps the partitions it did
-not rerun. It is `tasks` where `effective` is true, so a Parquet reader filters on that column.
-`partition_id` names the partition a task computed, which a retry's `task_index` does not.
-
-A numeric column's name ends in its unit: `_ms`, `_ns`, `_bytes`, `_records` or `_count`. Spark
-reports CPU time in nanoseconds beside run time in milliseconds, and the names keep the two apart.
-An instant ends in `_epoch_ms`, milliseconds since the epoch. So `launch_epoch_ms` is when a task
-started, and `duration_ms` is how long it ran. `plan_node_metrics` holds every kind of metric in
-the same columns, so its `unit` column names each row's unit.
-
-`sparkxray.metric_glossary` describes every column with a unit and every plan metric.
-`metric_entries('Executor CPU Time')` returns each entry a name matches. Each `MetricEntry` holds
-its unit here and in Spark, the event fields it reads, any derivation, and its meaning's source.
-
-`tables.manifest.lacks` names what the log was written without, because Spark leaves it out by
-default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`. A column only
-those settings fill, such as `peak_python_rss_bytes`, is null in a log written without them.
-
-`sparkxray.summaries` holds the summaries the command prints, each read from the tables:
-
-| Function | Returns |
-| --- | --- |
-| `stage_summaries` | one row per stage: tasks, wall time and share of the run, task durations, shuffle, spill, GC |
-| `stage_detail` | one stage, and the min, p25, median, p75, p95 and max of every task metric |
-| `stage_tasks` | one stage's task attempts |
-| `executor_summaries` | one row per executor and the driver: lifetime, cores, memory, task time, idle share |
-| `sql_summaries` | one row per SQL execution: duration, jobs, stages, the operators of its last plan |
-| `sql_detail` | one SQL execution, its jobs, how many of each operator its last plan holds, and what AQE changed: joins it switched or split for skew, operators it added or removed, and how it read each shuffle |
-| `annotated_plan` | one version of one SQL execution's plan, each node with what it does, its metrics and the stages it ran in; `with_findings` adds an analysis's findings on the nodes they name |
-| `application_detail` | the application, its duration and its manifest |
-
-A stage's quantiles are taken as the Stages tab takes its summary metrics, so they print the
-numbers the Spark UI does.
-
-## Join a Glue run's metrics and the driver's own log
-
-An event log says little about the driver. A driver that ran out of memory can leave a log whose
-last job succeeded. Two sources beside the log say more. AWS Glue publishes a job run's metrics to
-CloudWatch, and a failed run's job run insights to CloudWatch Logs. Spark 4.0 and later write the
-driver's log as JSON records under `spark.log.structuredLogging.enabled=true`.
-
-`logs ingest` joins either to a log's tables:
-
-```bash
-sparkxray logs ingest s3://your-bucket/spark-logs/spark-application-1729 \
-  --glue-run nightly-orders:jr_0123abcd \
-  --driver-log s3://your-bucket/driver-logs/stderr.log.gz
-```
-
-`--glue-run JOB_NAME:RUN_ID` reads the run's metrics over the window the application ran in. The
-job must have run with `--enable-observability-metrics true`. The older job metrics that
-`--enable-metrics` publishes are not read. CloudWatch lists no metric silent for two weeks, so an
-older run joins without them, and `logs ingest` says so. It also reads the run's insights from
-`/aws-glue/jobs/logs-v2`, which a job writes only when it fails with `--enable-job-insights true`.
-
-`--driver-log` takes a local file, an `s3://` object, or a CloudWatch Logs stream as
-`cloudwatch:GROUP:STREAM`, and repeats. A file may be gzip'd or zstd'd. Lines that are no JSON
-record, such as the JVM's own warnings, are skipped. A log with no record in its first 64 KiB is
-refused as `E-ENRICH-002`, because Spark wrote it as plain text.
-
-Reading needs `cloudwatch:ListMetrics`, `cloudwatch:GetMetricData` and `logs:GetLogEvents`, and
-`s3:GetObject` for a driver log on S3. Nothing is written to AWS. The region comes from
-`AWS_DEFAULT_REGION` or the profile, as boto3 reads it.
-
-```python
-from sparkxray.enrichment import GlueRun
-
-enrichment = log.enrich(glue_run=GlueRun('nightly-orders', 'jr_0123abcd'), driver_logs=['stderr.log'])
-enrichment.row_counts     # the rows each table now holds
-enrichment.warnings       # E-ENRICH-003 where CloudWatch listed no observability metric for the run
-```
-
-| Table | One row per |
-| --- | --- |
-| `glue_metrics` | CloudWatch datapoint: one metric's statistic over one period |
-| `glue_insights` | event of a failed run's exception analysis or rule-based root cause |
-| `driver_log` | JSON record of every driver log given |
-
-Joined tables feed the rules:
-
-- `app.driver-oom` reports an `OutOfMemoryError` in the driver log.
-- `app.driver-memory-pressure` reports the driver's heap held at least 90% full for two minutes
-  or more.
-- `stage.task-skew` adds Glue's own skewness score to its evidence.
-- `executor.idle-cores` adds Glue's worker utilization to its evidence.
-
-`logs diff` reads the driver's and Glue's exceptions beside the tasks'. Giving a source again
-replaces its table. A later sparkxray version rebuilds the tables without them, so ingest with the
-flags again.
-
-## Find what slowed a run
-
-`log.analyze()` runs every rule over the log's tables and plans. Each finding names its rule, the
-stage, execution or plan node it is about, the evidence, the thresholds it was judged against, and
-the seconds a fix could recover.
+`log.analyze()` runs every rule an event log can feed over the log's tables and plans. Each finding
+names its rule, the stage, execution or plan node it is about, the evidence, the thresholds it was
+judged against, and the seconds a fix could recover.
 
 ```python
 import json
@@ -393,7 +190,7 @@ for finding in analysis.findings:            # the most recoverable time first
     print(finding.finding_id, finding.severity, finding.impact_seconds, finding.title)
 print(analysis.skipped)                      # rules the log held too little to run
 print(analysis.gate('high').blocking)        # the findings at high or above, by finding_id
-json.dumps(analysis.to_json())               # the shape sparkxray/schemas/findings.json pins
+json.dumps(analysis.to_json())               # the shape `sparkxray schemas show findings` prints
 log.tables.findings.filter("severity = 'high'").fetchall()
 ```
 
@@ -431,8 +228,9 @@ for finding in analyze_plan(parse_plan_text(printed.getvalue())).findings:
 `log.tables.stored_analysis()` says which rules that analysis ran, under which thresholds, and
 which it skipped.
 
-`sparkxray.rules.rule_lesson('stage.shuffle-skew', thresholds=...)` returns a rule's lesson as
-Markdown, at the thresholds it would apply, beside the finding it reported on a fixture log.
+`sparkxray.rules.rule_lesson('stage.shuffle-skew', thresholds=...)` returns a `RuleLesson`. Its
+`text` is the lesson as Markdown, at the thresholds the rule would apply. Its `example` is what the
+rule found on one of sparkxray's test runs.
 
 `sparkxray.reports` builds the document `reports write` prints. A report takes its findings, and
 the thresholds they were judged by, from one analysis:
@@ -445,7 +243,7 @@ from sparkxray.reports import write_report
 report = build_report(log, analysis, fail_on='critical')  # without an analysis, log.analyze() at the defaults
 write_report(render_report(report, 'markdown'), 'report.md')
 report.gate.passed                           # False when a finding is at or above fail_on
-report.to_json()                             # the shape sparkxray/schemas/report.json pins
+report.to_json()                             # the shape `sparkxray schemas show report` prints
 ```
 
 `sparkxray.run_diff.diff_logs` compares two runs as `logs diff` does:
@@ -455,8 +253,8 @@ from sparkxray.run_diff import diff_logs
 
 diff = diff_logs(EventLog.open(good), EventLog.open(slow), baselines=[EventLog.open(other_good)])
 [finding.finding_id for finding in diff.findings.new]
-diff.gate('high').passed                     # False when a finding new in the slow run is at or above high
-diff.to_json()                               # the shape sparkxray/schemas/diff.json pins
+diff.gate('high').passed                     # False when the slow run added a finding at or above high, or raised one to it
+diff.to_json()                               # the shape `sparkxray schemas show diff` prints
 ```
 
 `sparkxray.simulation.simulate` estimates a run at other executor counts as `executors simulate`
@@ -468,12 +266,189 @@ from sparkxray.simulation import simulate
 simulation = simulate(EventLog.open(location), executors=[4, 8, 16])
 [(point.executor_count, point.estimated_wall_ms) for point in simulation.curve]
 simulation.model_error_share                 # how far the estimate at the run's own size is from its wall time
-simulation.to_json()                         # the shape sparkxray/schemas/simulation.json pins
+simulation.to_json()                         # the shape `sparkxray schemas show simulation` prints
 ```
 
 `sparkxray.schemas.schema_document(name)` returns any schema `schemas show` prints, and
 `sparkxray.errors.registered()` every error class, each with its `code`, `exit_code` and
 `raised_when`. A `SparkxrayError`'s `to_json()` is the envelope's `error`.
+
+## Query a log's tables with SQL
+
+`log.tables` reads the log into Parquet tables with DuckDB, the first time it is asked. A later
+open of the unchanged log reads them from the cache.
+
+```python
+from sparkxray.ingest import EventLog
+
+tables = EventLog.open('eventlog.zstd').tables
+skew = tables.query(
+    'select stage_id, median(shuffle_read_records), max(shuffle_read_records) from tasks_effective group by all'
+)
+print(skew.fetchall())
+tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
+print(tables.path)                               # the Parquet directory, for any Parquet reader
+plans = tables.last_plans()                      # each execution's last Plan, without the log
+initial = tables.plan(0, version=0)              # one version of one execution's plan
+rows = tables.rows('select * from stages')       # plain Python values, with columns and types
+tables.listing()                                 # every table and view: rows, and each column's unit and meaning
+```
+
+`tables.listing()`, or `sparkxray tables list LOG`, names every table and view with its row count,
+and each column's type, unit and meaning.
+
+Read task metrics through `tasks_effective`. It keeps the first success of each partition of each
+stage, so a retried or speculative task counts once, and a stage retry keeps the partitions it did
+not rerun. It is `tasks` where `effective` is true, so a Parquet reader filters on that column.
+`partition_id` names the partition a task computed, which a retry's `task_index` does not.
+
+A column holding a measurement ends in its unit, as `_ms`, `_ns` or `_bytes`. Spark records a
+task's CPU time in nanoseconds beside its run time in milliseconds, and the names keep the two
+apart. An instant ends in `_epoch_ms`, milliseconds since the epoch. So `launch_epoch_ms` is when a
+task started, and `duration_ms` is how long it ran. An id has no unit. `plan_node_metrics` and
+`glue_metrics` hold every kind of metric in the same columns, so each one's `unit` column names a
+row's unit. `sparkxray schemas show tables` gives every column's unit.
+
+`sparkxray.metric_glossary` describes every column with a unit, and the plan metrics Spark's own
+operators declare. `metric_entries('Executor CPU Time')` returns each entry a name matches. Each
+`MetricEntry` holds its unit here and in Spark, the event fields it reads, any derivation, and its
+meaning's source.
+
+`tables.manifest.lacks` names what the log was written without, so a missing value never reads as
+0. Spark leaves three out by default: `stage_executor_metrics`, `block_updates` and
+`process_tree_metrics`. A column only those settings fill, such as `peak_python_rss_bytes`, is
+null in a log written without them. The rest are what a log rebuilt from REST JSON goes without,
+and an older Spark's log may too. `sparkxray schemas show tables-manifest` lists each value and
+what its absence means.
+
+`sparkxray.summaries` holds the summaries the command prints, each read from the tables:
+
+| Function | Returns |
+| --- | --- |
+| `stage_summaries` | one row per stage: tasks, wall time and share of the run, task durations, shuffle, spill, GC |
+| `stage_detail` | one stage, and the min, p25, median, p75, p95 and max of every task metric |
+| `stage_tasks` | one stage's task attempts |
+| `executor_summaries` | one row per executor and the driver: lifetime, cores, memory, task time, idle share |
+| `sql_summaries` | one row per SQL execution: duration, jobs, stages, the operators of its last plan |
+| `sql_detail` | one SQL execution, its jobs, how many of each operator its last plan holds, and what AQE changed: joins it switched or split for skew, operators it added or removed, and how it read each shuffle |
+| `annotated_plan` | one version of one SQL execution's plan, each node with what it does, its metrics and the stages it ran in; `with_findings` adds an analysis's findings on the nodes they name |
+| `application_detail` | the application, its duration and its manifest |
+
+A stage's quantiles are taken as the Stages tab takes its summary metrics, so they print the
+numbers the Spark UI does.
+
+## Read a query's physical plan
+
+`sparkxray.plan` reads a plan from an event log, from `df.explain()` text in simple or formatted
+mode, or from a History Server's SQL graph. Every form reads into one tree of nodes.
+
+```python
+import json
+
+from sparkxray.ingest import EventLog
+from sparkxray.plan import last_plans
+
+events = [json.loads(line) for line in EventLog.open('eventlog.zstd').lines()]
+for execution_id, plan in last_plans(events).items():
+    print(execution_id, plan.is_final, plan.operator_counts().most_common(3))
+```
+
+`last_plans` keeps each SQL execution's last plan, after adaptive query execution re-planned it.
+Under adaptive query execution, an execution that never finished, as in a killed application, has
+`is_final` False. A plan run without it is final as written. `parse_plan_text` reads `explain()`
+output. From `explain(mode='cost')` it also reads the optimizer's size estimates into
+`plan.estimates`, which no event log carries. `normalize_label` rewrites a node's ids, so two
+builds of one query compare equal.
+
+## Join a Glue run's metrics and the driver's own log
+
+An event log says little about the driver. A driver that ran out of memory can leave a log whose
+last job succeeded. Two sources beside the log say more. AWS Glue publishes a job run's metrics to
+CloudWatch, and a failed run's job run insights to CloudWatch Logs. Spark 4.0 and later write the
+driver's log as JSON records under `spark.log.structuredLogging.enabled=true`.
+
+`logs ingest` joins either to a log's tables:
+
+```bash
+sparkxray logs ingest s3://your-bucket/spark-logs/spark-application-1729 \
+  --glue-run nightly-orders:jr_0123abcd \
+  --driver-log s3://your-bucket/driver-logs/stderr.log.gz
+```
+
+`--glue-run JOB_NAME:RUN_ID` reads the run's metrics over the window the application ran in. The
+job must have run with `--enable-observability-metrics true`. The older job metrics that
+`--enable-metrics` publishes are not read. CloudWatch lists no metric silent for two weeks, so an
+older run joins without them, and `logs ingest` says so. It also reads the run's insights from
+`/aws-glue/jobs/logs-v2`, which a job writes only when it fails with `--enable-job-insights true`.
+
+`--driver-log` takes a local file, an `s3://` object, or a CloudWatch Logs stream as
+`cloudwatch:GROUP:STREAM`, and repeats. A file may be gzip'd or zstd'd. Lines that are no JSON
+record, such as the JVM's own warnings, are skipped. A log with no record in its first 64 KiB is
+refused as `E-ENRICH-002`, because Spark wrote it as plain text.
+
+Reading needs `cloudwatch:ListMetrics`, `cloudwatch:GetMetricData` and `logs:GetLogEvents`. A
+driver log on S3 also needs `s3:ListBucket` and `s3:GetObject`. Nothing is written to AWS. The
+region comes from `AWS_DEFAULT_REGION` or the profile, as boto3 reads it.
+
+```python
+from sparkxray.enrichment import GlueRun
+
+enrichment = log.enrich(glue_run=GlueRun('nightly-orders', 'jr_0123abcd'), driver_logs=['stderr.log'])
+enrichment.row_counts     # the rows each table now holds
+enrichment.warnings       # E-ENRICH-003 where CloudWatch listed no observability metric for the run
+```
+
+| Table | One row per |
+| --- | --- |
+| `glue_metrics` | CloudWatch datapoint: one metric's statistic over one period |
+| `glue_insights` | event of a failed run's exception analysis or rule-based root cause |
+| `driver_log` | JSON record of every driver log given |
+
+Joined tables feed the rules:
+
+- `app.driver-oom` reports an `OutOfMemoryError` in the driver log.
+- `app.driver-memory-pressure` reports the driver's heap held at least 90% full for two minutes
+  or more.
+- `stage.task-skew` adds Glue's own skewness score to its evidence.
+- `executor.idle-cores` adds Glue's worker utilization to its evidence.
+
+`logs diff` reads the driver's and Glue's exceptions beside the tasks'. Giving a source again
+replaces its table. A later sparkxray version rebuilds the tables without them, so ingest with the
+flags again.
+
+## Run the library inside an AWS Glue job
+
+Glue 5.0 and 5.1 run Python 3.11, so the library installs into a Glue job. Glue 4.0 runs 3.10 and
+cannot. Download the wheel from the index alone, and upload it to S3:
+
+```bash
+pip download --no-deps --index-url https://pypi.ichrisbirch.com/simple/ --dest wheels sparkxray
+aws s3 cp --recursive wheels/ s3://your-bucket/glue/
+```
+
+Then pass its path in the job's parameters, with the version pip downloaded. Glue installs the
+wheel, and its dependencies from PyPI:
+
+```text
+--additional-python-modules  s3://your-bucket/glue/sparkxray-<version>-py3-none-any.whl
+```
+
+Never give pip the package index as an extra index beside PyPI. pip installs the highest version it
+finds on either, so anyone uploading a `sparkxray` to PyPI would run their code in the job.
+
+A job with no internet access installs from a zip of wheels instead. Build it on Amazon Linux 2023,
+as AWS's guide to a zip of wheels does. Name the downloaded wheel by its path, so pip never asks
+PyPI for sparkxray:
+
+```bash
+pip download --dest wheels --platform manylinux2014_x86_64 --python-version 311 \
+  --only-binary=:all: wheels/sparkxray-<version>-py3-none-any.whl
+echo sparkxray > wheels/requirements.txt
+zip -r sparkxray-<version>.gluewheels.zip wheels/
+```
+
+Upload the zip, pass its `s3://` path to `--additional-python-modules`, and pass `--no-index` to
+`--python-modules-installer-option`. Glue then resolves every dependency from the zip.
 
 ## Layout
 
@@ -492,6 +467,7 @@ release.
 
 MIT. The Apache Spark test logs under `fixtures/logs/apache-spark-events/` are copied from Apache
 Spark and stay under the Apache License 2.0, as `fixtures/NOTICE` records. Some of the rule
-catalog's wording is adapted from DataFlint, SparkDoctor and Dr. Elephant, and some metric and
-column descriptions quote Apache Spark's documentation and source. All four are under the Apache
-License 2.0, as `library/NOTICE` records.
+catalog's wording is adapted from DataFlint, SparkDoctor and Dr. Elephant. Some metric and column
+descriptions quote Apache Spark's documentation and source. The executor simulation ports
+Sparklens's model. Each is under the Apache License 2.0, and `library/NOTICE` names each project
+and what came from it.

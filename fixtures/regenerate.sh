@@ -38,8 +38,8 @@ readonly VARIANTS=(
   apache-spark-events
 )
 
-# The jobs the reduced variants run. Each lz4, snappy and gzip file Spark writes stays under the
-# 500 kB a committed file may be, which the full job's log would not.
+# The jobs the reduced variants run. An lz4, snappy or gzip log is committed in its own codec,
+# where a plain log is recompressed with zstd -19, so it comes from a reduced job to stay small.
 readonly REDUCED=(--only python-udf small-side-join)
 
 fixtures=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

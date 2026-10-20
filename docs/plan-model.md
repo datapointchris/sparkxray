@@ -1,6 +1,6 @@
 # Plan model
 
-## Four plan forms read into one tree
+## Every plan form reads into one tree
 
 | Source | Where it comes from |
 | --- | --- |
@@ -37,14 +37,19 @@ The JSON tree holds wrappers the text never shows, and the text holds lines JSON
   `hosting_node_id` of the node that runs it. JSON holds a subquery as an extra child of that node.
   Simple text draws it beneath the node, and formatted text lists it after the tree, under
   `===== Subqueries =====`.
-- The `Subquery` or `SubqueryBroadcast` node wrapping a subquery is removed, as formatted text
-  removes it. Its metrics, the result's `data size` and its `time to collect`, move to the
-  subquery's root. That root is an `AdaptiveSparkPlan` under AQE, which declares no metrics of its
-  own. With AQE off, a `SubqueryBroadcast` sits over the reused `BroadcastExchange`, which declares
-  both names too. That node then lists each name twice, told apart by accumulator id.
+- The `Subquery`, `SubqueryBroadcast` or `SubqueryAdaptiveBroadcast` node wrapping a subquery is
+  removed, as formatted text removes it. Its metrics, the result's `data size` and its `time to
+  collect`, move to the subquery's root. That root is an `AdaptiveSparkPlan` under AQE, which
+  declares no metrics of its own. With AQE off, a `SubqueryBroadcast` sits over the reused
+  `BroadcastExchange`, which declares both names too. That node then lists each name twice in
+  `plan_node_metrics`, told apart by accumulator id. `plans show` prints one per name, the one
+  with the lower accumulator id.
+- A `ReusedSubquery` hosts no plan. Spark prints a subquery's plan once, under its first user. A
+  node reusing it names the subquery in `subquery_ids`, and `Plan.subqueries` holds it once.
 
-With those folded, one plan read from JSON and from formatted text gives equal operator counts.
-Without them, one plan read two ways reports `FileScan +1, Scan -1`.
+With those folded, one plan read from JSON, formatted text and simple text gives equal operator
+counts. Without them, JSON counts a `WholeStageCodegen` and an `InputAdapter` that formatted text
+never prints. Simple text against JSON reports `FileScan +1, Scan -1`.
 
 `Plan.numbered()` numbers a plan's nodes and its subqueries' in one sequence. The plan's own nodes
 keep their `node_id`, and each subquery's follow on from the last number before them. A
@@ -52,17 +57,23 @@ subquery's root takes its hosting node as parent. `plan_nodes` uses these number
 `(execution_id, plan_version, node_id)` names any node, and a rule reading a plan names the same
 node the tables do.
 
-Labels are normalized by rewriting ids only. Each rewrite is anchored to the syntax that carries
-the id, so two builds of one transform compare equal. The ids themselves stay on each node as
-fields: expression ids, the plan id, the query stage id and subquery ids.
+Labels are normalized by rewriting what differs between two runs of one transform: ids, JVM names,
+paths and measured statistics. A `Statistics(...)` reads `Statistics(<stats>)`, and a `"jvmId"`
+key is dropped. Each rewrite is anchored to the syntax that carries the value, so two builds of
+one transform compare equal. The ids themselves stay on each node as fields: expression ids, the
+plan id, the query stage id and subquery ids.
 
-Names that differ per JVM are rewritten too. A lambda class such as
-`$$Lambda$2082/0x0000000840efd040@75e17c26` reads `$$Lambda`. An object's identity hash reads
-`@N` only after a class name, as in `NoopWrite$@76babe95`. So a literal like `ops@cafe.example`
-survives.
+`subtree_hash` hashes each node's normalized label and details with its children's hashes. So a
+change to a rewrite moves every repeated-work rule and the initial-to-final comparison with it.
 
-A URI reads `<path>` only after a filesystem scheme and `:/`, and it ends at a space, a comma or a
-closing bracket. So `struct<file:string>` survives, and `StartsWith(src#7, s3://raw/)` reads
+A lambda class such as `$$Lambda$2082/0x0000000840efd040@75e17c26` reads `$$Lambda`. An object's
+identity hash reads `@N` only after a package-qualified class name, as in
+`org.apache.spark.sql.execution.datasources.noop.NoopWrite$@76babe95`. So a literal like
+`ops@cafe.example` survives.
+
+A URI reads `<path>` only after a filesystem scheme and `:/`, such as `file:/`, `s3a://` or
+`hdfs://`. `_REWRITES` in `plan/labels.py` names every scheme. A URI ends at whitespace, a comma,
+a `]` or a `)`. So `struct<file:string>` survives, and `StartsWith(src#7, s3://raw/)` reads
 `StartsWith(src#N, <path>)`.
 
 Spark prints string literals unquoted. A literal holding `#` and digits, such as `PR#42`, reads as
@@ -80,7 +91,7 @@ The parser therefore never looks for a parent exactly three columns left. A line
 nearest open node to its left. A block belongs to the nearest open `AdaptiveSparkPlan` at or left
 of its header.
 
-## Only the last AQE update of an execution is the final plan
+## An execution's final plan is its last AQE update, or its first plan where AQE is off
 
 `SQLExecutionStart` carries the initial plan. Adaptive query execution re-plans as stages finish,
 and each re-plan emits a `SQLAdaptiveExecutionUpdate` with a new tree and text.
@@ -90,8 +101,11 @@ and each re-plan emits a `SQLAdaptiveExecutionUpdate` with a new tree and text.
   `AdaptiveSparkPlan isFinalPlan=true`.
 - With AQE off there are no updates, and the initial plan is final.
 
-The JSON child of `AdaptiveSparkPlan` is the current plan only. The initial plan survives in the
-text alone, and the model exposes it through `Plan.initial()`.
+The JSON child of `AdaptiveSparkPlan` is the current plan only. So the initial plan is version 0,
+the tree `SQLExecutionStart` carries. `plans show --initial`, `Tables.plan(execution_id, 0)` and
+`aqe_changes` read that version. The last update's text also prints the initial plan, as its
+`== Initial Plan ==` block, and `Plan.initial()` returns that block. Nothing in sparkxray reads
+`Plan.initial()`. It serves a caller holding only one event's text.
 
 A cached relation's plan is one object, which both blocks print. So the initial block of a final
 update shows that plan finished, with its query stages, even though it had not run when the
@@ -100,30 +114,38 @@ execution started.
 Updates carry no timestamp. Their order is their position in the log, and the tables keep that
 order explicitly.
 
-`last_plans` reads each execution's last plan event. An execution that never finished keeps the
-last plan AQE reached, with `is_final` False. Killed and failed runs are the ones most worth
-explaining, so they are never dropped.
+`last_plans` reads each execution's last plan event. `is_final` is AQE's own `isFinalPlan` flag.
+Under AQE, an execution that never finished keeps the last plan AQE reached, with `is_final`
+False. Killed and failed runs are the ones most worth explaining, so they are never dropped. A
+plan run without AQE is final as written, so `is_final` says nothing there about whether the
+execution finished. `sql_executions.end_epoch_ms` does.
 
-It takes the tree from `sparkPlanInfo`, because only JSON carries accumulator ids. Where the text
+It takes the tree from `sparkPlanInfo`, because only JSON carries accumulator ids. An event with
+no `sparkPlanInfo` reads from its text alone. A log rebuilt from a server's REST JSON is that case,
+with one plan per execution, the final plan's text. Its nodes carry no accumulator ids. Their
+metrics are the SQL graph's display strings, placed on the text's nodes by stepping over the query
+stages the graph leaves out. Where the text
 reads into the same operators in the same shape, each node also takes the text's formatted number,
 details and statistics. The plan then takes the text's initial plan. Where the two differ, the plan
 is JSON alone.
 
 Formatted text numbers each plan object once, so a node AQE left alone carries one number in both
 blocks. Each such initial node takes its final node's label, details and metrics. So an untouched
-node has one `normalized_label` and `subtree_hash` in both plans, and an initial-to-final diff
-marks only what AQE changed.
+node has one `normalized_label` and `subtree_hash` in `Plan.initial()` and the final plan, and a
+caller diffing the two sees only what AQE changed.
 
-Finished query stages print their measured size, as in `Statistics(sizeInBytes=8.4 MiB, …)`. These
-come from completed shuffles, not cost-model guesses, so plan rules can size a join's sides with no
-task metrics. Spark 4 prints `8.0 EiB` on `ResultQueryStage`. That is `Long.MaxValue` used as a
-placeholder, and the parser reads it as unknown.
+Formatted text prints each finished query stage's measured size, as in
+`Statistics(sizeInBytes=8.4 MiB, …)`. JSON and simple text print none, so a Glue log, whose text
+is simple, carries no measured size. These sizes come from completed shuffles, not cost-model
+guesses, so plan rules can size a join's sides with no task metrics. Spark 4 prints `8.0 EiB` on
+`ResultQueryStage`. That is `Long.MaxValue` used as a placeholder, and the parser reads it as
+unknown.
 
 ## What AQE changed is the first plan against the last, less what every re-plan adds
 
 `aqe_changes` compares the plan `SQLExecutionStart` carries, version 0, with the last version.
 How many times AQE re-planned is the last version's number, which only an event log records, so
-`sql_detail` passes it in. Three parts make up the rest.
+`sql_detail` passes it in. The rest is:
 
 - **Operator counts that changed.** AQE adds a query stage around each stage it creates, and an
   `AQEShuffleRead` over each shuffle. Its `postStageCreationRules` insert `ColumnarToRow` and
@@ -152,8 +174,9 @@ product and a nested-loop join shows only in the operator counts.
 `explain(mode='cost')` prints the optimized logical plan, each node ending in
 `Statistics(sizeInBytes=…)`, then the physical plan. `parse_plan_text` reads the physical plan as
 the tree, as for any text. It reads the logical plan into `Plan.estimates`, one `LogicalEstimate`
-per node in the order printed, each naming its parent and children. Every other form leaves
-`estimates` empty.
+per node in pre-order, each naming its parent and children. A subquery's plan, drawn as an inner
+child of the filter running it, is left out, because it is sized against its own relations. Every
+other form leaves `estimates` empty.
 
 An estimate is the optimizer's guess before anything ran, where a finished query stage's size was
 measured. A relation without table statistics is sized from its files. One the optimizer could not
@@ -163,7 +186,7 @@ of their estimates grew from the placeholder.
 The logical and physical trees share no node ids. One logical join can become an exchange, a sort
 and a join. So the estimates are a list beside the plan, never a field on its nodes.
 
-## A truncated plan is flagged, never read as a smaller one
+## A truncated plan reads up to its cut and carries a flag, so it never passes for a whole one
 
 Spark truncates plan text three ways:
 
@@ -185,16 +208,21 @@ and reads as a `ReusedExchange` leaf.
 So a REST plan's operator counts equal the JSON plan's with its query stages removed. A REST plan
 carries no version, because the API serves only the execution's latest plan.
 
-Its metrics are display strings, not accumulator updates:
+Its metrics are display strings, not accumulator updates. A metric with one value prints it alone.
+A spread arrives under a header line, and an average's header leads a spread with no total:
 
 ```text
 1,024
 9.9 KiB
+total (min, med, max (stageId: taskId))
 12 ms (6 ms, 6 ms, 6 ms (stage 28.0: task 37))
+(min, med, max (stageId: taskId)):
+(1, 1.5, 2 (stage 3.0: task 4))
 ```
 
-`parse_display_value` reads each into a unit and a total. Where Spark prints the spread, it also
-reads the minimum, median and maximum, and the stage and task that held the maximum.
+`parse_display_value` reads each into a unit, and a total wherever Spark printed one. Where Spark
+prints the spread, it also reads the minimum, median and maximum, and the stage and task that held
+the maximum.
 
 ## Plan nodes reach the stages that ran them through accumulator ids
 
@@ -215,7 +243,7 @@ Driver-side values, such as broadcast build time and file listing, arrive in
 `SparkListenerSQLAdaptiveSQLMetricUpdates`, naming no node. Both join the same way, and a
 definition with no node has no plan version or node id in `plan_node_metrics`.
 
-## Plan metrics aggregate as the SQL tab aggregates them, except where it names a task
+## Plan metrics aggregate as the SQL tab aggregates them, and never state what no task reported
 
 `plan_node_metrics` follows Spark's `SQLAppStatusListener` and `MetricUtils.stringValue`, which
 build the History Server's SQL tab:
@@ -229,23 +257,22 @@ build the History Server's SQL tab:
 - The driver's values count beside the tasks'.
 - A `sum` counts every value, and an `average` those above 0. A `size`, `timing` or `nsTiming`
   counts those at 0 or above, which drops the -1 an unset metric starts at.
-- Every type gets `total`, `min`, `median` and `max`, and the stage and task that held the max.
-  The median is the value at index n / 2 of the sorted values, as Spark takes it. `value_count` is
-  how many values those cover.
+- Every type gets `min`, `median` and `max`, and the stage and task that held the max. Every type
+  but an average gets a `total`. The median is the value at index n / 2 of the sorted values, as
+  Spark takes it. `value_count` is how many values those cover.
 - A `size` is in bytes, a `timing` in milliseconds and a `sum` a count. An `nsTiming` is converted
   to milliseconds, truncated. An `average` has no unit and no total. Spark stores it as ten times
   its value, so a long integer keeps one decimal, and the table divides by 10.
 
-The tables differ from the SQL tab in two places:
+The tables differ from the SQL tab here:
 
 - Spark's listener names the first task to report the highest value it has seen, a failed attempt
   included, and keeps that name after a retry replaces the value. So the SQL tab can print a
   maximum beside a task that never reported it. The tables name the task whose value is the
   maximum.
 - A metric with no counted value has null statistics, where the SQL tab prints zero.
-
-A driver value above every task's names no task, so `max_stage_id` and `max_task_id` are null
-where the SQL tab prints `(driver)`.
+- A driver value above every task's names no task. So `max_stage_id` and `max_task_id` are null
+  where the SQL tab prints `(driver)`.
 
 `fixtures/history-server-sql/` holds what the SQL tab serves for the plan-shapes logs, metric
 strings included. The tables test prints each execution's `plan_node_metrics` the way the SQL tab
@@ -282,7 +309,8 @@ the pipeline's start to its last row, so it includes the time spent reading the 
 node it names the nodes the duration covers, which `AnnotatedPlan.codegen_members` lists.
 
 A sort's `spill size` is the task's spill while the sort read its input (`SortExec.scala`). So it
-also counts the spills of the sorts and joins below it in the task. `own_spill_bytes` takes theirs
+also counts the spills of every node below it in the task, up to the first exchange or query
+stage. `own_spill_bytes` takes theirs
 off, through the `own_spills` SQL that `stage.spill` ranks nodes by. `plans show` prints both
 figures where they differ.
 

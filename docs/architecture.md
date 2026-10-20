@@ -1,18 +1,21 @@
 # Architecture
 
-## A log location becomes findings in four library stages
+## Each library stage reads what the one before it wrote
 
-Each stage reads what the one before it wrote. The CLI calls one library function per command and
-holds no logic of its own.
+The CLI parses each command's arguments, calls the library and prints what it returns. It holds no
+logic of its own.
 
 ```text
- file, directory, rolling directory, s3:// prefix, History Server URL,
- or the app id of a log already read
+ file, directory, rolling directory, s3:// prefix, History Server or
+ driver UI address, or the app id of a log already read
         │
         ├── ingest ──→ ordered, decoded event lines
         │
-        ├── normalize ──→ Parquet tables + manifest.json, under
-        │                 $XDG_CACHE_HOME/sparkxray/tables/<source>/<key>/
+        ├── tables ──→ Parquet tables + manifest.json, under
+        │              $XDG_CACHE_HOME/sparkxray/tables/<source hash>/<key>/
+        │
+        ├── enrich ──→ Glue's metrics and insights and a driver's log,
+        │              as tables beside them
         │
         ├── rules ──→ findings: rule id, severity, evidence,
         │             thresholds applied, impact_seconds
@@ -20,11 +23,15 @@ holds no logic of its own.
         └── reports ──→ Markdown and JSON
 ```
 
-The tables are keyed by content. The key is a SHA-256 over each ingested file's URI, ETag,
-modification time and size, the tables schema version and the installed sparkxray version. So a
-second analysis of one run skips parsing, and every upgrade rebuilds the tables. A version bumped
-by hand would rebuild less often, and a parser fix that forgot the bump would keep serving the old
-parse.
+The tables are keyed by the files they were read from, never by those files' bytes. The key is a
+SHA-256 over each ingested file's URI, ETag, modification time and size, the tables schema version
+and the installed sparkxray version. So a second analysis of one run skips parsing, and every
+upgrade rebuilds the tables. The installed version is what rebuilds them after a parser fix. A
+version bumped by hand would rebuild less often, and a fix that forgot the bump would keep serving
+the old parse.
+
+The schema version is the manifest's JSON contract, `schemas/tables-manifest.json`. A removed
+field or table, or a changed meaning, bumps it. An added field, table or column does not.
 
 ## The library and the command line are separate distributions
 
@@ -43,36 +50,34 @@ A uv workspace resolves at one Python: the intersection of its members' `require
 that is 3.13, so nothing in the workspace runs the library at its floor. The
 `library-on-python-3.11.yml` workflow does. It installs `./library` unlocked into a 3.11
 environment, the way Glue's pip does, then type-checks the library as 3.11 and runs its tests.
-Each run installs one of four dependency sets:
+Each leg of its matrix installs one of these dependency sets:
 
 - the highest versions;
 - the floors the library declares;
 - Glue 5.0's preinstalled modules, then the library over them;
 - Glue 5.1's, the same way.
 
-A Glue job keeps every preinstalled module that satisfies a floor. So Glue 5.0's numpy 1.26.4 and
-pyarrow 17.0.0 are what the library imports there, and neither of the first two sets holds them.
+A Glue job keeps every preinstalled module that satisfies a floor. So the library imports Glue's
+own pyarrow there, as `.github/glue-preinstalled-modules/` records it. Glue 5.0's pyarrow is newer
+than the floor and older than the highest release, so neither of the first two sets holds it.
 
 *Rejected:* one distribution with the CLI's dependencies behind an extra. Every CLI install would
 have to name the extra, and the CLI would sit on the library's 3.11 floor.
 
 ## DuckDB parses the log, so there is no JVM and no custom parser
 
-The benchmark input is a fixture log inflated to 786 MB, holding 126,920 `TaskEnd` events. Over it,
-DuckDB's `read_json` with an explicit `columns=` map computed per-stage task aggregates in
-0.29–0.30 s on 16 threads. Reading the same log zstd'd took 0.32–0.37 s. On the same file:
-
-- Polars 2.0.0's `scan_ndjson` took 0.36–0.39 s;
-- Python with orjson took 2.0–2.1 s.
-
-`benchmarks/parse/README.md` holds every arm and the method.
+The benchmark reads a fixture log inflated to 750 MiB, holding 126,920 `TaskEnd` events, and
+computes per-stage task aggregates. DuckDB's `read_json` with an explicit `columns=` map was the
+fastest arm. It took 7–28% longer to read the zstd'd copy. Polars' `scan_ndjson` took 20–35%
+longer than DuckDB. Python with orjson took about seven times as long.
+`benchmarks/parse/README.md` holds every arm's timing, the machine, the versions and the method.
 
 The explicit `columns=` map is required. Every `SparkListener*` event has its own JSON shape, and
 auto-detection unifies them all into one enormous struct. With the map, DuckDB's reader parses in
 parallel and drops every field nobody asked for.
 
-*Rejected:* Polars. It parsed in a fifth more time than DuckDB. The rules are SQL over the tables,
-and DuckDB is the engine they run in, so Polars would be a second engine beside it.
+*Rejected:* Polars. It took 20–35% longer than DuckDB over the same file. The rules are SQL over
+the tables, and DuckDB is the engine they run in, so Polars would be a second engine beside it.
 
 *Rejected:* a Rust reader. A tuned one might match DuckDB, but only by redoing work DuckDB already
 does, and every install would need its build.
@@ -93,12 +98,18 @@ is still appending to is downloaded again. One module, `ingest/aws.py`, makes ev
 
 ```text
 $XDG_CACHE_HOME/sparkxray/logs/
-├── s3/<bucket>/<key>/<etag>-<size>     one downloaded object, as S3 holds it
-└── decoded/<uri hash>/<version hash>.jsonl   one file's events as plain lines
+├── s3/<bucket>/<key>/<etag>-<size>               one downloaded object, as S3 holds it
+├── rest/<server hash>/<app>/<attempt>/<version>/  what a server served, or the log rebuilt from it
+└── decoded/<uri hash>/
+    ├── <version hash>.jsonl                      one file's events as plain lines
+    └── <version hash>.json                       whether that version's end was cut
 ```
 
-A local file that DuckDB can read as it stands is never copied. The manifest records, per file,
-the `read_path` holding its events and the `read_codec` it is compressed with.
+A local file that DuckDB can read as it stands is never copied, unless it is the last file of a
+log Spark is still writing. The manifest records, per file, the `read_path` holding its events and
+the `read_codec` it is compressed with.
+
+## Every cache entry is versioned, and an older version goes once a day unused
 
 A decoded file's version is its URI, ETag, modification time and size, under the installed
 sparkxray version. So an upgrade decodes each file again, and never downloads one again.
@@ -119,6 +130,15 @@ writes logs. A server whose log is unreadable answers 503, and an older one 404.
 sparkxray rewrites the application's REST JSON as the listener events Spark would have logged,
 with `JsonProtocol`'s field names and units, into one file. The one build then reads it, so no
 table has a second code path to drift from the first.
+
+Three facts REST carries have no listener event to hold them. The rebuild writes each as an event
+of its own, which no Spark writes, and these are the one route a Spark-written log never takes:
+
+- `sparkxray.RestPlanMetrics` carries the SQL tab's metric values, which `plan_node_metrics` reads;
+- `sparkxray.RestExecutorPeaks` carries each executor's whole-run peaks, which `executors` reads;
+- `sparkxray.RestEvicted` marks a run the server had dropped part of.
+
+A new REST field the tables need goes through one of these, or a new one beside them.
 
 ```text
 GET <app>/logs ── zip with members ──→ unpack ──→ the files, as a local log
@@ -149,19 +169,23 @@ when asked, what the build finds missing from the events:
   writes a `sparkxray.RestEvicted` event, and `app.failed-jobs` needs the `whole_run` signal it
   takes away. A command naming such a log prints a note saying only part of the run is held.
 
-Only each execution's final plan survives, read from its text. A task's end reason is read back
+Only each execution's latest plan survives, read from its text. A task's end reason is read back
 from the string `TaskEndReason.toErrorString` made of it. A failed job's failure is its failed
 stage's, because Spark ends each running stage only that job used with the job's message.
 
 A rule that needs a missing part is skipped by signal. `config.skew-join-off-with-skew` needs
 `plan_stages`, which `node_stages` holding rows provides. The rules that read `node_stages` only
-to name a node keep running and name none.
+to name a node keep running and name none. The two Python UDF rules need only `plan`, so they keep
+running too. Their evidence from `node_stages`, the stages that ran the UDF, those stages' share of
+task time and the Python workers' peak, comes back empty or null.
 
 A finished attempt's copy is keyed by its end time and last update, so it is fetched once. An
 incomplete attempt's download is keyed by its last update. A History Server dates that by the
 log's last write, so a run killed long ago is fetched once, and a growing log again as it grows.
 A driver UI dates a running attempt by its start. So a rebuild of a running attempt gets a fresh
-key on every open, and a live application is never read from the cache. Downloads and rebuilds
+key on every open, and a live application is never read from the cache. No key holds sparkxray's
+version, so an upgrade rebuilds the tables from the cached copy and never fetches again. Downloads
+and rebuilds
 go under `logs/rest/<server hash>/<app>/<attempt>/<version>/`. One httpx2 client per open bounds
 how many requests run at once, and retries a connection error or a 5xx with backoff. It never
 retries a 404 or a 503 from `/logs`, which mean no log. `rest_client.py` holds the limits.
@@ -211,7 +235,7 @@ An app id never holds a `/`, and an S3 URI or a path with a separator always doe
 looks for it in the cache.
 
 The cache answers from its tables' manifests alone, so finding a log reads no event. Each
-`tables/<source>/<key>/manifest.json` names the log it was built from. Only the newest entry per
+`tables/<source hash>/<key>/manifest.json` names the log it was built from. Only the newest entry per
 source counts, whichever sparkxray built it. Entries then merge where they are one log:
 
 - Two locations reaching the same files, such as a directory and the file in it, share a tables
@@ -263,8 +287,10 @@ A cut last file is decoded or trimmed into the cache without its partial line, a
 records `truncated_tail`. A cut in any other file is `E-INGEST-006`, as is a block that does not
 decode.
 
-A local log Spark is still writing, by its `.inprogress` name or its `appstatus` marker, grows
-after it is opened. So its last file is copied into the cache, a plain one at the size it was
+A local log Spark is still writing grows after it is opened. A single file says so by its
+`.inprogress` name. A rolling directory says so by an `appstatus_<appId>.inprogress` marker, or by
+having no marker at all, because Spark renames the marker only when the application ends. So its
+last file is copied into the cache, a plain one at the size it was
 listed with. The reader and the table build both read that copy, so neither sees a line Spark
 appended later.
 
@@ -273,8 +299,9 @@ line, once, and names the file and line of one that does not parse.
 
 ## The table build parses every event once, in the order Spark wrote them
 
-`log.tables` builds the tables the first time it is read. DuckDB is imported only then, so code
-reading only lines or plans never loads it.
+`log.tables` builds the tables the first time it is read. DuckDB and pyarrow are imported then,
+or when a log is opened by its app id, because the cache lookup imports them. So code that opens a
+log by its location and reads only its lines or plans never loads them.
 
 One `read_json` per run of files sharing a codec loads every event into one temporary table,
 through the explicit column map. Every table is selected from that copy, so the log is parsed
@@ -286,8 +313,14 @@ Parquet reader opens them without sparkxray, and a column's type never depends o
 happened to hold.
 
 The build parses every field, each task's accumulator updates included, where the parse benchmark
-reads a few task fields. On the benchmark's input and machine, building every table takes
-2.0–2.2 s, against the benchmark's 0.3 s. Reopening the cached tables takes 0.02 s.
+reads a few task fields. So building a log's tables takes several times the benchmark's parse, and
+reopening the cached tables parses nothing. The first command below times a build on the
+benchmark's input, and the second, run after it, a reopen:
+
+```bash
+time uv run python -c "from sparkxray.ingest import EventLog; EventLog.open('/tmp/big.json', cache_dir='/tmp/sx-bench').tables"
+time uv run python -c "from sparkxray.ingest import EventLog; EventLog.open('/tmp/big.json', cache_dir='/tmp/sx-bench').tables"
+```
 
 A build writes into a directory of its own, then renames it into place. Two processes building one
 log never read each other's partial files, and the first rename wins. Tables built from an older
@@ -308,7 +341,12 @@ reran after it succeeded counts once per attempt.
 So after a stage retry, its totals can fall short of the same metric summed over
 `tasks_effective`.
 
-`manifest.json` names what the log was written without, because Spark's defaults leave it out:
+## The manifest names what the log was written without
+
+`manifest.json` names what the log was written without, so a reader tells a missing value from a
+0. The build checks every value on every log, from its events. `LACK_MEANINGS` in
+`tables/manifest.py` says what each leaves out, and `sparkxray schemas show tables-manifest` lists
+them. Three are what Spark's defaults leave out:
 
 | `lacks` | Spark writes it only with |
 | --- | --- |
@@ -316,11 +354,15 @@ So after a stage retry, its totals can fall short of the same metric summed over
 | `block_updates` | `spark.eventLog.logBlockUpdates.enabled` |
 | `process_tree_metrics` | `spark.executor.processTreeMetrics.enabled` |
 
-Without stage executor metrics, each task's peaks are the log's only memory figures. So an
-executor's `peak_jvm_heap_bytes` is the larger of its stage and task peaks, and
-`peak_memory_source` says which it had. Without
-process-tree metrics, `peak_python_rss_bytes` is null. Spark writes 0 for a metric it never
-measured, and the table does not pass that off as a measurement.
+The rest are what a REST rebuild cannot carry, listed above. An older Spark's own log can lack
+them too, as Apache's `app-20200706201101-0003` fixture lacks `execution_configs`.
+
+An executor's `peak_jvm_heap_bytes` is the larger of its stage and task peaks.
+`peak_memory_source` is `stage_executor_metrics` wherever the log holds stage peaks for it, and
+`task_peaks` where it holds only task peaks. Without stage executor metrics, each task's peaks are
+the log's only memory figures. Without process-tree metrics, `peak_python_rss_bytes` is null.
+Spark writes 0 for a metric it never measured, and the table does not pass that off as a
+measurement.
 
 ## A Glue run and a driver's log join as tables beside the log's, after the build
 
@@ -348,21 +390,28 @@ no AWS libraries loaded.
 **Metrics are found by ListMetrics, not by a fixed list of names.** AWS's metric reference spells
 `glue.driver.throughput.bytesWrittten` with three t's, and its own Limitations section spells it
 with two. ListMetrics filtered on `JobName` and `JobRunId` returns what the run published,
-whichever spelling that was. ListMetrics omits a metric with no data in the last two weeks. So an
-older run joins with an empty `glue_metrics` and the `E-ENRICH-003` warning. The analysis still
-runs, without the rules that needed it.
+whichever spelling that was. It also returns Glue's older job metrics, which `--enable-metrics`
+publishes under the same names. Those carry no `ObservabilityGroup` dimension, so a metric without
+one is left out. ListMetrics omits a metric with no data in the last two weeks. So an older run
+joins with an empty `glue_metrics` and the `E-ENRICH-003` warning. The analysis still runs,
+without the rules that needed it.
 
 Each metric is read at the shortest period CloudWatch still keeps for a run that old: 60 seconds
-within 15 days, 300 within 63, and 3600 after. Counts are read as their Sum, as AWS's reference
-lists. Throughput gauges, those with a `Source` or `Sink`, are running totals, so they are read as
-their Maximum, as AWS's Grafana dashboard reads them. Any other gauge is read as its Average.
+within 15 days, 300 within 63, and 3600 after. The read starts one period before the application
+started and ends two minutes after it ended, because metrics land after a run ends. A log cut
+before its end reads to its last event. A log that records no application start has no window, so
+it reads none and carries the `E-ENRICH-003` warning. Counts are read as their Sum, as AWS's
+reference lists. Throughput gauges, those with a `Source` or `Sink`, are running totals, so they
+are read as their Maximum, as AWS's Grafana dashboard reads them. Any other gauge is read as its
+Average.
 CloudWatch stamps a period with its start, so a datapoint covers `period_start_epoch_ms` to
 `period_start_epoch_ms + period_ms`. A rule matches a datapoint to a stage where the two overlap.
 
 AWS gives every percentage metric the unit Percentage and no scale. Its published
 `glue.driver.workerUtilization` values run from 0 to 1. Nothing published shows
 `glue.driver.memory.heap.used.percentage`'s scale. So `glue_shares_cte` in `tables/registry.py`
-reads a run's series as 0 to 100 where any value passes 1, and a finding names the scale it read.
+reads a run's series as 0 to 100 where any value passes 1. `app.driver-memory-pressure` names the
+scale it read as `heap_percentage_scale`.
 
 **Insights are read from `/aws-glue/jobs/logs-v2` only.** That is the continuous-logging group a
 job writes to unless it names its own. Each insights stream is named for the run id, so it is read
@@ -388,17 +437,20 @@ theirs from their sources: `tasks_effective` from `tasks`, and `findings` from t
 `schemas/findings.json`.
 
 `sparkxray.metric_glossary` adds what the registry cannot say about a number. It covers every
-column whose name ends in a unit, and every metric a plan node declares. For each it gives the
-unit Spark records beside the unit sparkxray shows, the event fields read, and how a derived
-column is computed. Spark-side facts sit in that module, keyed by `table.column`, and a unit
-column it lacks raises a `KeyError` whenever the glossary is read.
+column whose name ends in a unit, and every plan metric the fixture logs declare. For each it
+gives the unit Spark records beside the unit sparkxray shows, the event fields read, and how a
+derived column is computed. Spark-side facts sit in that module, keyed by `table.column`. A unit
+column it lacks raises a `KeyError` whenever the glossary is read. No test reads it, so run
+`sparkxray metrics list` after adding a unit column.
 
-No meaning is written from a metric's name. Each is quoted from the Spark 4.2 documentation's
-tables, or read from the Apache Spark v4.2.0 source, and cites that page or that file and line.
-Six metrics only AWS Glue 5.0's Spark build declares have no published source, so they carry no
-description. The glossary's metric types match those every fixture log declares.
+No meaning is written from a metric's name. A meaning is quoted from the Spark 4.2 documentation's
+tables, read from the Apache Spark v4.2.0 source, or taken from AWS's CloudWatch references. Each
+cites that page or that file and line. A column sparkxray reads from one event field cites that
+field, under the source `sparkxray, from the event field it reads`. A metric only AWS Glue 5.0's
+Spark build declares has no published source, so it carries no description.
 
 A name the glossary does not hold is `E-METRIC-001`, listing every column and plan metric it does.
+Where a name is close to one of them, the message ends by asking `did you mean` it.
 
 ## Rules read the tables, and a plan alone needs neither DuckDB nor pyarrow
 
@@ -414,13 +466,13 @@ plan captured from `explain()` pays for neither.
 
 ## The command's summaries are library reads, measured as the Spark UI measures
 
-Each command calls one function and prints what it returns. The per-resource reads live in
-`sparkxray.summaries`, and each runs SQL over the tables into `Rows`. So code importing the library
-reads the numbers the command prints, and the command holds no logic to test.
+Each command calls the library and prints what it returns. The per-resource reads live in
+`sparkxray.summaries`. Each runs SQL over the tables, and returns `Rows` or a detail value built
+from them. So code importing the library reads the numbers the command prints, and the command
+holds no logic to test.
 
 A stage's quantiles take the value at sorted index min(⌊q·n⌋, n−1), as the Stages tab's summary
-metrics do. For every stage of the fixtures, each quantile and each total equals what a History
-Server serves. Spark summarizes each stage attempt alone, while sparkxray summarizes a stage's
+metrics do. Spark summarizes each stage attempt alone, while sparkxray summarizes a stage's
 effective tasks across its attempts. So after a retry the two differ.
 
 A stage's wall time runs from its first submission to its last completion, and a SQL execution's
@@ -430,15 +482,21 @@ weighed by.
 
 An executor's task time is its tasks' summed duration, which Spark sums too. Spark's Executors tab
 then shows the driver's task time as the application's run time, and its GC time as the driver
-JVM's own. `task_time_ms` keeps the tasks' sum, because the idle share needs the time tasks held cores. It is
-1 − task time × `spark.task.cpus` ÷ (lifetime × cores), since each task holds that many cores.
+JVM's own. `task_time_ms` keeps the tasks' sum, because the idle share needs the time tasks held
+cores. `idle_share` is 1 − task time × `spark.task.cpus` ÷ (lifetime × cores), since each task
+holds that many cores.
 
 A SQL execution's operator counts read its last plan version, as the rules do. A stage a job
-planned but never ran is what the Spark UI lists as skipped, and no summary holds it.
+planned but never ran is what the Spark UI lists as skipped. No stage summary holds it. `sql show`
+lists each job's skipped stages as `skipped_stage_ids`.
 
-A query DuckDB refuses is `E-QUERY-001`, carrying DuckDB's message. A stage, SQL execution or
-finding the run does not hold is `E-QUERY-002`, and a sort column a list lacks is `E-QUERY-003`.
-Each lists the values that would have worked.
+A query DuckDB refuses is `E-QUERY-001`, carrying DuckDB's message. It lists the tables only where
+the query named one they lack. A query reading `findings` before any analysis wrote them is
+`E-RULE-005` instead. A stage, SQL execution, plan version or finding the run does not hold is
+`E-QUERY-002`. A stage a job skipped says which job skipped it. A sort column a list lacks is
+`E-QUERY-003`. Both list the values that would have worked. Where a name is close to one of them,
+the message ends by asking `did you mean` it. A hint that starts `sparkxray` is a command that runs
+as written, so a program can run it.
 
 ## A report is one value rendered twice, and holds nothing that changes between runs
 
@@ -474,11 +532,15 @@ the three has a hand-written copy to fall behind the code, and a command or erro
 docs still appears.
 
 A command's exit codes are read from its parameters. One taking `--fail-on` exits 3 when it fails
-the gate that flag's help states, and one taking a log exits 3 when the log cannot be read. The
-gate is the flag's to state, because commands gate different findings: `findings list` every
-finding, and `logs diff` those run B added or raised to the bar. A log parameter shows
-as `LOG`, or `LOG_<role>` where a command takes two. Every refused input exits 2, and its error
-code says which input.
+the gate that flag's help states. The gate is the flag's to state, because commands gate
+different findings: `findings list` every finding, and `logs diff` those run B added or raised to
+the bar. One taking a log exits 3 when the log cannot be read. A log parameter shows as `LOG`, or
+`LOG_<role>` where a command takes two.
+
+A refusal exits with its error's own status: 2 where the input was wrong, 3 where a person must
+act. So a location holding several logs exits 2. A log that does not decode, and a driver log
+Spark wrote as plain text, exit 3. `sparkxray schemas show errors` gives each code's status as
+`x-exit-code`, and the code says which input failed.
 
 The root group reads whether a command asked for JSON from its words, before any parameter is
 parsed: `--json`, or `--format json`. A callback on `--json` would run only once parsing reached
@@ -487,18 +549,21 @@ it, so `--fail-on hgih --json` would refuse in prose. The parser's refusal print
 Without JSON it prints the parser's own text.
 
 The other schemas are files, because their shape is the contract a program holds the document to.
-Every object in them is closed, so a key the code adds without its schema fails the test that
-validates that document. Each file has one. The findings, the report and both manifests are
-validated over fixture logs, and capabilities and the error envelope over the live command.
+Every object in them is closed. So a key the code adds without its schema fails the test that
+validates that document. Each file has a test that validates a document against it, over a
+fixture log or the live command.
 
 Every number a schema describes ends in its unit, from the suffixes the finding contract holds
-evidence keys to. The exemptions identify rather than measure: an `_id`, an attempt, a version or
-an index. A number beside a `unit` field names its unit there, as a threshold's `default` and a
-plan metric's `total` do. One test walks every schema, the built ones included.
+evidence keys to. The exemptions identify rather than measure, as an `_id`, an attempt or a line
+number does, and `library/tests/test_schemas.py` lists them. A number beside a `unit` field names
+its unit there, as a threshold's `default` and a plan metric's `total` do. One test walks every
+schema, the built ones included.
 
-So a plan node's numbers carry the names `plan_nodes` gives them, in every JSON: `node_id`,
-`parent_id`, `child_ids` and `codegen_stage_id`. The `(3)` formatted text prints is `operator_id`,
-Spark's own name for it in `ExplainUtils.generateOperatorIDs`.
+So a plan node's own numbers carry the names `plan_nodes` gives them: `node_id`, `parent_id` and
+`codegen_stage_id`. An annotated plan adds `child_ids` beside them. A number naming a node from
+elsewhere says whose it is: `plan_node_id` in a finding's scope, `initial_node_id` and
+`final_node_id` in an AQE join change, and `root_id` for a subquery's root. The `(3)` formatted
+text prints is `operator_id`, Spark's own name for it in `ExplainUtils.generateOperatorIDs`.
 
 *Rejected:* a capabilities document written by hand. An agent trusts it most, and nothing would
 say when it went stale.
@@ -541,11 +606,15 @@ have, too little to show the skew A's did. So its other findings are listed apar
 from below it. A finding A already had at the bar does not block, so a run that kept a known
 problem passes. One that worsened past the bar fails, as `findings list` on B alone would.
 
-An exception becomes a key: its one line, with the run's hosts replaced, then its paths, UUIDs, hex
-ids and numbers. A key B shares with a run that succeeded is routine. A fetch failure a retry
-recovered is one, and so is a speculative copy killed when its twin finished. A key B shares only
-with a failed A is recurring, and one only B holds is new. The view lists new and recurring keys,
-and counts the routine ones.
+An exception becomes a key: its one line, with the run's hosts replaced, then its UUIDs, paths, IP
+addresses, hex ids and numbers. Each runs before the next could split what it matches, so a UUID
+reads as `<uuid>` rather than as hex runs, and a path as one `<path>`, numbers and all.
+`_REWRITES` in `run_diff/exception_triage.py` says why each comes where it does.
+
+A key B shares with a run that succeeded is routine. A fetch failure a retry recovered is one, and
+so is a speculative copy killed when its twin finished. A key B shares only with a failed A is
+recurring, and one only B holds is new. The view lists new and recurring keys, and counts the
+routine ones.
 
 A failed task's exception is in the log. One the driver threw outside a task is not, so the
 driver log's exceptions are read beside the tasks', where it was joined. So are a Glue run's
@@ -596,8 +665,8 @@ raise `E-SIM-001` naming them, where Sparklens returns 0.
 
 `stages list` reads each stage's core-hours over a window from its first task's launch to its end.
 Its waste is the core time in that window no task of any stage held. Sparklens opens the window at
-the stage's submission and charges it every core its own tasks left. So a stage submitted beside a
-busy one was charged the busy one's core time as its own waste.
+the stage's submission and charges it every core its own tasks left. So Sparklens charges a stage
+submitted beside a busy one the busy one's core time as its own waste.
 
 *Rejected:* scaling each stage's measured time by the change in cores. A stage's time is set by
 its longest task as much as by its total, so halving the executors does not double a skewed

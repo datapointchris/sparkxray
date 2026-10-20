@@ -3,11 +3,11 @@
 How fast each engine reads a Spark event log's task events. The result is why sparkxray parses
 logs with DuckDB.
 
-## DuckDB is fastest, and Polars takes a fifth longer
+## DuckDB is fastest, and Polars takes 20–35% longer
 
 | Arm | Command | Wall time, three runs |
 | --- | --- | --- |
-| DuckDB `read_json` with explicit `columns=`, 16 threads | `duckdb_bench.py LOG` | 0.29–0.30 s |
+| DuckDB `read_json` with explicit `columns=`, at DuckDB's default thread count, 16 here | `duckdb_bench.py LOG` | 0.29–0.30 s |
 | the same, one thread | `duckdb_bench.py LOG --threads 1` | 0.67–0.72 s |
 | the same, reading the zstd'd log | `duckdb_bench.py LOG.zst --compression zstd` | 0.32–0.37 s |
 | Polars `scan_ndjson` with a schema | `polars_bench.py LOG` | 0.36–0.39 s |
@@ -27,7 +27,8 @@ benchmarks/parse/inflate.sh fixtures/logs/spark-3.5.9/local-*.zstd 380 /tmp/big.
 benchmarks/parse/run.sh /tmp/big.json
 ```
 
-Each arm parses the whole file and keeps only `SparkListenerTaskEnd`. Per stage, it computes the
+Each arm reads the whole file and aggregates only `SparkListenerTaskEnd`. The prefilter arm parses
+only the lines that name it. Per stage, each arm computes the
 task count, the median and max `Executor Run Time`, the summed `Memory Bytes Spilled` and
 `JVM GC Time`, and the max `Total Records Read`. Each times its own query with
 `time.perf_counter`, so interpreter start and imports are not counted. `run.sh` writes the zstd

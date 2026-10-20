@@ -1,6 +1,6 @@
 # Rule design
 
-## Every ratio threshold is paired with an absolute floor
+## A ratio that can gate a run is paired with an absolute floor
 
 A ratio alone fires on noise. In the `spark-3.5.9` fixture, the 200-file write's stage runs 200
 tasks with a 14 ms median and a 385 ms maximum. That is a 27× max-to-median duration ratio, and
@@ -10,15 +10,19 @@ Durations also understate real skew. The same fixture's skewed join reads 64× t
 records on its largest task, but runs only 38× the median's time. `fixtures/README.md` gives both
 stages' totals and the command that reads them.
 
-So every ratio comes with an absolute amount, the way AQE's own skew test pairs
-`skewedPartitionFactor` (5) with `skewedPartitionThresholdInBytes` (256 MB). Stage rules lead with
-bytes and records, and use duration as a secondary signal. `stage.task-skew` needs a gap of at
-least 30 s between the slowest and the median task, which keeps it silent on the 200-task stage.
+So every ratio that can gate a run comes with an absolute amount, the way AQE's own skew test
+pairs `skewedPartitionFactor` (5) with `skewedPartitionThresholdInBytes` (`256MB`, which Spark
+reads as 256 MiB). `plan.estimate-unreliable` judges a ratio alone. It reports only at `info`, so
+it never gates.
+
+Stage rules lead with bytes and records, and use duration as a secondary signal.
+`stage.task-skew` needs a gap of at least 30 s between the slowest and the median task, which
+keeps it silent on the 200-task stage.
 `stage.scheduler-delay` and `stage.deserialization` need 30 s at stake too: their summed time over
 the stage's concurrent slots. So the first stage on fresh executors, which loads its classes
 once, stays quiet.
 
-## Severity is the rule's grade, moved one step by the stage's share of the run
+## Severity is the rule's grade, moved one step by its scope's share of the run
 
 The ladder is `info`, `low`, `medium`, `high`, `critical`. `info` is for rules that report
 presence only. A rule grading a plan shape by its size is `info` below its byte floor too, and
@@ -54,41 +58,36 @@ what failed it.
 
 `--json` carries the gate beside the findings whenever the log was read, as the findings schema's
 optional `gate`. A caller reads the verdict there rather than inferring it from the exit status.
-An exit 3 with no `gate` on stdout means the log was not read. A severity outside the ladder is
-`E-RULE-006`, listing the five.
+An exit 3 with no `gate` on stdout means the log was not read. `Analysis.gate` refuses a severity
+outside the ladder as `E-RULE-006`, listing the five. The command's parser refuses one first, as
+`E-USAGE-001`.
 
 ## `impact_seconds` is wall time a fix could recover, and null where nobody can say
 
-| Rule | `impact_seconds` |
-| --- | --- |
-| `stage.task-skew` | the slowest task's run time minus the median task's |
-| `stage.shuffle-skew`, `stage.spill-skew` | the slowest task's duration minus the median task's |
-| `stage.spill` | the spilling tasks' run time ÷ concurrent slots, × disk spill ÷ (shuffle read + input) up to 1, capped at stage wall time, and null where the stage read nothing |
-| `stage.tiny-tasks` | the tasks' summed duration less their run time, ÷ the stage's concurrent slots |
-| `stage.scheduler-delay` | the summed scheduler delay ÷ concurrent slots |
-| `stage.deserialization` | the summed deserialization time ÷ concurrent slots |
-| `stage.retry-waste` | the failed attempts' run time ÷ concurrent slots |
-| `app.driver-gaps` | the gaps' summed length |
-| every other rule | null |
-
-A stage's concurrent slots are its task count or the cores of the executors that ran its tasks,
-whichever is fewer.
+A rule prices its own finding, in its SQL or its `check`. A stage rule divides summed task time by
+the stage's concurrent slots, so it states wall time rather than core time. A stage's concurrent
+slots are its task count or the cores of the executors that ran its tasks, whichever is fewer. A
+skew rule takes the slowest task's time less the median's, because the stage waits on that task
+alone. `stage.spill` scales the spilling tasks' time by the disk spill's share of what the stage
+read, and caps it at the stage's wall time. `app.driver-gaps` sums its gaps. A rule that cannot
+say what a fix recovers returns null, as every `plan.*` rule does.
+`rg -n impact_seconds library/src/sparkxray/rules` shows each rule's formula.
 
 Findings sort by `impact_seconds`, largest first and nulls last, then by severity.
 
 ## A rule declares the signals it reads, so it runs wherever they exist
 
-The signals are:
+A signal names one kind of input a rule reads. A plan gives its tree, its metrics and its
+estimates, and the stages that ran each node, which a log rebuilt from REST JSON lacks. A log
+gives its tasks, executors, environment and timeline. `whole_run` is a run the server held whole,
+which one past its `spark.ui.retained*` limits does not. Each table `enrich` joins is a signal of
+its own. `sparkxray capabilities show --json` lists every signal under `signals`. `SIGNALS` in
+`rules/rule.py` declares them, and `_SIGNALS_SQL` in `rules/analysis.py` decides whether a log
+holds each. So a new signal adds a column there.
 
-- `plan`, `plan_metrics` and `plan_estimates`, from a plan;
-- `plan_stages`, which stages ran each node, which a log rebuilt from REST JSON lacks;
-- `tasks`, `executors`, `environment` and `timeline`, from the log;
-- `whole_run`, which a server past its `spark.ui.retained*` limits has dropped part of;
-- `glue_metrics`, `glue_insights` and `driver_log`, from the tables `enrich` joins.
-
-A rule whose signals are missing is skipped, and the skip names the missing signal. So `plan.*`
-rules run on a bare `explain()` plan with no event log, and a skipped rule says what it would have
-needed.
+A rule whose signals are missing is skipped, and the skip names the missing signal. So a `plan.*`
+rule reading the plan alone runs on a bare `explain()` plan with no event log. One reading
+`plan_metrics` is skipped there, and says it needed them.
 
 `plan_estimates` is the optimizer's size estimates. Only `explain(mode='cost')` text prints them,
 and no event log carries them. So `plan.estimate-unreliable` runs through `analyze_plan` alone.
@@ -101,10 +100,10 @@ Rule ids are dotted by the evidence they read:
 | Prefix | Reads |
 | --- | --- |
 | `plan.` | plan nodes, and their metrics where present |
-| `stage.` | effective tasks and stages |
-| `executor.` | executors, their memory peaks and their memory settings |
-| `app.` | jobs, stages and executors as a timeline, or the driver's log and Glue's metrics |
-| `config.` | the environment, against other findings |
+| `stage.` | one stage's tasks, its effective ones or every attempt, and its own events |
+| `executor.` | executors and the driver: cores against task time, memory peaks against settings, and removals |
+| `app.` | the job timeline, or the driver's log and Glue's metrics |
+| `config.` | the settings, against what the run shows: its tasks, its executors or another rule's findings |
 
 ## A rule may read another rule's findings, and that rule runs first
 
@@ -140,12 +139,15 @@ as `plan_nodes` numbers it, with each node's metric totals and the tables.
 
 Either returns one mapping per finding, and the engine sorts its keys three ways:
 
-- `severity`, `impact_seconds`, `confidence` and `confidence_reason` fill the finding's own fields;
+- `severity`, `impact_seconds`, `confidence` and `confidence_reason` fill the finding's own
+  fields. `confidence` is `high`, `medium` or `low`, and `high` where the rule gives none.
+  `confidence_reason` says what lowered it;
 - the scope ids fill `scope`, and a plan node's label is read from the plan where a rule gives none;
 - every other key is evidence.
 
-A numeric evidence key must end in its unit, such as `_bytes`, `_ms`, `_records`, `_rows`,
-`_count`, `_share` or `_ratio`. A list of node or stage ids ends in `_ids`. The engine refuses a finding that breaks this, and the findings
+A numeric evidence key must end in its unit, such as `_bytes`, `_ms`, `_count` or `_share`.
+`UNIT_SUFFIXES` in `rules/findings.py` holds every one. A single id ends in `_id`, and a list of
+node or stage ids in `_ids`. The engine refuses a finding that breaks this, and the findings
 schema does too. So a rule registered by other code is held to the same shape. A malformed rule,
 a taken id, or a finding that breaks the contract is `E-RULE-004`, naming the rule.
 
@@ -153,8 +155,9 @@ A rule's `title` is a `str.format` template over the finding's scope ids and evi
 `{key:bytes}` prints a byte count as the Spark UI's `Utils.bytesToString` does, `702.5 MiB`, and
 `{key:duration}` prints milliseconds as its `UIUtils.formatDuration` does, `26 s`. So a title reads
 the way the Stages tab shows the same number. `{key:plural gap}` prints a count with its noun
-agreeing, `1 gap` or `3 gaps`, so a title never reads "1 gaps". A count no threshold can bring
-below 2, such as a repeated subtree's occurrences, prints bare.
+agreeing, `1 gap` or `3 gaps`, so a title never reads "1 gaps". A noun with an irregular plural
+names both, as `{key:plural copy|copies}`. A count the defaults hold at 2 or more, such as a
+repeated subtree's occurrences, prints bare.
 
 ## A finding is named by its rule and its scope
 
@@ -170,22 +173,28 @@ and a node key would claim it is about one operator.
 The id is stable within one log only. Stage numbers shift between runs, so comparing two runs
 matches findings by rule and aligned scope, never by this string.
 
+A rule id never changes meaning, so renaming a rule breaks every caller. `rule_version` starts at
+1 and rises whenever what the rule reports changes. So a finding from an older analysis reads as
+judged by an older rule.
+
 ## A stage finding names the plan node behind it where one stands out
 
 A stage runs several operators of one execution's plan. `stage.shuffle-skew` names the join that
 read the skewed shuffle, where exactly one sort-merge or shuffled hash join ran in the stage.
 `stage.spill` and `stage.spill-skew` name the node that spilled most in the execution's last
-plan: a sort, an aggregate or a join. A spill no plan node counts names none. A shuffle write's
+plan, whatever its operator: a sort, an aggregate, a window or a join. A spill no plan node counts
+names none. A shuffle write's
 sorter spills that way.
 
 A node is ranked by its own part of `spill size`. `SortExec` records all the task spilled while
 it read its input, so a sort's figure also counts the spills of every node below it in the task.
 `plan_nodes.enclosing_sort_id` names that sort for each node, up to the first exchange or query
 stage. The shared `own_spills` SQL takes those nodes' figures off the sort's. Ranked by the raw
-figure, the outermost sort of a pipeline would always win.
+figure, the outermost sort of a task would always win.
 
-In the base fixture's stage 4, the outer sort records 6.1 GiB, the stage's whole spill. Its own
-part is 4.1 GiB, and the two sorts under its join hold the rest.
+In stage 4 of the `spark-3.5.9` fixture, the sort above the join records 6.1 GiB, the stage's
+whole spill. Its own part is 4.1 GiB. The two sorts under the join hold the rest, 1562.0 MiB and
+560.0 MiB. `sparkxray plans show <log> --sql 0` prints all three.
 
 The node joins the finding's scope, and its id stays the stage's. The finding is about the stage,
 and the node says where in the plan to look.
@@ -193,18 +202,11 @@ and the node says where in the plan to look.
 ## Each threshold names where it came from
 
 A `Threshold` carries a `source` beside its default. Most defaults come from published prior art:
-
-- sparkDoctor's `docs/detections.md`, which supplies most stage floors, the exchange count and the
-  repeated-subtree sizes;
-- DataFlint's alert reducers, for wasted cores, memory provisioning and partition size, and for
-  join sides, broadcast size, file sizes and filter length;
-- Dr. Elephant's `ExecutorGcHeuristic`, for the GC ladder;
-- Spark's own defaults, for the partition size at which AQE calls a partition skewed;
-- AWS Glue's observability docs, for the skewness score;
-- the Databricks Spark UI guide, for a driver gap of a minute and a job of a few seconds.
-
-A threshold no prior art supplies is marked `proposed`. `sparkxray rules show <rule id>` prints
-each threshold's source.
+SparkDoctor's `docs/detections.md`, DataFlint's alert reducers, Dr. Elephant's
+`ExecutorGcHeuristic`, Spark's own defaults, AWS Glue's observability docs and the Databricks Spark
+UI guide. Each `source` names the file or page. A threshold no prior art supplies is marked
+`proposed`. `sparkxray rules show <rule id>` prints each threshold's source, and
+`sparkxray capabilities show --json` lists every rule's.
 
 ## Each applied threshold records the layer that set it
 
@@ -220,8 +222,8 @@ and the default beside it. So a finding judged against an override says so.
 
 A size reads as Spark reads its own byte strings: `512m`, `512mb` and `512MiB` are all 512 × 1024²
 bytes. Spark's own default for `skewedPartitionThresholdInBytes` is written `256MB` and means
-268,435,456 bytes, so a decimal `MB` would read a copied Spark setting nearly 5% short. A duration takes
-`ms`, `s`, `m` or `min`, `h` and `d`.
+268,435,456 bytes, so a decimal `MB` would read a copied Spark setting nearly 5% short. A
+duration takes `ms`, `s`, `m` or `min`, `h` and `d`.
 
 An override naming a rule or threshold the catalog does not hold is refused, even when the
 analysis does not run that rule. So one file serves every subset of rules, and a misspelling never
@@ -245,12 +247,13 @@ the rule no longer judges by.
 
 *Rejected:* `$name`. A SQL rule already reads its thresholds as `$name` parameters.
 
-## Each lesson ends with what the rule found on a fixture log
+## A lesson ends with what the rule found on a fixture log
 
 `sparkxray rules show` follows the lesson with one finding the rule reported on a committed
-fixture: its title, scope, severity and evidence, and the log it came from. The library ships one
-per rule in `sparkxray/rules/lesson_examples.json`, and `rule_lesson(rule_id)` returns it beside
-the lesson. `fixtures/write_lesson_examples.py` writes the file. The rules test fails on an
+fixture: its title, scope, severity and evidence, and the log it came from. The library ships them
+in `sparkxray/rules/lesson_examples.json`, and `rule_lesson(rule_id)` returns one beside the
+lesson. A rule no fixture fires has none, as `app.driver-memory-pressure`, which needs Glue's
+CloudWatch metrics. `fixtures/write_lesson_examples.py` writes the file. The rules test fails on an
 example its log no longer reports, so a lesson never shows output the rule has stopped giving.
 
 *Rejected:* evidence written by hand. Nothing would hold it to what the rule reports.
@@ -272,7 +275,7 @@ disagree.
 *Rejected:* a sidecar `analysis.json`. Two files are replaced one at a time, and a reader between
 the two renames gets one analysis's rules beside another's findings.
 
-## The seed rules measure what the Spark UI shows
+## `stage.shuffle-skew` takes its median as the Stages tab does, and `plan.cartesian` sizes a cross join as DataFlint does
 
 `stage.shuffle-skew` reads every task of `tasks_effective` in each stage that read a shuffle, the
 tasks that read an empty partition included. The Stages tab's summary metrics and AQE's skew join
@@ -289,15 +292,17 @@ from Spark 3.2, and its skew join is on wherever AQE is.
 `plan.cartesian` follows DataFlint's cross-join alert. The rows scanned are the product of the two
 inputs' rows, and over 10,000,000,000 is `critical`. Each input's rows are the first count down its
 chain of single-child nodes. A node's `number of output rows` counts first, and a finished query
-stage's measured `rowCount` next. So a plan read from `explain()` text, with no metrics, still
-sizes a join whose sides AQE had already run.
+stage's measured `rowCount` next. So a plan read from `explain(mode='formatted')` text, with no
+metrics, still sizes a join whose sides AQE had already run. Simple text prints no measured size.
 
 ## A plan rule sizes what ran, so a plan that never ran stays quiet
 
-A join side or a broadcast takes its bytes from the first measured size down its chain. That is a
-finished query stage's `sizeInBytes`, then an exchange's `data size`, then a scan's `size of files
-read`. The chain passes through a sort, AQE's reads and a columnar conversion, which keep a side's
-size. A filter changes it, so a side measured only below a filter has no size.
+A join side takes its bytes from the first measured size down its chain. That is a finished
+shuffle query stage's `sizeInBytes`, then an exchange's `data size`, then a scan's `size of files
+read`. The chain passes through a sort, a coalesce, AQE's reads and a columnar conversion, which
+keep a side's size. A filter changes it, so a side measured only below a filter has no size.
+`plan.broadcast-too-large` reads the broadcast exchange's own `data size`, so it needs the plan's
+metrics.
 
 `plan.smj-small-side` weighs only a side Spark could broadcast for the join's type, as
 `canBuildBroadcastLeft` and `canBuildBroadcastRight` in Spark's optimizer decide. A full outer
@@ -306,11 +311,11 @@ broadcast saves that shuffle. A join of bucketed tables shuffles neither side.
 
 A plan printed before it ran measured nothing. So `plan.smj-small-side` finds no size in it, and
 the rules reading metrics are skipped. The optimizer's own estimate is no substitute. With the
-cost-based optimizer off, as it is by default, it sizes a join as the product of its inputs, whatever
-statistics the tables hold. In the plan-rules fixture, a
+cost-based optimizer off, as it is by default, it sizes a join as the product of its inputs,
+whatever statistics the tables hold. In `fixtures/explain/spark-3.5.9-plan-rules/cost-mode.json`, a
 396.5 KiB table joined to a 7.1 KiB one is estimated at 2.8 GiB. `plan.estimate-unreliable`
-reports that gap, from `explain(mode='cost')` text. A relation the optimizer could not size prints `8.0 EiB`, which is
-`Long.MaxValue`, and every estimate above it counts as unknown.
+reports that gap, from `explain(mode='cost')` text. A relation the optimizer could not size prints
+`8.0 EiB`, which is `Long.MaxValue`, and every estimate above it counts as unknown.
 
 ## A cached plan counts once, at the copy that ran
 
@@ -333,12 +338,13 @@ with `isFinalPlan=false` has reused nothing yet. `plan.missed-exchange-reuse` sk
 There `plan.repeated-subtree` leaves out every repeat holding an exchange, and `plan.repeated-scan`
 every scan under a repeated exchange's later copies.
 
-`plan.missed-exchange-reuse` has high confidence where the execution set `spark.sql.exchange.reuse`
-to `false`, because the setting explains the miss. Elsewhere its confidence is low. Spark compares
+`plan.missed-exchange-reuse` has high confidence where the execution ran with
+`spark.sql.exchange.reuse` set to `false`, by its own settings or the application's. The setting
+explains the miss. Elsewhere its confidence is low. Spark compares
 whole canonical plans, so a difference the normalized hash hides may be what kept it from reusing
 the exchange.
 
-## A cut or omitted value reads as unknown, never as empty
+## A cut value reads as unknown, and a list formatted text omits reads as empty
 
 Simple text cuts each scan field to 100 characters, ending in `...`, past
 `spark.sql.maxMetadataStringLength`. A rule that needs a whole value skips a cut one.
@@ -366,8 +372,8 @@ to reuse. The plan-shapes fixtures' pruning query shows it reading all 5 partiti
 
 The Python worker's time shows in no operator metric, only in the stage's run time. So both
 Python UDF rules report presence. Their evidence names the stages running the UDF, and those
-stages' share of the run's task time. Spark 4 renamed several Python operators, and the rules read
-both releases' names.
+stages' share of every effective task's run time, as `stage_run_time_share`. Spark 4 renamed
+several Python operators, and the rules read both releases' names.
 
 ## A memory finding names where it read the heap's size and its peak
 
@@ -397,8 +403,9 @@ no task held. A task holds `spark.task.cpus` cores, so two-core tasks keep a two
 busy. In local mode the driver runs the tasks, so the driver is counted instead. A Glue run's
 evidence adds the idle DPU-hours, at four cores to a DPU. DataFlint pairs its 50% share with no
 amount, so a run of seconds fires on its start-up alone. The rule also needs `min_idle_core_ms`,
-five minutes of one core by default, before the share counts. A short local run idles a core
-minute or two starting and stopping, so the floor sits above that.
+five minutes of one core by default, before the share counts. The `spark-3.5.9` fixture, a
+50-second local run on four cores, leaves 95 core-seconds idle, as `sparkxray executors list`
+reads its lifetime, cores and task time. So the floor sits about three times above that.
 
 ## Glue's figures sit beside a log rule's evidence, and decide only the rules built on them
 
@@ -416,9 +423,11 @@ tasks.
 `app.driver-memory-pressure` reads Glue's heap metric alone, and fires on a span, never a peak.
 The heap fills between collections, so one full sample can be a collection about to run. It
 reports each run of consecutive periods at or over `min_heap_used_fraction` that lasted at least
-`min_sustained_ms`. Glue publishes every 30 seconds, but sparkxray reads one-minute averages, the
-shortest period it asks CloudWatch for. So the default is two of those minutes. No prior art
-gives either threshold, so both are proposed.
+`min_sustained_ms`. Glue publishes every 30 seconds, but sparkxray reads one-minute averages for a
+run under 15 days old, the shortest period it asks CloudWatch for. So the default is two of those
+minutes. An older run reads 5-minute or hourly periods. There one period outlasts
+`min_sustained_ms`, so a single period at or over the floor fires. No prior art gives either
+threshold, so both are proposed.
 
 `app.driver-oom` reads the driver's log alone, because the event log holds no trace of a driver
 OOM. In the fixture run, a `collect` larger than the driver's heap ended its job as succeeded. Its
@@ -433,9 +442,9 @@ cluster manager words the reason its own way. The exit code is read from YARN's 
 Kubernetes' `exit code N` and standalone's `exited with code N`.
 
 The loss is `high` where its reason or a task on the executor names running out of memory. That is
-an `OutOfMemoryError`, YARN's memory limit, or exit code 52, 137 or 143. Spark exits 52 on an
-`OutOfMemoryError`. 137 is SIGKILL, which a container's memory limit sends, and 143 is SIGTERM,
-which YARN sends first.
+an `OutOfMemoryError`, YARN's memory limit, Kubernetes' `OOMKilled`, or exit code 52, 137 or
+143. Spark exits 52 on an `OutOfMemoryError`. 137 is SIGKILL, which a container's memory limit
+sends, and 143 is SIGTERM, which YARN sends first.
 
 ## A stage or job Spark stopped for another's failure is not a failure
 
