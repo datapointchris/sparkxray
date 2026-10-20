@@ -56,7 +56,7 @@ def test_tasks_effective_keeps_the_first_success_of_each_partition_of_each_stage
     assert tables.query('select stage_id, partition_id from tasks_effective order by all').fetchall() == sorted(succeeded)
     assert tables.query('select attempt, name from stages where stage_id = 99 and is_highest_attempt').fetchall() == [(1, None)]
     stage = tables.query(
-        'select max(shuffle_records_read), median(shuffle_records_read), max(executor_run_time_ms) from tasks_effective where stage_id = 4'
+        'select max(shuffle_read_records), median(shuffle_read_records), max(executor_run_time_ms) from tasks_effective where stage_id = 4'
     )
     assert stage.fetchone() == (32_536_313, 506_215, 25_607)
     cpu = tables.query('select executor_cpu_time_ns from tasks_effective where task_id = ?', [longest['Task Info']['Task ID']])
@@ -75,7 +75,7 @@ def test_plan_node_metrics_print_as_the_history_servers_sql_tab(capture: pathlib
         """
         select execution_id, metric_name, metric_type, value_count, total, min, median, max, max_stage_id, max_task_id
         from plan_node_metrics join sql_executions using (execution_id)
-        where plan_version = plan_versions - 1 and (total is not null or min is not null)
+        where plan_version = plan_version_count - 1 and (total is not null or min is not null)
         """
     )
     ours: dict[int, collections.Counter[tuple[str, str]]] = collections.defaultdict(collections.Counter)

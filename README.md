@@ -57,10 +57,48 @@ zip -r sparkxray-<version>.gluewheels.zip wheels/
 Upload the zip, pass its `s3://` path to `--additional-python-modules`, and pass `--no-index` to
 `--python-modules-installer-option`. Glue then resolves every dependency from the zip.
 
+## Find what slowed a run from a terminal
+
+Every command is `sparkxray <resource> <verb> LOG`. `LOG` is a log file or directory, an `s3://`
+URI, or the app id of a log already read. The first command on a log reads it into the cache, and
+every later one opens the cache.
+
+```bash
+sparkxray findings list s3://your-bucket/spark-logs/spark-application-1729
+sparkxray findings show spark-application-1729 stage.shuffle-skew:s4
+sparkxray stages list spark-application-1729 --sort wall_ms -n 5
+sparkxray tasks list spark-application-1729 --stage 4 --sort duration_ms -n 5
+sparkxray tables query spark-application-1729 "select stage_id, max(duration_ms) from tasks_effective group by all"
+sparkxray rules show stage.shuffle-skew
+```
+
+A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and `26 s`. `--json`
+prints the raw numbers instead, each under a name ending in its unit, and an empty list as `[]`.
+Progress and notes go to stderr, so stdout holds only the data.
+
+A list keeps each row on one line. On a narrow terminal its longest text ends in `…`, and
+narrower still each row prints as a block of field and value. A `show` command and `--json`
+print every value whole.
+
+`findings list` exits 0 when no finding is at or above `--fail-on`, which defaults to `high`. It
+exits 3 when one is, or when the log cannot be read, and 2 on a usage error. So a CI step gates
+on the severity it names:
+
+```bash
+sparkxray findings list "$LOG" --fail-on critical
+```
+
+`--min-severity` and `--limit` narrow what is listed, never what gates. Whenever the log was read,
+`--json` carries the verdict as
+`"gate": {"fail_on": "high", "passed": false, "blocking": ["stage.shuffle-skew:s4"]}`. So an exit 3
+with nothing on stdout means the log was not read.
+
 ## Open an event log from a path or S3
 
 `EventLog.open` takes a log file, a directory, a Spark 4 rolling `eventlog_v2_*` directory, or an
-`s3://` URI to any of those. The location must hold one application's log.
+`s3://` URI to any of those. The location must hold one application's log. A log already read also
+opens by its app id, and `cached_logs()` in `sparkxray.tables.cached_logs` lists those logs, newest
+first.
 
 ```python
 from sparkxray.ingest import EventLog
@@ -119,12 +157,14 @@ from sparkxray.ingest import EventLog
 
 tables = EventLog.open('eventlog.zstd').tables
 skew = tables.query(
-    'select stage_id, median(shuffle_records_read), max(shuffle_records_read) from tasks_effective group by all'
+    'select stage_id, median(shuffle_read_records), max(shuffle_read_records) from tasks_effective group by all'
 )
 print(skew.fetchall())
 tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
 print(tables.path)                               # the Parquet directory, for any Parquet reader
 plans = tables.last_plans()                      # each execution's last Plan, without the log
+rows = tables.rows('select * from stages')       # plain Python values, with columns and types
+tables.listing()                                 # every table and view, with rows and column units
 ```
 
 | Table | One row per |
@@ -145,14 +185,30 @@ stage, so a retried or speculative task counts once, and a stage retry keeps the
 not rerun. It is `tasks` where `effective` is true, so a Parquet reader filters on that column.
 `partition_id` names the partition a task computed, which a retry's `task_index` does not.
 
-A column holding a time or a size names its unit: `ms`, `ns`, `bytes` or `mib`. Spark reports CPU
-time in nanoseconds beside run time in milliseconds, and the names keep the two apart.
-`plan_node_metrics` holds every kind of metric in the same columns, so its `unit` column names each
-row's unit.
+A numeric column's name ends in its unit: `_ms`, `_ns`, `_bytes`, `_records` or `_count`. Spark
+reports CPU time in nanoseconds beside run time in milliseconds, and the names keep the two apart.
+An instant ends in `_epoch_ms`, milliseconds since the epoch. So `launch_epoch_ms` is when a task
+started, and `duration_ms` is how long it ran. `plan_node_metrics` holds every kind of metric in
+the same columns, so its `unit` column names each row's unit.
 
 `tables.manifest.lacks` names what the log was written without, because Spark leaves it out by
 default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`. A column only
 those settings fill, such as `peak_python_rss_bytes`, is null in a log written without them.
+
+`sparkxray.summaries` holds the summaries the command prints, each read from the tables:
+
+| Function | Returns |
+| --- | --- |
+| `stage_summaries` | one row per stage: tasks, wall time and share of the run, task durations, shuffle, spill, GC |
+| `stage_detail` | one stage, and the min, p25, median, p75, p95 and max of every task metric |
+| `stage_tasks` | one stage's task attempts |
+| `executor_summaries` | one row per executor and the driver: lifetime, cores, memory, task time, idle share |
+| `sql_summaries` | one row per SQL execution: duration, jobs, stages, the operators of its last plan |
+| `sql_detail` | one SQL execution, its jobs, and how many of each operator its last plan holds |
+| `application_detail` | the application, its duration and its manifest |
+
+A stage's quantiles are taken as the Stages tab takes its summary metrics, so they print the
+numbers the Spark UI does.
 
 ## Find what slowed a run
 
@@ -170,6 +226,7 @@ analysis = log.analyze(thresholds={'stage.shuffle-skew': {'ratio': 8}})
 for finding in analysis.findings:            # the most recoverable time first
     print(finding.finding_id, finding.severity, finding.impact_seconds, finding.title)
 print(analysis.skipped)                      # rules the log held too little to run
+print(analysis.gate('high').blocking)        # the findings at high or above, by finding_id
 json.dumps(analysis.to_json())               # the shape sparkxray/schemas/findings.json pins
 log.tables.findings.filter("severity = 'high'").fetchall()
 ```

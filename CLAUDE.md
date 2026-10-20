@@ -25,7 +25,11 @@ benchmarks/parse/ the parse benchmark, run by hand
   never reused or renumbered, and a retired one stays registered. The code goes in with the change
   that first raises it.
 - **The CLI holds no logic.** A command parses its arguments, calls one library function and
-  renders the result. Anything worth testing lives in the library.
+  renders the result. Anything worth testing lives in the library. The per-resource reads live in
+  `sparkxray.summaries`, and all printing in `sparkxray_cli/render.py`.
+- **A library refusal reaches the terminal through the root group.** `SparkxrayGroup` in
+  `sparkxray_cli/main.py` prints it on stderr and exits with the error's own `exit_code`. So a
+  command never catches a `SparkxrayError` itself.
 - **The member `pyproject.toml` files carry packaging only.** ruff, mypy and pytest read their
   config from the root file.
 
@@ -61,6 +65,7 @@ uv sync                                  # both members editable, at 3.13
 uv run sparkxray --help
 uv run mypy .
 uv run pytest library                    # the library's tests, over the committed fixtures
+uv run pytest cli                        # the command's exit-status test
 uv build --package sparkxray --out-dir dist
 uv build --package sparkxray-cli --out-dir dist
 fixtures/regenerate.sh [VARIANT...]      # rewrite the fixtures from Spark runs in docker

@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from sparkxray.errors import InvalidRuleError
+from sparkxray.errors import NotInRunError
 from sparkxray.errors import UnknownRuleError
+from sparkxray.errors import UnknownSeverityError
 from sparkxray.plan.tree import NumberedNode
 from sparkxray.plan.tree import Plan
 from sparkxray.rules.catalog import catalog
@@ -55,34 +57,14 @@ SELECT
   (SELECT count(*) FROM tasks_effective) > 0 AS tasks,
   (SELECT count(*) FROM executors) > 0 AS executors,
   (SELECT count(*) FROM environment) > 0 AS environment,
-  (SELECT count(*) FROM stages WHERE submit_ms IS NOT NULL) > 0 AS timeline
-"""
-
-# A run still going when its log ended has no end, so it ends at the last thing the log saw finish.
-_SHARES_SQL = """
-WITH app AS (
-  SELECT start_ms, coalesce(end_ms, greatest(
-    (SELECT max(finish_ms) FROM tasks), (SELECT max(complete_ms) FROM stages),
-    (SELECT max(end_ms) FROM jobs), (SELECT max(end_ms) FROM sql_executions))) AS end_ms
-  FROM application
-), task_ends AS (
-  SELECT stage_id, max(finish_ms) AS finish_ms FROM tasks GROUP BY stage_id
-), walls AS (
-  SELECT 'stage' AS level, stage_id AS id, coalesce(max(complete_ms), max(task_ends.finish_ms)) - min(submit_ms) AS wall_ms
-  FROM stages LEFT JOIN task_ends USING (stage_id) GROUP BY stage_id
-  UNION ALL
-  SELECT 'sql_execution', execution_id, coalesce(end_ms, (SELECT end_ms FROM app)) - start_ms FROM sql_executions
-)
-SELECT walls.level, walls.id, round(walls.wall_ms / (app.end_ms - app.start_ms), 4) AS share
-FROM walls, app
-WHERE walls.wall_ms IS NOT NULL AND app.end_ms > app.start_ms
+  (SELECT count(*) FROM stages WHERE submit_epoch_ms IS NOT NULL) > 0 AS timeline
 """
 
 # Each node's metric totals in its execution's last plan. A name a node lists twice keeps its first accumulator.
 _NODE_METRICS_SQL = """
 SELECT metrics.execution_id, metrics.node_id, metrics.metric_name, arg_min(metrics.total, metrics.accumulator_id) AS total
 FROM plan_node_metrics AS metrics JOIN sql_executions USING (execution_id)
-WHERE metrics.plan_version = sql_executions.plan_versions - 1 AND metrics.total IS NOT NULL
+WHERE metrics.plan_version = sql_executions.plan_version_count - 1 AND metrics.total IS NOT NULL
 GROUP BY ALL
 """
 
@@ -140,6 +122,55 @@ class Analysis:
             'skipped': [skipped.to_json() for skipped in self.skipped],
         }
 
+    def gate(self, fail_on: str) -> Gate:
+        """Whether no finding is at or above the severity `fail_on`, and which are. Another word raises `UnknownSeverityError`."""
+        bar = _rung(fail_on, field='fail_on')
+        blocking = tuple(finding.finding_id for finding in self.findings if SEVERITIES.index(finding.severity) >= bar)
+        return Gate(SEVERITIES[bar], not blocking, blocking)
+
+    def narrowed(self, *, min_severity: str | None = None, limit: int | None = None) -> Analysis:
+        """This analysis with only its findings at or above `min_severity`, and only the first `limit` of those, in its order."""
+        findings = self.findings
+        if min_severity is not None:
+            bar = _rung(min_severity, field='min_severity')
+            findings = tuple(finding for finding in findings if SEVERITIES.index(finding.severity) >= bar)
+        if limit is not None:
+            if limit < 0:
+                raise ValueError(f'limit is {limit}, and a list cannot keep fewer than 0 findings')
+            findings = findings[:limit]
+        return dc.replace(self, findings=findings)
+
+    def finding(self, finding_id: str) -> Finding:
+        """The finding with this id. An id the analysis did not find raises `NotInRunError`, listing those it did."""
+        for finding in self.findings:
+            if finding.finding_id == finding_id:
+                return finding
+        raise NotInRunError(
+            f'this analysis found nothing with the id {finding_id!r}',
+            field='finding_id',
+            valid=[finding.finding_id for finding in self.findings],
+        )
+
+
+@dc.dataclass(frozen=True, slots=True)
+class Gate:
+    """Whether an analysis passes a severity bar: it does when no finding is at or above `fail_on`, and `blocking` names those that are."""
+
+    fail_on: Severity
+    passed: bool
+    blocking: tuple[str, ...]
+
+    def to_json(self) -> dict[str, Any]:
+        return {'fail_on': self.fail_on, 'passed': self.passed, 'blocking': list(self.blocking)}
+
+
+def _rung(severity: str, *, field: str) -> int:
+    """Where a severity sits on the ladder, from 0 for `info`."""
+    for index, rung in enumerate(SEVERITIES):
+        if rung == severity:
+            return index
+    raise UnknownSeverityError(f'{severity!r} is not a severity', field=field, valid=SEVERITIES)
+
 
 @dc.dataclass(frozen=True)
 class _Input:
@@ -180,6 +211,9 @@ def analyze(
     for execution_id, node_id, name, total in tables.query(_NODE_METRICS_SQL).fetchall():
         node_metrics.setdefault(execution_id, {}).setdefault(node_id, {})[name] = total
     application = tables.query('SELECT app_id FROM application').fetchone()
+    from sparkxray.tables.registry import WALL_SHARES_SQL
+
+    shares = {(level, scope_id): share for level, scope_id, _, share in tables.query(WALL_SHARES_SQL).fetchall() if share is not None}
     analysis = _run(
         selected,
         applied,
@@ -190,7 +224,7 @@ def analyze(
             numbered={execution_id: plan.numbered() for execution_id, plan in plans.items()},
             node_metrics=node_metrics,
             tables=tables,
-            shares={(level, scope_id): share for level, scope_id, share in tables.query(_SHARES_SQL).fetchall()},
+            shares=shares,
         ),
     )
     from sparkxray.tables.relations import FINDINGS_FILE

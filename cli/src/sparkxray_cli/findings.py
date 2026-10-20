@@ -1,0 +1,168 @@
+"""`sparkxray findings`: run the rules over a log, list what they found, and show one finding in full."""
+
+from __future__ import annotations
+
+import shlex
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from rich.text import Text
+from sparkxray.rules import Analysis
+from sparkxray.rules import Severity
+
+from sparkxray_cli import render
+from sparkxray_cli.log_opening import open_log
+from sparkxray_cli.shared_parameters import JsonOption
+from sparkxray_cli.shared_parameters import LimitOption
+from sparkxray_cli.shared_parameters import LogArgument
+
+app = typer.Typer(
+    no_args_is_help=True,
+    help='Find what slowed a run, worst first. findings list exits 3 when a finding reaches --fail-on, so it gates CI.',
+)
+
+RuleOption = Annotated[
+    list[str] | None,
+    typer.Option('--rule', metavar='RULE_ID', help='Run only this rule. Repeat for more. Every rule by default.', show_default=False),
+]
+ThresholdOption = Annotated[
+    list[str] | None,
+    typer.Option(
+        '--threshold',
+        metavar='RULE_ID.NAME=VALUE',
+        help='Override one threshold, as stage.shuffle-skew.ratio=8 or stage.shuffle-skew.min_bytes=512MiB. Repeat for more.',
+        show_default=False,
+    ),
+]
+ThresholdFileOption = Annotated[
+    Path | None,
+    typer.Option(
+        '--thresholds',
+        metavar='FILE',
+        help='A TOML file of thresholds, one ["<rule_id>"] table per rule. A --threshold beats it.',
+        show_default=False,
+    ),
+]
+
+
+@app.command('list')
+def list_findings(
+    log: LogArgument,
+    rule: RuleOption = None,
+    min_severity: Annotated[
+        Severity | None, typer.Option('--min-severity', help='List only findings at or above this severity.', show_default=False)
+    ] = None,
+    threshold: ThresholdOption = None,
+    thresholds: ThresholdFileOption = None,
+    fail_on: Annotated[
+        Severity, typer.Option('--fail-on', help='Exit 3 when a finding is at or above this severity, listed or not.')
+    ] = 'high',
+    limit: LimitOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    """Run the rules over a log and list what they found, the most wall time a fix could recover first.
+
+    Exits 0 when no finding reaches `--fail-on`, 2 on a usage error, and 3 when one does or the
+    log could not be read. So `sparkxray findings list LOG --fail-on critical` gates a CI job,
+    and a scheduled report stays green while it lists medium findings. `--json` carries the
+    gate it was judged by.
+    """
+    analysis = _analysis(log, rule, threshold, thresholds)
+    gate = analysis.gate(fail_on)
+    listed = analysis.narrowed(min_severity=min_severity, limit=limit)
+    if as_json:
+        render.emit_json({**listed.to_json(), 'gate': gate.to_json()})
+    else:
+        _print_findings(listed, len(analysis.findings), _show_command(log, threshold, thresholds))
+    for skipped in analysis.skipped:
+        render.note(f'skipped {skipped.rule_id}: the log holds no {", ".join(skipped.missing_signals)}')
+    if not gate.passed:
+        render.note(f'{len(gate.blocking)} at or above {fail_on}: {", ".join(gate.blocking)}')
+        raise typer.Exit(3)
+
+
+@app.command('show')
+def show(
+    log: LogArgument,
+    finding_id: Annotated[str, typer.Argument(metavar='FINDING_ID', help='A finding id, as findings list prints it.', show_default=False)],
+    threshold: ThresholdOption = None,
+    thresholds: ThresholdFileOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    """Show one finding: its evidence, the thresholds it was judged by and where each came from, and how to fix it."""
+    finding = _analysis(log, None, threshold, thresholds).finding(finding_id)
+    if as_json:
+        render.emit_json(finding.to_json())
+        return
+    render.stdout.print(Text(finding.title, style='bold'))
+    render.print_record(
+        {
+            'finding_id': finding.finding_id,
+            'rule_id': finding.rule_id,
+            'rule_version': finding.rule_version,
+            'severity': finding.severity,
+            'base_severity': finding.base_severity,
+            'scope': finding.scope.describe(),
+            'worst_task_ids': list(finding.scope.worst_task_ids),
+            'impact_seconds': finding.impact_seconds,
+            'confidence': finding.confidence,
+            'confidence_reason': finding.confidence_reason,
+        }
+    )
+    render.print_records(
+        [{'key': key, 'value': render.shown(key, value)} for key, value in finding.evidence.items()], ('key', 'value'), title='Evidence'
+    )
+    applied = [
+        {
+            'name': name,
+            'value': render.shown_in(threshold.unit, threshold.value),
+            'source': threshold.source,
+            'default': render.shown_in(threshold.unit, threshold.default),
+            'default_source': threshold.default_source,
+        }
+        for name, threshold in finding.thresholds.items()
+    ]
+    render.print_records(applied, ('name', 'value', 'source', 'default', 'default_source'), title='Thresholds')
+    render.print_list('How to fix it', finding.remediation)
+    render.print_links(finding.docs)
+    render.note(f'how the rule decides: sparkxray rules show {finding.rule_id}')
+
+
+def _analysis(log: str, rules: list[str] | None, flags: list[str] | None, file: Path | None) -> Analysis:
+    event_log = open_log(log)
+    with render.status(f'Analyzing {event_log.manifest.app_id}'):
+        return event_log.analyze(rules=rules or None, threshold_file=file, threshold_flags=flags or ())
+
+
+def _print_findings(listed: Analysis, found: int, show_command: list[str]) -> None:
+    if not found:
+        render.none_found('findings')
+        return
+    if not listed.findings:
+        render.note(f'none listed; {found} finding{"s fall" if found > 1 else " falls"} below --min-severity or past --limit')
+        return
+    render.print_records(
+        [
+            {
+                'severity': finding.severity,
+                'finding_id': finding.finding_id,
+                'scope': finding.scope.describe(),
+                'title': finding.title,
+                'impact_seconds': finding.impact_seconds,
+            }
+            for finding in listed.findings
+        ],
+        ('severity', 'finding_id', 'scope', 'title', 'impact_seconds'),
+    )
+    render.note(f'one in full: {shlex.join([*show_command[:4], listed.findings[0].finding_id, *show_command[4:]])}')
+
+
+def _show_command(log: str, flags: list[str] | None, file: Path | None) -> list[str]:
+    """`findings show` with the same thresholds, so it shows the finding as this list judged it. The finding id goes fifth."""
+    command = ['sparkxray', 'findings', 'show', log]
+    for flag in flags or ():
+        command += ['--threshold', flag]
+    if file is not None:
+        command += ['--thresholds', str(file)]
+    return command

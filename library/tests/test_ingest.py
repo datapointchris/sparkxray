@@ -39,3 +39,27 @@ def test_every_codec_decodes_to_the_lines_spark_wrote(codec: str, variant: str, 
 
     assert [file.codec for file in opened.manifest.files] == [codec] * len(files)
     assert list(opened.lines()) == expected
+
+
+def test_an_app_id_read_while_spark_wrote_the_log_opens_the_log_spark_finished_and_renamed(tmp_path: pathlib.Path) -> None:
+    lines = plain_lines(FIXTURES / 'logs' / 'spark-3.5.9' / 'local-1792406949080.zstd')
+    running = tmp_path / 'spark-events' / 'local-1792406949080.inprogress'
+    running.parent.mkdir()
+    running.write_bytes(b'\n'.join(lines[: len(lines) // 2]) + b'\n')
+    cache = tmp_path / 'cache'
+    read_while_running = _task_count(EventLog.open(running, cache_dir=cache))
+
+    finished = running.with_suffix('')
+    finished.write_bytes(b'\n'.join(lines) + b'\n')
+    running.unlink()
+
+    by_app_id = _task_count(EventLog.open('local-1792406949080', cache_dir=cache))
+    by_path = _task_count(EventLog.open(finished, cache_dir=cache))
+    assert read_while_running < by_app_id == by_path
+    # Read by its finished path as well, the log is still one log under its app id.
+    assert EventLog.open('local-1792406949080', cache_dir=cache).manifest.source == finished.as_uri()
+
+
+def _task_count(log: EventLog) -> int:
+    count: int = log.tables.query('SELECT count(*) FROM tasks').fetchall()[0][0]
+    return count

@@ -43,6 +43,10 @@ class Threshold:
     unit: ThresholdUnit
     source: str
 
+    def to_json(self) -> dict[str, Any]:
+        default = int(self.default) if float(self.default).is_integer() else self.default
+        return {'name': self.name, 'default': default, 'unit': self.unit, 'source': self.source}
+
 
 @dc.dataclass(frozen=True)
 class RuleContext:
@@ -126,3 +130,18 @@ class Rule:
 
     def threshold(self, name: str) -> Threshold | None:
         return next((threshold for threshold in self.thresholds if threshold.name == name), None)
+
+    def to_json(self) -> dict[str, Any]:
+        """What the rule reads, judges by and teaches, without the SQL or Python it runs."""
+        return {
+            'rule_id': self.rule_id,
+            'rule_version': self.rule_version,
+            'title': self.title,
+            'scope': self.scope,
+            'signals': [signal for signal in SIGNALS if signal in self.signals],
+            'thresholds': [threshold.to_json() for threshold in self.thresholds],
+            'severity_ladder': {severity: self.severity_ladder[severity] for severity in SEVERITIES if severity in self.severity_ladder},
+            'remediation': list(self.remediation),
+            'docs': list(self.docs),
+            'lesson': self.lesson,
+        }

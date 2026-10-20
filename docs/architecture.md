@@ -6,7 +6,8 @@ Each stage reads what the one before it wrote. The CLI calls one library functio
 holds no logic of its own.
 
 ```text
- file, directory, rolling directory, s3:// prefix, History Server URL
+ file, directory, rolling directory, s3:// prefix, History Server URL,
+ or the app id of a log already read
         │
         ├── ingest ──→ ordered, decoded event lines
         │
@@ -145,6 +146,38 @@ A log beside files that start with some other Spark event is `E-INGEST-005` too.
 likely pieces of a log split across several, which sparkxray cannot order. Reading the log alone
 would drop them without a word. The caller picks; the resolver never guesses.
 
+## A log already read opens by its app id
+
+An app id never holds a `/`, and an S3 URI or a path with a separator always does. So
+`EventLog.open` reads a location with no separator that names nothing on disk as an app id, and
+looks for it in the cache.
+
+The cache answers from its tables' manifests alone, so finding a log reads no event. Each
+`tables/<source>/<key>/manifest.json` names the log it was built from. Only the newest entry per
+source counts, whichever sparkxray built it. Entries then merge where they are one log:
+
+- Two locations reaching the same files, such as a directory and the file in it, share a tables
+  key.
+- A log read while Spark wrote it, then read again after, holds its files under their names
+  without `.inprogress`. The later read stands.
+- A location that no longer exists loses to one with the same app id that does. Spark renames a
+  finished log, so a log read while it ran is looked for under its finished name too.
+
+`cached_logs()` lists what is left, and `sparkxray logs list` prints it. So an app id listed once
+opens.
+
+Finished tables the installed sparkxray built open as they stand, so the log's source is never
+read. That keeps an S3 log openable with no credentials and no network. A log Spark was still
+writing is read again, because it may have grown since, and the tables key reuses its tables if
+it has not. Tables an earlier sparkxray built are never read, because their columns may differ
+from this one's. Either way the app id resolves to the log's location, and the open reads it as
+a path would. So an app id and a path give one answer, and an app id keeps opening after an
+upgrade.
+
+An app id no cached log holds is `E-INGEST-001`, listing the app ids the cache does hold. Two
+attempts of one application share an app id, and so do two copies of a log that differ. Either is
+`E-INGEST-005`, listing each location to open instead.
+
 ## Spark's lz4 and snappy logs need two small decoders, and zstd a streaming one
 
 Spark writes a compressed log through its own `CompressionCodec`. Only zstd, Spark 4's default,
@@ -239,3 +272,31 @@ analyzing a cached log parses no event line. The findings go into the table dire
 `analyze_plan` runs the rules over one `Plan` and reads no table. Importing `sparkxray.rules` loads
 neither DuckDB nor pyarrow, and pyarrow loads only to write `findings.parquet`. So code checking a
 plan captured from `explain()` pays for neither.
+
+## The command's summaries are library reads, measured as the Spark UI measures
+
+Each command calls one function and prints what it returns. The per-resource reads live in
+`sparkxray.summaries`, and each runs SQL over the tables into `Rows`. So code importing the library
+reads the numbers the command prints, and the command holds no logic to test.
+
+A stage's quantiles take the value at sorted index min(⌊q·n⌋, n−1), as the Stages tab's summary
+metrics do. For every stage of the fixtures, each quantile and each total equals what a History
+Server serves. Spark summarizes each stage attempt alone, while sparkxray summarizes a stage's
+effective tasks across its attempts. So after a retry the two differ.
+
+A stage's wall time runs from its first submission to its last completion, and a SQL execution's
+from its start to its end. Each share is that wall time over the run's span. The rules grade
+severity by the same shares, from the same SQL, so `stages list` prints the share a finding was
+weighed by.
+
+An executor's task time is its tasks' summed duration, which Spark sums too. Spark's Executors tab
+then shows the driver's task time as the application's run time, and its GC time as the driver
+JVM's own. `task_time_ms` keeps the tasks' sum, because the idle share, 1 − task time ÷
+(lifetime × cores), needs the time tasks held cores.
+
+A SQL execution's operator counts read its last plan version, as the rules do. A stage a job
+planned but never ran is what the Spark UI lists as skipped, and no summary holds it.
+
+A query DuckDB refuses is `E-QUERY-001`, carrying DuckDB's message. A stage, SQL execution or
+finding the run does not hold is `E-QUERY-002`, and a sort column a list lacks is `E-QUERY-003`.
+Each lists the values that would have worked.
