@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Annotated
 
 import typer
@@ -26,14 +27,17 @@ app = typer.Typer(no_args_is_help=True, help='See where in a query the rows, byt
 _UNPLACED_KEYS = ('severity', 'finding_id', 'scope', 'title')
 
 
-@app.command('show')
+@app.command('show', no_args_is_help=True)
 def show(
     log: LogArgument,
     execution_id: Annotated[
         int, typer.Option('--sql', metavar='ID', help='The SQL execution, by the id sql list prints.', show_default=False)
     ],
     initial: Annotated[
-        bool, typer.Option('--initial', help='Show the plan the execution started from, version 0, before AQE re-planned it.')
+        bool,
+        typer.Option(
+            '--initial', help='Show the plan the execution started from, version 0, before adaptive query execution (AQE) re-planned it.'
+        ),
     ] = False,
     version: Annotated[
         int | None,
@@ -51,11 +55,12 @@ def show(
 ) -> None:
     """Show one SQL execution's plan as a tree: what each node does, its metrics and stages, and the findings that name it.
 
-    Each node opens with its number, as finding ids and `sql show` name it, such as `n9`. A node
-    Spark compiled into a codegen pipeline carries the pipeline's `*(N)`, and the top one its
-    `duration`: each task's time from the pipeline's start to its last row, reading its inputs
-    included. A Sort's `spill size` counts the spills of the nodes it reads from in its task, so
-    it also states its own part.
+    Each node opens with its number, such as `n9`. `sql show` prints the same number, and a
+    finding id carries it after its execution, as `e0n9` for node n9 of SQL execution 0. A node
+    Spark compiled into a codegen pipeline carries the pipeline's `*(N)`. The pipeline's top node
+    carries its `duration`, summed over its tasks: each task's time from the pipeline's start to
+    its last row, its inputs' reads included. A Sort's `spill size` counts the spills of the nodes
+    it reads from in its task, so it also states its own part.
 
     The last plan carries the findings on the nodes they name. An earlier version, from
     `--initial` or `--plan-version`, lists them below the tree, because findings number the last
@@ -70,12 +75,12 @@ def show(
     if as_json:
         render.emit_json(plan.to_json())
         return
-    _print_plan(plan)
+    _print_plan(plan, log)
     if plan.findings:
         render.note(f'one finding in full: {show_command(log, plan.findings[0].finding_id, threshold, thresholds)}')
 
 
-def _print_plan(plan: AnnotatedPlan) -> None:
+def _print_plan(plan: AnnotatedPlan, log: str) -> None:
     render.stdout.print(Text(_title(plan), style='bold'))
     for node in plan.nodes:
         if node.parent is None:
@@ -85,11 +90,20 @@ def _print_plan(plan: AnnotatedPlan) -> None:
     render.stdout.print()
     if plan.truncated:
         render.note('Spark cut this plan short, so a node past the cut is not in it')
+    command = ['sparkxray', 'plans', 'show', log, '--sql', str(plan.execution_id)]
     unplaced = plan.unplaced_findings()
     if unplaced:
         records = [{'severity': f.severity, 'finding_id': f.finding_id, 'scope': f.scope.describe(), 'title': f.title} for f in unplaced]
-        render.print_records(records, _UNPLACED_KEYS, title='Findings on no node shown')
-    render.note('each metric with its min, median and max, and the task that reported the max: --json')
+        title = (
+            "Findings, which number the last plan's nodes, so they are not marked on this one"
+            if plan.version != plan.last_version
+            else 'Findings on no node of this plan'
+        )
+        render.print_records(records, _UNPLACED_KEYS, title=title, yields=('scope',))
+        if plan.version != plan.last_version:
+            render.note(f'the last plan, with these marked on its nodes: {shlex.join(command)}')
+    version = [] if plan.version == plan.last_version else ['--plan-version', str(plan.version)]
+    render.note(f"each metric's min, median and max, and the task that reported the max: {shlex.join([*command, *version, '--json'])}")
 
 
 def _title(plan: AnnotatedPlan) -> str:

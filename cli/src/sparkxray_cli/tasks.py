@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Annotated
 
 import typer
@@ -28,12 +29,12 @@ _LIST_COLUMNS = (
     'input_bytes',
     'shuffle_read_bytes',
     'shuffle_write_bytes',
-    'memory_spilled_bytes',
+    'disk_spilled_bytes',
     'end_reason',
 )
 
 
-@app.command('list')
+@app.command('list', no_args_is_help=True)
 def list_tasks(
     log: LogArgument,
     stage: Annotated[int, typer.Option('--stage', metavar='STAGE_ID', help='The stage whose tasks to list.', show_default=False)],
@@ -44,12 +45,13 @@ def list_tasks(
     """List every task attempt of one stage, retries and speculative copies included.
 
     `--sort duration_ms -n 5` gives the five slowest. `--json` carries every column of the
-    tasks table.
+    tasks table, and `tables query` reads them all.
     """
     rows = stage_tasks(open_tables(log), stage, sort=sort, limit=limit)
     if as_json:
         render.emit_json(rows.to_json())
     elif not rows:
-        render.none_found(f'tasks in stage {stage}')
+        render.empty(f'tasks in stage {stage}', limit)
     else:
         render.print_rows(rows, _LIST_COLUMNS)
+        render.note(f'every column: {shlex.join(["sparkxray", "tasks", "list", log, "--stage", str(stage), "--json"])}')

@@ -13,6 +13,7 @@ from sparkxray.run_diff import diff_logs
 from sparkxray.summaries import application_detail
 from sparkxray.tables.cached_logs import CachedLog
 from sparkxray.tables.cached_logs import cached_logs
+from sparkxray.tables.manifest import LACK_MEANINGS
 
 from sparkxray_cli import render
 from sparkxray_cli.findings import exit_if_gated
@@ -28,7 +29,7 @@ from sparkxray_cli.shared_parameters import ThresholdOption
 
 app = typer.Typer(
     no_args_is_help=True,
-    help='Read a log into the cache, list the logs it holds, show one, and diff two runs. A cached log opens by its app id.',
+    help='Diff two runs of one job, list and show the logs the cache holds, and join a Glue run or a driver log to one.',
 )
 
 _RUN_COLUMNS = ('run', 'app_id', 'app_name', 'spark_version', 'wall_ms', 'succeeded')
@@ -51,11 +52,11 @@ def glue_run(text: str) -> GlueRun:
     """`JOB_NAME:RUN_ID`, split at the last colon, because a job's name may hold one and a run id never does."""
     job_name, _, run_id = text.rpartition(':')
     if not job_name or not run_id.startswith('jr_'):
-        raise typer.BadParameter("give the job's name and its run id, as my-job:jr_0123abcd")
+        raise typer.BadParameter(f"{text!r} is not JOB_NAME:RUN_ID, as my-job:jr_0123abcd, and a Glue run's id starts jr_")
     return GlueRun(job_name, run_id)
 
 
-@app.command('ingest')
+@app.command('ingest', no_args_is_help=True)
 def ingest(
     log: LogArgument,
     app_id: Annotated[
@@ -90,43 +91,53 @@ def ingest(
     ] = None,
     as_json: JsonOption = False,
 ) -> None:
-    """Read a log, build its tables, and print the directory that holds them.
+    """Join a Glue run's metrics or a driver's log to a log, or read a log ahead of time, and print where its tables are.
 
-    Reading an unchanged log again reads the tables already built, so every other command is
-    as fast on the second run as the first was slow. A server's address reads the event log it
-    serves, or rebuilds one from its REST JSON where it serves none, as a live driver UI does.
+    Every other command reads a log on first use, so a plain run needs no ingest. A log already
+    read is not read again while it is unchanged, so only the first command on it pays for the
+    read. A log is cached by the location it was opened from, so a file and the directory holding
+    it are read apart.
+
+    A History Server's address downloads the event log it serves. A live driver UI serves none, so
+    sparkxray rebuilds one from its REST JSON. That rebuild lacks each stage's parents, each task's
+    accumulator updates and executor peaks, and the settings a query changed. `logs show` names
+    what a log lacks, and `findings list` names each rule it skipped for want of it.
 
     --glue-run and --driver-log join what the event log does not hold, each as a table of its own
-    that rules read. Giving one again replaces its table. With --json, `enrichment` gives each
-    joined table's rows and each warning, and is null where neither flag was given.
+    that rules read. Giving one again replaces its table. An upgrade of sparkxray rebuilds the
+    tables without the joined ones, so give the flags again after one. With --json, `enrichment`
+    gives each joined table's rows and each warning, and is null where neither flag was given.
     """
     opened = open_log(log, app=app_id)
     tables = tables_of(opened)
+    app = opened.manifest.app_id
     enrichment = None
     if glue is not None or driver_logs:
-        with render.status(f'Joining sources to {opened.manifest.app_id}'):
+        with render.status(f'Joining sources to {app}'):
             enrichment = opened.enrich(glue_run=glue, driver_logs=driver_logs or ())
-        render.enrichment_notes(opened.manifest.app_id, enrichment)
+        render.enrichment_notes(app, enrichment)
     cached = CachedLog.of(tables)
     if as_json:
         render.emit_json({**cached.to_json(), 'enrichment': None if enrichment is None else enrichment.to_json()})
     else:
-        print(cached.tables_path)
+        render.emit_text(f'{cached.tables_path}\n')
+        render.note(f'{app} is read, and opens by that id; what slowed it: sparkxray findings list {app}')
 
 
 @app.command('list')
 def list_logs(limit: LimitOption = None, as_json: JsonOption = False) -> None:
-    """List the logs the cache holds tables for, newest first."""
+    """List the logs the cache under $XDG_CACHE_HOME/sparkxray/ holds tables for, newest first, each by the app id that opens it."""
     logs = cached_logs(limit=limit)
     if as_json:
         render.emit_json([cached.to_json() for cached in logs])
     elif not logs:
-        render.none_found('logs are cached yet; sparkxray logs ingest LOG reads one')
+        render.empty('logs are cached yet; any command given a LOG reads one', limit)
     else:
         render.print_records([cached.to_json() for cached in logs], _LIST_COLUMNS)
+        render.note(f'what slowed one: sparkxray findings list {logs[0].app_id}')
 
 
-@app.command('show')
+@app.command('show', no_args_is_help=True)
 def show(log: LogArgument, as_json: JsonOption = False) -> None:
     """Show the application a log holds, the files it was read from, and what the log was written without."""
     detail = application_detail(open_tables(log))
@@ -142,15 +153,18 @@ def show(log: LogArgument, as_json: JsonOption = False) -> None:
             'in_progress': ingest_manifest.in_progress,
             'truncated_tail': ingest_manifest.truncated_tail,
             'compacted': ingest_manifest.compacted,
-            'lacks': list(detail.manifest.lacks),
         },
         title='Log',
     )
     files = [{'uri': file.uri, 'codec': file.codec, 'size_bytes': file.size_bytes} for file in ingest_manifest.files]
     render.print_records(files, ('uri', 'codec', 'size_bytes'), title='Files')
+    lacks = [{'lack': lack, 'missing': LACK_MEANINGS[lack]} for lack in detail.manifest.lacks]
+    if lacks:
+        render.print_described('What the log was written without', lacks, ('lack', 'missing'))
+    render.note(f'what slowed it: sparkxray findings list {ingest_manifest.app_id}')
 
 
-@app.command('diff')
+@app.command('diff', no_args_is_help=True)
 def diff(
     log_a: Annotated[str, typer.Argument(metavar='LOG_A', help=f'The reference run, usually the good or older one. {LOG_HELP}')],
     log_b: Annotated[str, typer.Argument(metavar='LOG_B', help=f'The run to explain. {LOG_HELP}')],
@@ -186,10 +200,15 @@ def diff(
 ) -> None:
     """Compare LOG_B with LOG_A: what got slower or faster, which settings differ, which findings and exceptions are new.
 
-    Ids shift between runs, so SQL executions pair by their description and plan, and stages by
-    the plan nodes they ran, never by id. Both runs are analyzed at the same thresholds. An
-    exception LOG_B shares with a run that succeeded, LOG_A or a `--baseline`, is routine. The
-    view prints the notable changes and counts the rest, and `--json` carries every row.
+    Ids shift between runs, so no pair is made by id. SQL executions pair by their description
+    and the plan before AQE changed it, then by weaker keys where those leave one unpaired. A stage
+    pairs by the plan nodes it ran, and a stage of no SQL execution by name, its call site in the
+    code. Each pair says how it was made. Both runs are analyzed at the same thresholds. An
+    exception LOG_B shares with a run that succeeded, LOG_A or a `--baseline`, is routine.
+
+    The view prints each metric that moved by at least 10% and by its floor: 5 s for a time,
+    64 MiB for a size, and 1 for a ratio. Any other metric's floor is the 10% alone. The view
+    counts the rest, and `--json` carries every row.
 
     Exits 0 when it ran, whatever changed, and 2 on a usage error. Exits 3 when `--fail-on` is
     given and LOG_B has a finding at or above it that is new or was below it in LOG_A, or when a
@@ -219,7 +238,7 @@ def diff(
         if not run.succeeded:
             render.note(f'baseline {run.app_id} did not succeed, so it marks no exception routine')
     if fail_on is not None:
-        exit_if_gated(compared.gate(fail_on))
+        exit_if_gated(compared.gate(fail_on), which=' that run B added or raised')
 
 
 def _print_diff(compared: RunDiff) -> None:
@@ -240,7 +259,7 @@ def _print_diff(compared: RunDiff) -> None:
         if metric.notable
     ]
     if moved:
-        render.print_metric_changes(moved, title='What moved by at least 10% and its floor')
+        render.print_metric_changes(moved, title='What moved by at least 10% and by at least its floor (logs diff --help gives each floor)')
     render.print_list(
         'Last plans that differ',
         [

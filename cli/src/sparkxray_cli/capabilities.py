@@ -18,8 +18,8 @@ app = typer.Typer(no_args_is_help=True, help='What a program or an agent can cal
 def show(ctx: typer.Context, as_json: JsonOption = False) -> None:
     """Show every command, and with --json its flags and exit codes, every rule's thresholds, and the tables, schemas and codes.
 
-    It is read from the running command and library, so it names a command or rule no page
-    documents yet. `--json` prints the document `sparkxray schemas show capabilities` describes.
+    It is built from the installed sparkxray, so it matches this version exactly. `--json` prints
+    the document `sparkxray schemas show capabilities` describes.
     """
     held = capabilities(command_surface(ctx))
     if as_json:

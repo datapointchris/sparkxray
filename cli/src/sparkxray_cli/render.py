@@ -77,8 +77,12 @@ def table(*, title: str | None = None, show_header: bool = True) -> Table:
 
 
 def header(column: str) -> str:
-    """A column's name with spaces for underscores, so a narrow column wraps it between words."""
-    return column.replace('_', ' ')
+    """A column's name with spaces for underscores, so a narrow column wraps it between words.
+
+    A name that is no identifier is an expression a query computed, as `max(duration_ms)`, and
+    prints as DuckDB gives it.
+    """
+    return column.replace('_', ' ') if column.isidentifier() else column
 
 
 def is_handle(column: str) -> bool:
@@ -92,7 +96,12 @@ def print_rows(rows: Rows, columns: Sequence[str] | None = None, *, title: str |
 
 
 def print_records(
-    records: Sequence[Mapping[str, Any]], columns: Sequence[str], *, title: str | None = None, numbers: Sequence[str] = ()
+    records: Sequence[Mapping[str, Any]],
+    columns: Sequence[str],
+    *,
+    title: str | None = None,
+    numbers: Sequence[str] = (),
+    yields: Sequence[str] = (),
 ) -> None:
     """Print mappings as a table of the named columns, numbers right-aligned, every row one line.
 
@@ -103,7 +112,8 @@ def print_records(
     prints as its own block of field and value instead, as psql's expanded display does.
 
     `numbers` names columns whose values are numbers already shown as text, as when each row's
-    unit differs. They print as numbers do.
+    unit differs. They print as numbers do. `yields` names text columns that give up their width
+    to the other text columns in a fitted table, as a finding's scope does to its title.
 
     Every cell is a `Text`, so a bracket in a value, as in a plan's `Project [id#0L]`, prints
     as written rather than being read as a style.
@@ -114,7 +124,11 @@ def print_records(
     if not records or _natural_width(natural) <= stdout.width:
         print_table(natural)
     elif _natural_width(_records_table(columns, cells, numeric, title, 'floored')) <= stdout.width:
-        print_table(_records_table(columns, cells, numeric, title, 'fitted'))
+        held = {column: _TEXT_FLOOR for column in yields}
+        spare = stdout.width - _natural_width(_records_table(columns, cells, numeric, title, 'fitted', held)) if yields else 0
+        if spare > 0:
+            held = {column: _TEXT_FLOOR + spare // len(yields) for column in yields}
+        print_table(_records_table(columns, cells, numeric, title, 'fitted', held))
     else:
         if title:
             stdout.print(Text(title, style='bold'))
@@ -141,8 +155,14 @@ def _style(column: str, value: Any) -> str:
 
 
 def _records_table(
-    columns: Sequence[str], cells: Mapping[str, Sequence[Text]], numeric: Mapping[str, bool], title: str | None, layout: _Layout
+    columns: Sequence[str],
+    cells: Mapping[str, Sequence[Text]],
+    numeric: Mapping[str, bool],
+    title: str | None,
+    layout: _Layout,
+    held: Mapping[str, int] | None = None,
 ) -> Table:
+    """The table in one layout. `held` caps the width of named text columns in a fitted one."""
     printed = table(title=title)
     for column in columns:
         justify: JustifyMethod = 'right' if numeric[column] else 'left'
@@ -155,7 +175,8 @@ def _records_table(
             width = max([len(word) for word in header(column).split()] + [cell.cell_len for cell in values])
             printed.add_column(heading, justify=justify, no_wrap=True, max_width=width)
         else:
-            printed.add_column(heading, justify=justify, max_width=_TEXT_FLOOR if layout == 'floored' else None)
+            cap = _TEXT_FLOOR if layout == 'floored' else (held or {}).get(column)
+            printed.add_column(heading, justify=justify, max_width=cap)
     for row in zip(*(cells[column] for column in columns), strict=True):
         printed.add_row(*row)
     return printed
@@ -257,6 +278,14 @@ def note(message: str) -> None:
 def none_found(what: str) -> None:
     """Say on stderr that a list came back empty, so an empty table is never left to be read as a failure."""
     note(f'no {what}')
+
+
+def empty(what: str, limit: int | None) -> None:
+    """Say on stderr that a list came back empty, or that `-n 0` kept none of it, so neither reads as the run holding none."""
+    if limit == 0:
+        note('none listed, because -n 0 keeps no rows')
+    else:
+        none_found(what)
 
 
 def report_error(error: SparkxrayError, *, as_json: bool = False) -> None:

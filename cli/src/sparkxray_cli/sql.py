@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Annotated
+from typing import Any
 
 import typer
 from sparkxray.plan import without_ids
@@ -15,7 +17,11 @@ from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import LimitOption
 from sparkxray_cli.shared_parameters import LogArgument
 
-app = typer.Typer(no_args_is_help=True, help='Find the query or DataFrame action that took the time, and what its plan holds.')
+app = typer.Typer(
+    no_args_is_help=True,
+    help='Find the SQL execution, a query or DataFrame action, that took the time, and what its plan holds. '
+    'To run SQL of your own, use tables query.',
+)
 
 _LIST_COLUMNS = (
     'execution_id',
@@ -48,40 +54,49 @@ _SHOW_KEYS = (
     'final_plan_truncated',
     'modified_configs',
 )
-_JOIN_CHANGE_KEYS = ('final_node_id', 'initial_operator', 'final_operator', 'skew_split', 'join_type', 'left_keys', 'right_keys')
+_JOIN_CHANGE_KEYS = ('node', 'initial_operator', 'final_operator', 'skew_split', 'join_type', 'left_keys', 'right_keys')
 _OPERATOR_CHANGE_KEYS = ('operator', 'initial_count', 'final_count')
-_SHUFFLE_READ_KEYS = (
-    'node_id',
-    'kind',
-    'exchange_partition_count',
-    'partition_count',
-    'coalesced_partition_count',
-    'skewed_partition_count',
-    'skewed_split_count',
-    'empty_partition_count',
-    'data_bytes',
-)
+# Each shuffle read's --json name under the one-word header its table prints, which sql show --help defines.
+_SHUFFLE_READ_HEADERS = {
+    'exchange_partition_count': 'written',
+    'partition_count': 'read',
+    'coalesced_partition_count': 'coalesced',
+    'skewed_partition_count': 'skewed',
+    'skewed_split_count': 'splits',
+    'empty_partition_count': 'empty',
+    'data_bytes': 'data',
+}
 
 
-@app.command('list')
+@app.command('list', no_args_is_help=True)
 def list_executions(log: LogArgument, limit: LimitOption = None, as_json: JsonOption = False) -> None:
     """List every SQL execution: its duration and share of the run, jobs, stages, and the operators of its last plan."""
     rows = sql_summaries(open_tables(log), limit=limit)
     if as_json:
         render.emit_json(rows.to_json())
     elif not rows:
-        render.none_found('SQL executions; the run used only RDDs')
+        render.empty('SQL executions; the run used only RDDs', limit)
     else:
         render.print_rows(rows, _LIST_COLUMNS)
+        render.note(f'one in full: {shlex.join(["sparkxray", "sql", "show", log, str(rows.to_json()[0]["execution_id"])])}')
 
 
-@app.command('show')
+@app.command('show', no_args_is_help=True)
 def show(
     log: LogArgument,
     execution_id: Annotated[int, typer.Argument(metavar='ID', help='A SQL execution id, as sql list prints it.', show_default=False)],
     as_json: JsonOption = False,
 ) -> None:
-    """Show one SQL execution, the jobs it ran, how many of each operator its last plan holds, and what AQE changed in it."""
+    """Show one SQL execution, the jobs it ran, how many of each operator its last plan holds, and what AQE changed in it.
+
+    AQE is adaptive query execution, which re-plans a query as its stages finish. A job's
+    skipped_stage_ids are the stages it skipped, because an earlier stage had written their
+    shuffle output. A node is numbered as `plans show` numbers the last plan, such as n9.
+
+    Each shuffle read AQE planned gives the partitions the exchange below it `written`, and the
+    partitions it `read` them as. Of those, `coalesced` merged small ones, `skewed` were split
+    into `splits` reads, and `empty` held no rows. `data` is the bytes it read.
+    """
     detail = sql_detail(open_tables(log), execution_id)
     if as_json:
         render.emit_json(detail.to_json())
@@ -90,19 +105,35 @@ def show(
     render.print_rows(detail.jobs, title='Jobs')
     render.print_rows(detail.operator_counts, title='Operators in the last plan')
     changes = detail.aqe_changes
-    if changes is None:
-        return
-    printed = changes.to_json()
+    if changes is not None:
+        _print_aqe_changes(changes.to_json())
+    render.note(f'its plan as a tree: {shlex.join(["sparkxray", "plans", "show", log, "--sql", str(execution_id)])}')
+
+
+def _print_aqe_changes(printed: dict[str, Any]) -> None:
     render.print_record(printed, ['update_count'], title='AQE')
     if printed['joins']:
         joins = [
-            {**join, **{side: [without_ids(key) for key in join[side]] for side in ('left_keys', 'right_keys')}}
+            {
+                **join,
+                'node': f'n{join["final_node_id"]}',
+                **{side: [without_ids(key) for key in join[side]] for side in ('left_keys', 'right_keys')},
+            }
             for join in printed['joins']
         ]
         render.print_records(joins, _JOIN_CHANGE_KEYS, title='Joins AQE changed')
     if printed['operators']:
         render.print_records(printed['operators'], _OPERATOR_CHANGE_KEYS, title='Operators AQE added or removed')
     if printed['shuffle_reads']:
-        render.print_records(printed['shuffle_reads'], _SHUFFLE_READ_KEYS, title='Shuffle reads AQE planned')
+        reads = [
+            {
+                'node': f'n{read["node_id"]}',
+                'kind': read['kind'],
+                **{header: render.shown(name, read[name]) for name, header in _SHUFFLE_READ_HEADERS.items()},
+            }
+            for read in printed['shuffle_reads']
+        ]
+        headers = tuple(_SHUFFLE_READ_HEADERS.values())
+        render.print_records(reads, ('node', 'kind', *headers), title='Shuffle reads AQE planned', numbers=headers)
     if not (printed['joins'] or printed['operators'] or printed['shuffle_reads']):
         render.none_found('join, operator or shuffle read AQE changed')

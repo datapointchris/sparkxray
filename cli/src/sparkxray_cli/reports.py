@@ -22,11 +22,14 @@ from sparkxray_cli.shared_parameters import ThresholdOption
 
 app = typer.Typer(
     no_args_is_help=True,
-    help="Write a run's report: Markdown to read or attach to a ticket, JSON for a program. Exits 3 when a finding reaches --fail-on.",
+    help=(
+        'Write one document of a run to read, attach to a ticket or commit: its findings with their evidence, then its longest '
+        'stages, plans and settings. It gates as findings list does.'
+    ),
 )
 
 
-@app.command('write')
+@app.command('write', no_args_is_help=True)
 def write(
     log: LogArgument,
     report_format: Annotated[ReportFormat, typer.Option('--format', help='Markdown to read, or JSON to keep and diff.')] = 'markdown',
@@ -50,6 +53,9 @@ def write(
     recover first. A report names a local log by its file name and holds no time it was made. So
     the same log file, thresholds and sparkxray version write the same bytes on any machine, and a
     report diffs and commits cleanly.
+
+    `findings list --json` carries the findings alone, and `--format json` adds the run behind
+    them, in the document `sparkxray schemas show report` describes.
 
     Exits 0 when no finding reaches `--fail-on` and 3 when one does, and the report is written in
     both cases, stating the verdict. Exits 2 on a usage error, and 3 when the log could not be read.

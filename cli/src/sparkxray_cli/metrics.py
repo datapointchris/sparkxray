@@ -12,7 +12,10 @@ from sparkxray.metric_glossary import metric_glossary
 from sparkxray_cli import render
 from sparkxray_cli.shared_parameters import JsonOption
 
-app = typer.Typer(no_args_is_help=True, help='Look up what a number means and which unit it is in, before reading anything into it.')
+app = typer.Typer(
+    no_args_is_help=True,
+    help='Look up what a table column or a plan metric means, and its unit in sparkxray and in Spark, before reading into a number.',
+)
 
 _LIST_KEYS = ('name', 'unit', 'spark_unit', 'description')
 _SHOW_KEYS = ('table', 'unit', 'spark_unit', 'metric_type', 'description', 'spark_fields', 'derivation', 'declared_by', 'source')
@@ -21,7 +24,12 @@ _PLAN_METRICS_TITLE = 'plan node metrics, held in plan_node_metrics by metric_na
 
 @app.command('list')
 def list_metrics(as_json: JsonOption = False) -> None:
-    """List every column whose name ends in a unit, table by table, then every metric a plan node declares."""
+    """List every table column with a unit, table by table, then every plan metric, sparkxray's unit beside Spark's. It needs no log.
+
+    `metrics show NAME` adds the Spark fields an entry reads and how it is derived. A summary's own
+    numbers, as wall_ms in `stages list`, are defined on that command's --help. `tables list LOG`
+    gives one log's tables with their row counts and every column, unit or not.
+    """
     entries = metric_glossary()
     if as_json:
         render.emit_json([entry.to_json() for entry in entries])
@@ -33,7 +41,7 @@ def list_metrics(as_json: JsonOption = False) -> None:
     render.note('one in full, with its Spark fields and source: sparkxray metrics show NAME')
 
 
-@app.command('show')
+@app.command('show', no_args_is_help=True)
 def show(
     name: Annotated[
         str,
@@ -48,7 +56,10 @@ def show(
     ],
     as_json: JsonOption = False,
 ) -> None:
-    """Show every metric NAME names: its unit in sparkxray and in Spark, the Spark fields it reads, how it is derived, and its source."""
+    """Show what NAME means: its unit in sparkxray and in Spark, the Spark fields it reads, how it is derived, and its source.
+
+    A bare column name shows the column in every table that has it.
+    """
     entries = metric_entries(name)
     if as_json:
         render.emit_json([entry.to_json() for entry in entries])

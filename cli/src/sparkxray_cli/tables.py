@@ -16,9 +16,13 @@ app = typer.Typer(no_args_is_help=True, help='Ask the run anything with SQL over
 _COLUMN_KEYS = ('name', 'type', 'unit', 'description')
 
 
-@app.command('list')
+@app.command('list', no_args_is_help=True)
 def list_tables(log: LogArgument, as_json: JsonOption = False) -> None:
-    """List the tables and views a query reads: rows, each Parquet file, and every column's type, unit and what it holds."""
+    """List the tables and views tables query reads in one log: row counts, each Parquet file, and every column's type, unit and meaning.
+
+    findings appears once `findings list` or `reports write` has run on the log. `metrics list`
+    gives every column with a unit, and every plan metric, with no log needed.
+    """
     listed = open_tables(log).listing()
     if as_json:
         render.emit_json([table.to_json() for table in listed])
@@ -34,7 +38,7 @@ def list_tables(log: LogArgument, as_json: JsonOption = False) -> None:
     render.note('what a metric column means in Spark, and its unit there: sparkxray metrics show NAME')
 
 
-@app.command('query')
+@app.command('query', no_args_is_help=True)
 def query(
     log: LogArgument,
     sql: Annotated[str, typer.Argument(metavar='SQL', help='DuckDB SQL naming the tables tables list prints.', show_default=False)],
@@ -42,7 +46,12 @@ def query(
 ) -> None:
     """Run DuckDB SQL over the log's tables and print its rows.
 
-    `sparkxray tables query LOG "select stage_id, max(duration_ms) from tasks_effective group by all"`
+    The slowest task of each stage, counting each partition once:
+
+        sparkxray tables query LOG "select stage_id, max(duration_ms) from tasks_effective group by all"
+
+    tasks_effective holds each partition's first successful attempt, and tasks holds every
+    attempt, retries and speculative copies included.
     """
     rows = open_tables(log).rows(sql)
     if as_json:

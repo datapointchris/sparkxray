@@ -23,7 +23,10 @@ SortOption = Annotated[
     typer.Option(
         '--sort',
         metavar='COLUMN',
-        help='Sort by this column, largest first: any name --json prints, which is the header with underscores for spaces.',
+        help=(
+            'Sort by this column, largest first: any name --json prints, which is the header with underscores for spaces, '
+            'as wall_ms for the wall ms column. Its unit is the one the name ends in, whichever the table prints.'
+        ),
         show_default=False,
     ),
 ]
@@ -32,17 +35,22 @@ ThresholdOption = Annotated[
     typer.Option(
         '--threshold',
         metavar='RULE_ID.NAME=VALUE',
-        help='Override one threshold, as stage.shuffle-skew.ratio=8 or stage.shuffle-skew.min_bytes=512MiB. Repeat for more.',
+        help=(
+            'Override one threshold, as stage.shuffle-skew.ratio=8 or stage.shuffle-skew.min_bytes=512MiB. '
+            "sparkxray rules show RULE_ID names a rule's thresholds. Repeat for more."
+        ),
         show_default=False,
     ),
 ]
-FailOnOption = Annotated[Severity, typer.Option('--fail-on', help='Exit 3 when a finding is at or above this severity, listed or not.')]
+FailOnOption = Annotated[
+    Severity, typer.Option('--fail-on', help='Exit 3 when a finding is at or above this severity, whether or not it is listed.')
+]
 ThresholdFileOption = Annotated[
     Path | None,
     typer.Option(
         '--thresholds',
         metavar='FILE',
-        help='A TOML file of thresholds, one ["<rule_id>"] table per rule. A --threshold beats it.',
+        help='A TOML file of thresholds, one table per rule, as ["stage.shuffle-skew"] then ratio = 8. A --threshold beats it.',
         show_default=False,
     ),
 ]

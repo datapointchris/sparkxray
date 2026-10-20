@@ -58,9 +58,13 @@ FROM ({SQL_SUMMARIES_SQL}) AS summary JOIN sql_executions USING (execution_id)
 WHERE execution_id = $execution_id
 """
 
+# A stage a job lists and no stage event names is one Spark skipped, its shuffle output already written.
 _JOBS_SQL = """
-SELECT job_id, result, submit_epoch_ms, end_epoch_ms, end_epoch_ms - submit_epoch_ms AS duration_ms, stage_ids, job_group, failure_reason
-FROM jobs WHERE sql_execution_id = $execution_id ORDER BY job_id
+WITH ran AS (SELECT list(DISTINCT stage_id) AS stage_ids FROM stages)
+SELECT job_id, result, submit_epoch_ms, end_epoch_ms, end_epoch_ms - submit_epoch_ms AS duration_ms, jobs.stage_ids,
+  list_filter(jobs.stage_ids, lambda id: NOT coalesce(list_contains(ran.stage_ids, id), false)) AS skipped_stage_ids,
+  job_group, failure_reason
+FROM jobs, ran WHERE sql_execution_id = $execution_id ORDER BY job_id
 """
 
 _OPERATORS_SQL = """
@@ -101,7 +105,12 @@ def sql_detail(tables: Tables, execution_id: int) -> SqlExecutionDetail:
     """One SQL execution with its jobs, operators and AQE changes. An execution the run does not hold raises `NotInRunError`."""
     held = [row[0] for row in tables.query('SELECT execution_id FROM sql_executions ORDER BY execution_id').fetchall()]
     if execution_id not in held:
-        raise NotInRunError(f'the run has no SQL execution {execution_id}', field='execution_id', valid=[str(held_id) for held_id in held])
+        raise NotInRunError(
+            f'the run has no SQL execution {execution_id}',
+            field='execution_id',
+            valid=[str(held_id) for held_id in held],
+            hint=f'sparkxray sql list {tables.manifest.ingest.app_id}',
+        )
     parameters = {'execution_id': execution_id}
     execution = rows_of(tables.query(_EXECUTION_SQL, parameters)).to_json()[0]
     changes = None

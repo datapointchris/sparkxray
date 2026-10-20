@@ -91,6 +91,8 @@ def _command_line_error(error: UsageError) -> CommandLineError:
 
 
 app = typer.Typer(name='sparkxray', cls=SparkxrayGroup, no_args_is_help=True, rich_markup_mode='markdown')
+app.add_typer(findings.app, name='findings', rich_help_panel=_FINDING)
+app.add_typer(reports.app, name='reports', rich_help_panel=_FINDING)
 app.add_typer(logs.app, name='logs', rich_help_panel=_READING)
 app.add_typer(stages.app, name='stages', rich_help_panel=_READING)
 app.add_typer(tasks.app, name='tasks', rich_help_panel=_READING)
@@ -98,8 +100,6 @@ app.add_typer(executors.app, name='executors', rich_help_panel=_READING)
 app.add_typer(sql.app, name='sql', rich_help_panel=_READING)
 app.add_typer(plans.app, name='plans', rich_help_panel=_READING)
 app.add_typer(tables.app, name='tables', rich_help_panel=_READING)
-app.add_typer(findings.app, name='findings', rich_help_panel=_FINDING)
-app.add_typer(reports.app, name='reports', rich_help_panel=_FINDING)
 app.add_typer(rules.app, name='rules', rich_help_panel=_LEARNING)
 app.add_typer(metrics.app, name='metrics', rich_help_panel=_LEARNING)
 app.add_typer(capabilities.app, name='capabilities', rich_help_panel=_PROGRAMS)
@@ -129,7 +129,7 @@ def version_callback(asked: bool) -> None:
     except importlib.metadata.PackageNotFoundError:
         version = 'unknown'
     commit = installed_commit()
-    print(f'sparkxray {version}{f" @ {commit[:8]}" if commit else ""}')
+    render.emit_text(f'sparkxray {version}{f" @ {commit[:8]}" if commit else ""}\n')
     raise typer.Exit()
 
 
@@ -140,22 +140,39 @@ def main(
         typer.Option('--version', callback=version_callback, is_eager=True, help='Show the installed version and exit.'),
     ] = None,
 ) -> None:
-    """**sparkxray** reads a Spark event log and finds why the run was slow.
+    """**sparkxray** reads a Spark event log offline, with no JVM, and finds why the run was slow.
 
-    Every command is `sparkxray <resource> <verb> LOG`. The resource comes first, so walking
-    from `stages list` to `stages show` to `tasks list` changes one word at a time. Each verb
-    means the same on every resource: `list` a set, `show` one, `query` with SQL, `ingest` a log.
+    A command is `sparkxray <resource> <verb>`, and one that reads a run takes `LOG` first. The
+    resource comes first, so `stages list`, then `stages show LOG 4`, then `tasks list LOG --stage 4`
+    walks from the run down to one stage's tasks. `list` prints a set and `show` prints one, wherever
+    a resource has them. The other verbs belong to one resource each: `logs ingest`, `logs diff`,
+    `executors simulate`, `tables query` and `reports write`.
 
-    `LOG` is a log file or directory, an `s3://` URI, a Spark server's `http(s)://` address, or the
-    app id of a log already read. The first command on a log reads it into the cache, and every
-    later one opens the cache.
+    Start with `sparkxray findings list ./eventlog.zstd`. It reads the log into the cache, then
+    lists what slowed the run, the most wall time a fix could recover first.
 
-    `sparkxray findings list LOG` runs the rules, the most wall time a fix could recover first,
-    and exits 3 when a finding is at or above `--fail-on`. Run any partial command with no arguments or `--help` to see what
-    comes next.
+    Each finding has an id. `findings show LOG ID` gives its evidence and its fix, and
+    `rules show RULE_ID` explains its rule. Where a stage took the time, read it with
+    `stages show LOG STAGE_ID`, then `tasks list LOG --stage STAGE_ID`. Where a query did, read it
+    with `sql show LOG ID`, then `plans show LOG --sql ID`. `logs diff GOOD_LOG SLOW_LOG` explains a
+    slow run against a good one.
+
+    `findings list` exits 3 when a finding is high or worse, so it gates a CI step as it stands.
+    `--fail-on` moves the bar.
+
+    `LOG` is a log file or directory, an `s3://` URI, a History Server's or driver UI's `http(s)://`
+    address, or the app id of a log already read. The first command on a log reads it into the cache
+    under `$XDG_CACHE_HOME/sparkxray/`, and every later one opens the cache. Deleting that directory
+    empties it.
+
+    A table names each column as `--json` does, with spaces for underscores. It prints each value in
+    the unit that reads best, as `8 s` under `wall ms`, and `--json` prints the raw number in the
+    unit its name ends in.
 
     A program starts at `sparkxray capabilities show --json`, which lists every command, rule,
-    table, schema and error code. `sparkxray schemas show NAME` prints one schema, and its
-    description names the command printing that JSON. A listing such as `stages list --json` has
-    none.
+    table, schema and error code. `sparkxray schemas show NAME` prints the schema of one document.
+    The `--json` of a listing, such as `stages list --json`, has no schema of its own.
+
+    A resource with no verb, such as `sparkxray stages`, lists its verbs. A command missing its
+    arguments, or given `--help`, shows what it takes.
     """

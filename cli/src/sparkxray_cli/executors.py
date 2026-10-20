@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Annotated
 
 import typer
@@ -56,9 +57,11 @@ def executor_counts(text: str) -> ExecutorCounts:
         else:
             counts = ExecutorCounts(int(count) for count in text.split(','))
     except ValueError:
-        raise typer.BadParameter('give a range as 2..64 or a list as 4,8,16') from None
+        raise typer.BadParameter(f'{text!r} is neither a range as 2..64 nor a list as 4,8,16') from None
     if not counts or min(counts) < 1:
-        raise typer.BadParameter('a range runs from a low count to a high one, and every count is at least 1')
+        raise typer.BadParameter(
+            f'{text!r} counts no executors: a range runs from a low count to a high one, and every count is at least 1'
+        )
     return counts
 
 
@@ -78,7 +81,7 @@ _LIST_COLUMNS = (
 )
 
 
-@app.command('list')
+@app.command('list', no_args_is_help=True)
 def list_executors(log: LogArgument, limit: LimitOption = None, as_json: JsonOption = False) -> None:
     """List the driver and every executor: lifetime, cores, memory, task time, idle share and peak heap.
 
@@ -90,12 +93,13 @@ def list_executors(log: LogArgument, limit: LimitOption = None, as_json: JsonOpt
     if as_json:
         render.emit_json(rows.to_json())
     elif not rows:
-        render.none_found('executors')
+        render.empty('executors', limit)
     else:
         render.print_rows(rows, _LIST_COLUMNS)
+        render.note(f'the run at other executor counts: {shlex.join(["sparkxray", "executors", "simulate", log])}')
 
 
-@app.command('simulate')
+@app.command('simulate', no_args_is_help=True)
 def simulate_executors(
     log: LogArgument,
     executors: Annotated[
@@ -124,9 +128,17 @@ def simulate_executors(
 
     Each group of jobs that ran together is replayed onto the executors' task slots, every task
     taking the run time it took, as Sparklens's model replays them. An executor has its cores over
-    spark.task.cpus slots. The time no job ran stays the same at every count. The reference times
-    frame the curve: the run on unlimited executors, at today's size with no skew, and one task at
-    a time. The model's error is its estimate at the run's own size against the run's wall time.
+    spark.task.cpus slots. The time no job ran stays the same at every count.
+
+    The reference times frame the curve. critical_path_ms is the run on unlimited executors.
+    perfect_parallel_ms is the run at today's size with no skew. single_core_ms is the run one
+    task at a time.
+
+    The model check sets model_estimate_ms, the estimate at the run's own size, beside its
+    wall_ms, and model_error_share is the gap between them over wall_ms. job_group_count is how many groups of
+    jobs it replayed. overlap_merge_count is how many SQL executions joined a group another one
+    ran in, which happens only where a thread pool ran two queries at once. retry_run_ms is the
+    run time of retried and speculative task attempts, which the model leaves out.
 
     Exits 0 when it ran and 2 on a usage error. Exits 3 when the log could not be read, or its stages could not be replayed.
     """

@@ -11,6 +11,10 @@ from typer._click import types as click_types  # Typer vendors click, and export
 # A command with one of these verbs can write a file the caller names. Every command may write sparkxray's cache.
 _WRITING_VERBS = ('write',)
 _USAGE = 'a usage error, or an input sparkxray refused; the error code names which'
+_EXIT_3_BESIDE_AN_UNREAD_LOG: dict[tuple[str, ...], str] = {
+    ('logs', 'ingest'): ', or a Glue run or driver log it was asked to join could not be read',
+    ('executors', 'simulate'): ', or its stages could not be replayed',
+}
 
 
 def command_surface(ctx: typer.Context) -> list[dict[str, Any]]:
@@ -38,7 +42,7 @@ def _command(path: tuple[str, ...], command: Any) -> dict[str, Any]:
             '3': 'it failed the gate its --fail-on help states, or a log could not be read',
         }
     elif any(_names_a_log(parameter) for parameter in command.params):
-        exit_codes['3'] = 'the log could not be read'
+        exit_codes['3'] = 'the log could not be read' + _EXIT_3_BESIDE_AN_UNREAD_LOG.get(path, '')
     return {
         'path': list(path),
         'verb': path[-1],

@@ -15,20 +15,6 @@ from sparkxray.ingest.manifest import IngestManifest
 
 SCHEMA_VERSION = 1
 
-# What Spark writes only when asked:
-#   stage_executor_metrics  spark.eventLog.logStageExecutorMetrics, each stage's executor peaks
-#   block_updates           spark.eventLog.logBlockUpdates.enabled, every cached block's changes
-#   process_tree_metrics    spark.executor.processTreeMetrics.enabled, the RSS of each executor's
-#                           processes, Python workers included
-# What a log rebuilt from a server's REST JSON goes without, and an older Spark's log may too:
-#   stage_parents           the stages each stage reads, which the simulation then infers
-#   task_executor_metrics   each executor's peaks while a task ran
-#   task_accumulators       each task's accumulator updates, so no plan node's metrics aggregate
-#                           from tasks and node_stages is empty
-#   execution_configs       the settings each SQL execution changed from the application's, so a
-#                           setting changed at runtime reads as the application's
-#   evicted_records         what the server had dropped past its spark.ui.retained* limits, so
-#                           the tables hold only the part of the run it kept
 Lack = Literal[
     'stage_executor_metrics',
     'block_updates',
@@ -39,6 +25,25 @@ Lack = Literal[
     'execution_configs',
     'evicted_records',
 ]
+# What each lack leaves out of the tables, and what writes it. The first three Spark writes only when
+# a setting asks. A log rebuilt from a server's REST JSON goes without the next four, and an older
+# Spark's log may too.
+LACK_MEANINGS: Mapping[Lack, str] = {
+    'stage_executor_metrics': "each stage's executor peaks; spark.eventLog.logStageExecutorMetrics=true writes them",
+    'block_updates': "every cached block's changes; spark.eventLog.logBlockUpdates.enabled=true writes them",
+    'process_tree_metrics': (
+        "the RSS of each executor's processes, Python workers included; spark.executor.processTreeMetrics.enabled=true writes it"
+    ),
+    'stage_parents': 'the stages each stage reads, which executors simulate then infers',
+    'task_executor_metrics': "each executor's peaks while a task ran",
+    'task_accumulators': "each task's accumulator updates, so no plan node's metrics add up from tasks and node_stages is empty",
+    'execution_configs': (
+        "the settings a SQL execution changed from the application's, so a setting changed at runtime reads as the application's"
+    ),
+    'evicted_records': (
+        'what the server had dropped past its spark.ui.retained* limits, so the tables hold only the part of the run it kept'
+    ),
+}
 
 
 @dc.dataclass(frozen=True, slots=True)
