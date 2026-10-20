@@ -160,7 +160,7 @@ def _finding_details(finding: Finding) -> list[str]:
         )
         lines.append('')
     if finding.remediation:
-        lines += ['What to try:', '', *(f'{index}. {_inline(step)}' for index, step in enumerate(finding.remediation, start=1)), '']
+        lines += ['How to fix it:', '', *(f'{index}. {_inline(step)}' for index, step in enumerate(finding.remediation, start=1)), '']
     if finding.docs:
         lines += ['Read more:', '', *(f'- <{link}>' for link in finding.docs), '']
     lines += [f'How the rule decides: `{_rule_command(finding)}`', '', '</details>']

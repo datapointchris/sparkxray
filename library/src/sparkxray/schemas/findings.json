@@ -90,7 +90,7 @@
         "impact_seconds": {"type": ["number", "null"], "minimum": 0, "description": "The wall time a fix could recover. Null where no one can say, as for a rule reading only the plan."},
         "confidence": {"enum": ["high", "medium", "low"], "description": "How sure the rule is that the measurement shows the problem it names."},
         "confidence_reason": {"type": ["string", "null"], "description": "Why confidence is below high."},
-        "remediation": {"type": "array", "items": {"type": "string"}, "description": "What to try, in the order to try it."},
+        "remediation": {"type": "array", "items": {"type": "string"}, "description": "The steps that fix the problem, in the order to try them. findings show and a report print them under How to fix it."},
         "docs": {"type": "array", "items": {"type": "string"}, "description": "Pages that explain the problem and its fixes."}
       }
     },
@@ -118,9 +118,9 @@
       "properties": {
         "value": {"type": "number", "minimum": 0},
         "unit": {"enum": ["x", "bytes", "ms", "count", "rows", "fraction"]},
-        "source": {"enum": ["default", "file", "sdk", "flag"], "description": "The layer that set value: the rule's default, a thresholds file, the SDK's thresholds mapping, or a <rule_id>.<name>=<value> override string. A later layer in that list overrides an earlier one."},
+        "source": {"enum": ["default", "file", "sdk", "flag"], "description": "The layer that set value: the rule's default, a thresholds file, the SDK's thresholds mapping, or a <rule_id>.<name>=<value> override string. A later layer in that list overrides an earlier one. A person's view prints it as set by."},
         "default": {"type": "number", "minimum": 0, "description": "The rule's own value."},
-        "default_source": {"type": "string", "description": "Where the rule's own value comes from."}
+        "default_source": {"type": "string", "description": "The tool or document the rule's own value comes from, or proposed where sparkxray chose it because no published tool gives one. A person's view prints it as default from."}
       }
     },
     "rule_run": {

@@ -49,7 +49,7 @@
         "compacted": {"type": "boolean"},
         "in_progress": {"type": "boolean"},
         "truncated_tail": {"type": "boolean"},
-        "lacks": {"type": "array", "items": {"type": "string"}, "description": "What the log was written without, as the tables manifest names it: stage_executor_metrics, block_updates and process_tree_metrics by Spark's defaults, and stage_parents, task_executor_metrics, task_accumulators and execution_configs where it was rebuilt from a server's REST JSON."},
+        "lacks": {"type": "array", "items": {"type": "string"}, "description": "What the log was written without, as the tables manifest names it: stage_executor_metrics, block_updates and process_tree_metrics by Spark's defaults, and stage_parents, task_executor_metrics, task_accumulators and execution_configs where it was rebuilt from a server's REST JSON, and evicted_records where that server had dropped part of the run. sparkxray schemas show tables-manifest says what each one costs."},
         "enriched": {"type": "array", "items": {"enum": ["glue_metrics", "glue_insights", "driver_log"]}, "description": "The tables sparkxray logs ingest joined to the log from other sources: Glue's metrics and job run insights with --glue-run, and structured driver logs with --driver-log."}
       }
     },
