@@ -37,6 +37,11 @@ The JSON tree holds wrappers the text never shows, and the text holds lines JSON
   `hosting_node_id` of the node that runs it. JSON holds a subquery as an extra child of that node.
   Simple text draws it beneath the node, and formatted text lists it after the tree, under
   `===== Subqueries =====`.
+- The `Subquery` or `SubqueryBroadcast` node wrapping a subquery is removed, as formatted text
+  removes it. Its metrics, the result's `data size` and its `time to collect`, move to the
+  subquery's root. That root is an `AdaptiveSparkPlan` under AQE, which declares no metrics of its
+  own. With AQE off, a `SubqueryBroadcast` sits over the reused `BroadcastExchange`, which declares
+  both names too. That node then lists each name twice, told apart by accumulator id.
 
 With those folded, one plan read from JSON and from formatted text gives equal operator counts.
 Without them, one plan read two ways reports `FileScan +1, Scan -1`.
@@ -153,15 +158,43 @@ So the last plan lists the ids of everything that actually ran.
 That is why rules read metrics through the last plan's nodes. A node of the version 0 plan
 `SQLExecutionStart` logs has no updates, which is expected, not missing data.
 
-Metrics aggregate per node the way the History Server's SQL tab shows them:
-
-| Metric type | Aggregated as |
-| --- | --- |
-| `sum`, `size` | total, plus min, median and max across tasks, and which stage and task held the max |
-| `timing` | milliseconds |
-| `nsTiming` | nanoseconds, reported in milliseconds |
-| `average` | Spark's per-task average |
-
 Driver-side values, such as broadcast build time and file listing, arrive in
-`SparkListenerDriverAccumUpdates`. Metric definitions for nodes AQE added arrive in
-`SparkListenerSQLAdaptiveSQLMetricUpdates`. Both join the same way.
+`SparkListenerDriverAccumUpdates`. Metric definitions for a subquery AQE re-planned arrive in
+`SparkListenerSQLAdaptiveSQLMetricUpdates`, naming no node. Both join the same way, and a
+definition with no node has no plan version or node id in `plan_node_metrics`.
+
+## Plan metrics aggregate as the SQL tab aggregates them, except where it names a task
+
+`plan_node_metrics` follows Spark's `SQLAppStatusListener` and `MetricUtils.stringValue`, which
+build the History Server's SQL tab:
+
+- Only each stage's highest attempt counts. The listener starts a stage's values afresh when a new
+  attempt is submitted.
+- A task index keeps its last reported value up to its first success. A retry replaces a failed
+  attempt's value, and a speculative copy finishing after the success changes nothing.
+- An index that reported nothing counts as 0. The listener sizes each stage's values by its task
+  count, and a retried attempt that reran a few tasks leaves the rest at 0.
+- The driver's values count beside the tasks'.
+- A `sum` counts every value, and an `average` those above 0. A `size`, `timing` or `nsTiming`
+  counts those at 0 or above, which drops the -1 an unset metric starts at.
+- Every type gets `total`, `min`, `median` and `max`, and the stage and task that held the max.
+  The median is the value at index n / 2 of the sorted values, as Spark takes it. `value_count` is
+  how many values those cover.
+- A `size` is in bytes, a `timing` in milliseconds and a `sum` a count. An `nsTiming` is converted
+  to milliseconds, truncated. An `average` has no unit and no total. Spark stores it as ten times
+  its value, so a long integer keeps one decimal, and the table divides by 10.
+
+The tables differ from the SQL tab in two places:
+
+- Spark's listener names the first task to report the highest value it has seen, a failed attempt
+  included, and keeps that name after a retry replaces the value. So the SQL tab can print a
+  maximum beside a task that never reported it. The tables name the task whose value is the
+  maximum.
+- A metric with no counted value has null statistics, where the SQL tab prints zero.
+
+A driver value above every task's names no task, so `max_stage_id` and `max_task_id` are null
+where the SQL tab prints `(driver)`.
+
+`fixtures/history-server-sql/` holds what the SQL tab serves for the plan-shapes logs, metric
+strings included. The tables test prints each execution's `plan_node_metrics` the way the SQL tab
+prints them, and requires the two to match.

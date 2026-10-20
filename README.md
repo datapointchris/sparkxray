@@ -71,7 +71,8 @@ for line in log.lines():
     ...  # one JSON event per line, in the order Spark wrote them
 ```
 
-It reads uncompressed logs and Spark's zstd, lz4 and snappy, plus gzip. Spark's lzf is refused.
+It reads uncompressed logs and Spark's zstd, lz4 and snappy. A log compressed by hand reads too,
+under the suffix its tool gives it: `.gz` from gzip, `.zst` from zstd. Spark's lzf is refused.
 A log Spark is still writing, a killed run's, or a copy cut short can end partway through a line.
 What follows the last whole line is left out, and `truncated_tail` says so. A file before the
 last one that ends that way is refused. A local log Spark is still writing reads as it stood when
@@ -107,6 +108,50 @@ for execution_id, plan in last_plans(events).items():
 For an execution that never finished, as in a killed application, `is_final` is False.
 `parse_plan_text` reads `explain()` output. `normalize_label` rewrites a node's ids, so two builds
 of one query compare equal.
+
+## Query a log's tables with SQL
+
+`log.tables` reads the log into Parquet tables with DuckDB, the first time it is asked. A later
+open of the unchanged log reads them from the cache.
+
+```python
+from sparkxray.ingest import EventLog
+
+tables = EventLog.open('eventlog.zstd').tables
+skew = tables.query(
+    'select stage_id, median(shuffle_records_read), max(shuffle_records_read) from tasks_effective group by all'
+)
+print(skew.fetchall())
+tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
+print(tables.path)                               # the Parquet directory, for any Parquet reader
+```
+
+| Table | One row per |
+| --- | --- |
+| `application` | the application |
+| `environment` | property, by section: `jvm`, `spark`, `hadoop`, `system`, `classpath`, `metrics` |
+| `executors` | executor, and the driver |
+| `jobs` | job |
+| `stages` | stage attempt |
+| `tasks` | task attempt, failed, killed and still running included |
+| `sql_executions` | SQL execution |
+| `plan_nodes` | node of every plan version of every SQL execution |
+| `plan_node_metrics` | metric a plan node declares, aggregated as the History Server's SQL tab does |
+| `node_stages` | stage a node of an execution's last plan ran in |
+
+Read task metrics through `tasks_effective`. It keeps the first success of each partition of each
+stage, so a retried or speculative task counts once, and a stage retry keeps the partitions it did
+not rerun. It is `tasks` where `effective` is true, so a Parquet reader filters on that column.
+`partition_id` names the partition a task computed, which a retry's `task_index` does not.
+
+A column holding a time or a size names its unit: `ms`, `ns`, `bytes` or `mib`. Spark reports CPU
+time in nanoseconds beside run time in milliseconds, and the names keep the two apart.
+`plan_node_metrics` holds every kind of metric in the same columns, so its `unit` column names each
+row's unit.
+
+`tables.manifest.lacks` names what the log was written without, because Spark leaves it out by
+default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`. A column only
+those settings fill, such as `peak_python_rss_bytes`, is null in a log written without them.
 
 ## Layout
 

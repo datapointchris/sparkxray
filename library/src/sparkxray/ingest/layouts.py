@@ -2,8 +2,9 @@
 
 Spark names a single-file log `<appId>[.<codec>][.inprogress]`. A rolling log is a directory
 `eventlog_v2_<appId>/` holding `events_<N>_<appId>[.<codec>][.compact]` files and an
-`appstatus_<appId>[.inprogress]` marker. Names alone never decide that a file is a log: each
-candidate is confirmed by its first line afterwards.
+`appstatus_<appId>[.inprogress]` marker. A log compressed by hand carries its compressor's
+suffix instead: `.gz` from gzip and `.zst` from zstd. Names alone never decide that a file is a
+log: each candidate is confirmed by its first line afterwards.
 """
 
 from __future__ import annotations
@@ -17,8 +18,8 @@ from sparkxray.ingest.decoders import Codec
 
 Layout = Literal['single_file', 'rolling']
 
-_CODEC_SUFFIXES: dict[str, Codec] = {'zstd': 'zstd', 'lz4': 'lz4', 'snappy': 'snappy', 'lzf': 'lzf', 'gz': 'gzip'}
-_CODEC = r'(?:\.(?P<codec>zstd|lz4|snappy|lzf|gz))?'
+_CODEC_SUFFIXES: dict[str, Codec] = {'zstd': 'zstd', 'zst': 'zstd', 'lz4': 'lz4', 'snappy': 'snappy', 'lzf': 'lzf', 'gz': 'gzip'}
+_CODEC = r'(?:\.(?P<codec>zstd|zst|lz4|snappy|lzf|gz))?'
 # Matched against a name with its `.inprogress` removed.
 _SINGLE_FILE = re.compile(rf'(?P<app>[^._][^.]*){_CODEC}')
 ROLLING_DIRECTORY = re.compile(r'eventlog_v2_(?P<app>[^.]+)')

@@ -10,8 +10,8 @@ holds no logic of its own.
         │
         ├── ingest ──→ ordered, decoded event lines
         │
-        ├── normalize ──→ Parquet tables + manifest.json
-        │                 under $XDG_CACHE_HOME/sparkxray/tables/<key>/
+        ├── normalize ──→ Parquet tables + manifest.json, under
+        │                 $XDG_CACHE_HOME/sparkxray/tables/<source>/<key>/
         │
         ├── rules ──→ findings: rule id, severity, evidence,
         │             thresholds applied, impact_seconds
@@ -19,9 +19,11 @@ holds no logic of its own.
         └── reports ──→ Markdown and JSON
 ```
 
-The tables are keyed by content. The key is the SHA-256 of the ingested file list (URI, ETag or
-mtime, size) plus the normalizer's schema version. So a second analysis of one run skips parsing,
-and a normalizer upgrade rebuilds.
+The tables are keyed by content. The key is a SHA-256 over each ingested file's URI, ETag,
+modification time and size, the tables schema version and the installed sparkxray version. So a
+second analysis of one run skips parsing, and every upgrade rebuilds the tables. A version bumped
+by hand would rebuild less often, and a parser fix that forgot the bump would keep serving the old
+parse.
 
 ## The library and the command line are separate distributions
 
@@ -97,9 +99,13 @@ $XDG_CACHE_HOME/sparkxray/logs/
 A local file that DuckDB can read as it stands is never copied. The manifest records, per file,
 the `read_path` holding its events and the `read_codec` it is compressed with.
 
+A decoded file's version is its URI, ETag, modification time and size, under the installed
+sparkxray version. So an upgrade decodes each file again, and never downloads one again.
+
 An entry for an older version of a file is removed by a later open, once it has gone a day
 unused. An `EventLog` opened before the file changed still reads its copy. So nothing is removed
-the moment a newer version lands.
+the moment a newer version lands. A write goes to a `.part-` file first and is renamed into place.
+A partial file a killed process left behind is removed the same way.
 
 ## The resolver finds a log by Spark's names, and confirms it by its first line
 
@@ -112,6 +118,9 @@ Spark's two layouts somewhere, and the resolver recognizes the layout:
 
 A rolling log is its files in order of `N` as an integer, so `events_10` follows `events_9`. Glue
 leaves the `.inprogress` copy beside the finished log, and the finished one is read.
+
+A log compressed by hand carries its tool's suffix, not Spark's. So `.gz` reads as gzip, and
+`.zst` as zstd beside Spark's `.zstd`.
 
 A name only proposes a log. Its decoded first line must be `SparkListenerLogStart`, which Spark
 writes first in every log. So a `LICENSE` beside a log is passed over. The first line comes from
@@ -127,6 +136,10 @@ compacted file, and the manifest records `compacted`, because finished tasks wer
 A location naming one log that is not a log is `E-INGEST-003`. A directory or prefix holding no
 log is `E-INGEST-001`, which lists what it does hold and why each file was passed over. One
 holding several logs is `E-INGEST-005`, listing each.
+
+A compressed file under a name that declares no codec is passed over, with the codec its first
+bytes show as the reason. Named alone, it is `E-INGEST-003`, and the hint gives the suffix to
+rename it to.
 
 A log beside files that start with some other Spark event is `E-INGEST-005` too. Those files are
 likely pieces of a log split across several, which sparkxray cannot order. Reading the log alone
@@ -166,3 +179,52 @@ appended later.
 
 Ingest parses only a log's first events and the end of each file. The table build parses every
 line, once, and names the file and line of one that does not parse.
+
+## The table build parses every event once, in the order Spark wrote them
+
+`log.tables` builds the tables the first time it is read. DuckDB is imported only then, so code
+reading only lines or plans never loads it.
+
+One `read_json` per run of files sharing a codec loads every event into one temporary table,
+through the explicit column map. Every table is selected from that copy, so the log is parsed
+once. DuckDB's `rowid` keeps the order Spark wrote the events in. AQE's plan updates carry no
+timestamp, so that order numbers each query's plan versions.
+
+Each table is written to Parquet with every column cast to the type the registry declares. So any
+Parquet reader opens them without sparkxray, and a column's type never depends on what one log
+happened to hold.
+
+The build parses every field, each task's accumulator updates included, where the parse benchmark
+reads a few task fields. On the benchmark's input and machine, building every table takes
+2.0–2.2 s, against the benchmark's 0.3 s. Reopening the cached tables takes 0.02 s.
+
+A build writes into a directory of its own, then renames it into place. Two processes building one
+log never read each other's partial files, and the first rename wins. Tables built from an older
+version of the log are removed the next time its tables are read, once they have gone a day unused.
+So is a build a killed process left partway.
+
+`tasks.effective` marks the first success of each partition of each stage, across the stage's
+attempts. `tasks_effective` is `tasks` where it is true. So a retried or speculative task counts
+once, while `tasks` keeps every attempt for measuring what retries cost. The selection is a
+column, so a Parquet reader of `tasks.parquet` gets it without sparkxray.
+
+A stage retry reruns only the partitions it lost, and numbers its tasks from `Index` 0 again. So
+a partition is read from `Partition ID`, which Spark writes from 3.3 on. An older log has only
+`Index`, which names a partition within one stage attempt. There a partition a later attempt
+reran after it succeeded counts once per attempt.
+
+`plan_node_metrics` counts only each stage's highest attempt instead, because the SQL tab does.
+So after a stage retry, its totals can fall short of the same metric summed over
+`tasks_effective`.
+
+`manifest.json` names what the log was written without, because Spark's defaults leave it out:
+
+| `lacks` | Spark writes it only with |
+| --- | --- |
+| `stage_executor_metrics` | `spark.eventLog.logStageExecutorMetrics` |
+| `block_updates` | `spark.eventLog.logBlockUpdates.enabled` |
+| `process_tree_metrics` | `spark.executor.processTreeMetrics.enabled` |
+
+Without stage executor metrics, each task's peaks are the log's only memory figures. Without
+process-tree metrics, `peak_python_rss_bytes` is null. Spark writes 0 for a metric it never
+measured, and the table does not pass that off as a measurement.

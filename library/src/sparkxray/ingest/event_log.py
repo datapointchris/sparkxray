@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import functools
 import hashlib
 import json
 import os
@@ -11,10 +12,13 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import BinaryIO
 from typing import TypeVar
 
+from sparkxray.cache_directory import PARTIAL_MARK
 from sparkxray.cache_directory import cache_root
+from sparkxray.cache_directory import installed_version
 from sparkxray.cache_directory import remove_superseded
 from sparkxray.cache_directory import used
 from sparkxray.errors import AmbiguousLocationError
@@ -32,6 +36,9 @@ from sparkxray.ingest.manifest import IngestManifest
 from sparkxray.ingest.manifest import ReadCodec
 from sparkxray.ingest.platforms import infer_platform
 
+if TYPE_CHECKING:
+    from sparkxray.tables.relations import Tables
+
 # How much of a file is read for its first line. Spark's own blocks fit the first size, and the
 # second holds the 128 KiB block the zstd tool writes.
 _HEAD_BYTES = (64 << 10, 1 << 20)
@@ -41,16 +48,37 @@ _FOUND_SHOWN = 10
 # Concurrent S3 reads for one ingest: first lines, and the files of a rolling log.
 _THREADS = 8
 _COPY_BLOCK = 1 << 20
+# How each compressed form a log arrives in starts, and the suffix that declares it.
+_COMPRESSED_STARTS = {
+    b'\x28\xb5\x2f\xfd': ('zstd', '.zstd'),
+    b'\x1f\x8b': ('gzip', '.gz'),
+    b'LZ4Block': ('lz4', '.lz4'),
+    b'\x82SNAPPY\x00': ('snappy', '.snappy'),
+}
 
 _Item = TypeVar('_Item')
 _Result = TypeVar('_Result')
 
 
-@dc.dataclass(frozen=True, slots=True)
+@dc.dataclass(frozen=True)
 class EventLog:
-    """One application's event log, resolved, downloaded and decoded where it needed to be."""
+    """One application's event log, resolved, downloaded and decoded where it needed to be.
+
+    `cache_directory` holds its downloads, decoded copies and tables.
+    """
 
     manifest: IngestManifest
+    cache_directory: Path
+
+    @functools.cached_property
+    def tables(self) -> Tables:
+        """The log's events as Parquet tables, built on first use and kept in the cache.
+
+        A second open of an unchanged log reads the tables already built.
+        """
+        from sparkxray.tables.build import build_tables  # DuckDB is imported only when tables are read
+
+        return build_tables(self)
 
     @classmethod
     def open(
@@ -98,10 +126,10 @@ class EventLog:
             spark_version=None,
             platform='other',
         )
-        head = _head_facts(EventLog(provisional).lines())
+        head = _head_facts(EventLog(provisional, cache).lines())
         app_id = head.app_id or candidate.app_id
         platform = infer_platform(app_id, head.spark_version, head.properties, head.classpath)
-        return cls(dc.replace(provisional, app_id=app_id, spark_version=head.spark_version, platform=platform))
+        return cls(dc.replace(provisional, app_id=app_id, spark_version=head.spark_version, platform=platform), cache)
 
     def lines(self) -> Iterator[bytes]:
         """Every event line of the log in order, without its newline.
@@ -226,6 +254,12 @@ def _rejection(source: Location, candidate: layouts.Candidate) -> _Rejection | N
         kind = str(event['Event']).rpartition('.')[2] or None
     if kind == 'SparkListenerLogStart':
         return None
+    if first.codec == 'none':
+        for start, (codec, suffix) in _COMPRESSED_STARTS.items():
+            if line.startswith(start):
+                hint = f'rename it to end in {suffix}, the suffix that declares {codec}'
+                compressed = NotAnEventLogError(f'{uri} is {codec}-compressed, but its name declares no codec', field='location', hint=hint)
+                return _Rejection(f'it is {codec}-compressed under a name that declares no codec', compressed)
     shown = line[:80].decode('utf-8', 'replace')
     refusal = NotAnEventLogError(
         f'{uri} is not a Spark event log: its first line is {shown!r}, where Spark writes SparkListenerLogStart', field='location'
@@ -311,8 +345,8 @@ def _cut_before_last(log_file: layouts.LogFile) -> CorruptLogError:
 class _Version:
     """The cache's entries for one version of one file: a copy of its whole lines, and whether its end was cut.
 
-    A version is the file's URI, ETag, modification time and size. Entries for older versions
-    of the file are removed once they go a day unused.
+    A version is the file's URI, ETag, modification time and size, read by the installed
+    sparkxray. Entries for older versions of the file are removed once they go a day unused.
     """
 
     copy: Path
@@ -322,7 +356,7 @@ class _Version:
     def of(cls, log_file: layouts.LogFile, cache: Path) -> _Version:
         listed = log_file.listed
         directory = cache / 'logs' / 'decoded' / hashlib.sha256(listed.uri.encode()).hexdigest()[:32]
-        identity = [listed.uri, listed.etag, listed.mtime_ns, listed.size_bytes, decoders.DECODER_VERSION]
+        identity = [listed.uri, listed.etag, listed.mtime_ns, listed.size_bytes, installed_version()]
         stem = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:32]
         remove_superseded(directory, stem)
         return cls(directory / f'{stem}.jsonl', directory / f'{stem}.json')
@@ -347,14 +381,14 @@ class _Version:
 
     def record_cut(self, cut: bool) -> None:
         self.record.parent.mkdir(parents=True, exist_ok=True)
-        partial = self.record.with_name(f'{self.record.name}.part-{os.getpid()}')
+        partial = self.record.with_name(f'{self.record.name}{PARTIAL_MARK}{os.getpid()}')
         partial.write_text(json.dumps({'cut': cut}))
         partial.replace(self.record)
 
     def partial_copy(self) -> Path:
         """Where this process writes the copy before it is whole."""
         self.copy.parent.mkdir(parents=True, exist_ok=True)
-        return self.copy.with_name(f'{self.copy.name}.part-{os.getpid()}')
+        return self.copy.with_name(f'{self.copy.name}{PARTIAL_MARK}{os.getpid()}')
 
 
 def _decoded_copy(local: Path, log_file: layouts.LogFile, version: _Version) -> bool:
