@@ -23,7 +23,7 @@ from sparkxray_cli.shared_parameters import ThresholdOption
 
 app = typer.Typer(
     no_args_is_help=True,
-    help='Find what slowed a run, worst first. findings list exits 3 when a finding reaches --fail-on, so it gates CI.',
+    help='Find what slowed a run, costliest first. findings list exits 3 when a finding reaches --fail-on, so it gates CI.',
 )
 
 RuleOption = Annotated[

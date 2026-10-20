@@ -96,7 +96,7 @@ def main(
     `LOG` is a log file or directory, an `s3://` URI, or the app id of a log already read. The
     first command on a log reads it into the cache, and every later one opens the cache.
 
-    `sparkxray findings list LOG` runs the rules, worst first, and exits 3 when a finding is
-    at or above `--fail-on`. Run any partial command with no arguments or `--help` to see what
+    `sparkxray findings list LOG` runs the rules, the most wall time a fix could recover first,
+    and exits 3 when a finding is at or above `--fail-on`. Run any partial command with no arguments or `--help` to see what
     comes next.
     """
