@@ -9,6 +9,7 @@ from typing import Annotated
 import typer
 from rich.text import Text
 from sparkxray.rules import Analysis
+from sparkxray.rules import Gate
 from sparkxray.rules import Severity
 
 from sparkxray_cli import render
@@ -74,14 +75,13 @@ def list_findings(
             render.note(f"skipped {skipped.rule_id}: it runs on explain(mode='cost') text only")
         else:
             render.note(f'skipped {skipped.rule_id}: the log holds no {", ".join(skipped.missing_signals)}')
-    exit_if_gated(analysis, fail_on)
+    exit_if_gated(gate)
 
 
-def exit_if_gated(analysis: Analysis, fail_on: Severity) -> None:
-    """Exit 3, naming the findings, when one is at or above `fail_on`."""
-    gate = analysis.gate(fail_on)
+def exit_if_gated(gate: Gate) -> None:
+    """Exit 3, naming the findings, when the gate blocks."""
     if not gate.passed:
-        render.note(f'{len(gate.blocking)} at or above {fail_on}: {", ".join(gate.blocking)}')
+        render.note(f'{len(gate.blocking)} at or above {gate.fail_on}: {", ".join(gate.blocking)}')
         raise typer.Exit(3)
 
 
