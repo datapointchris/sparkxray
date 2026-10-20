@@ -17,6 +17,7 @@ from sparkxray.cache_directory import installed_version
 from sparkxray.simulation.job_groups import JobGroup
 from sparkxray.simulation.job_groups import JobSpan
 from sparkxray.simulation.job_groups import group_jobs
+from sparkxray.simulation.stage_scheduler import StageGate
 from sparkxray.simulation.stage_scheduler import StageWork
 from sparkxray.simulation.stage_scheduler import critical_path_ms
 from sparkxray.simulation.stage_scheduler import group_wall_ms
@@ -41,6 +42,8 @@ MODEL_LIMITS = (
     'Stages queue in stage-id order. Fair-scheduler pools are not modeled.',
     'A task costs its run time alone, without its scheduler delay or deserialization. So a stage of many tiny tasks '
     'scales better here than on a cluster, the case stage.tiny-tasks and stage.scheduler-delay report.',
+    "SQL executions whose jobs ran at once all replay from their group's start. A thread that submitted its query "
+    'only after another of its own finished is not seen, so such a query may start sooner here than it could.',
 )
 _MS_AN_HOUR = 3_600_000
 
@@ -48,9 +51,9 @@ _RUN_SQL = f"""
 WITH {CORE_TIME_CTES}, {EXECUTOR_POOL_CTE}
 SELECT application.app_id, application.platform, run.end_epoch_ms - run.start_epoch_ms AS wall_ms,
   pool.executor_count, pool.executor_core_count, pool.resource_profile_id, pool.resource_profile_count,
-  core_totals.core_time_ms,
+  task_cpus.cpus AS task_cpu_count, core_totals.core_time_ms,
   (SELECT coalesce(sum(executor_run_time_ms), 0) FROM tasks WHERE NOT effective)::BIGINT AS retry_run_ms
-FROM application, run, pool, core_totals
+FROM application, run, pool, task_cpus, core_totals
 """
 # A stage counts toward the first job listing it, the job that ran it. A later job lists it only to skip it.
 # A job still running when the log ended runs to the run's end.
@@ -125,22 +128,54 @@ class RunModel:
         """The run's wall time on `slots` task slots: the driver's time, then each group replayed, or its span where it ran no task."""
         total = self.driver_ms
         for group in self.groups:
-            work = self._work(group)
-            total += group_wall_ms(work, slots) if work else group.span_ms
+            replay = self._replay(group)
+            if replay is None:
+                total += group.span_ms
+            else:
+                stages, gates = replay
+                total += group_wall_ms(stages, slots, gates)
         return total
 
     def critical_path_ms(self) -> int:
         """The run's wall time on unlimited slots: the driver's time, then each group's longest chain of stages."""
         total = self.driver_ms
         for group in self.groups:
-            work = self._work(group)
-            total += critical_path_ms(work) if work else group.span_ms
+            replay = self._replay(group)
+            if replay is None:
+                total += group.span_ms
+            else:
+                stages, gates = replay
+                total += critical_path_ms(stages, gates)
         return total
 
-    def _work(self, group: JobGroup) -> dict[int, StageWork]:
-        """The group's stages, or none where not one of them ran a task."""
+    def _replay(self, group: JobGroup) -> tuple[dict[int, StageWork], tuple[StageGate, ...]] | None:
+        """The group's stages and the gates keeping each execution's steps in order, or None where not one stage ran a task.
+
+        A step waits on the last step before it that ran a task, by the driver's time between them
+        and the span of every step between that ran none.
+        """
         work = {stage_id: self.stages[stage_id] for stage_id in group.stage_ids if stage_id in self.stages}
-        return work if any(stage.task_run_ms for stage in work.values()) else {}
+        if not any(stage.task_run_ms for stage in work.values()):
+            return None
+        gates = []
+        for sequence in group.sequences:
+            awaited: frozenset[int] = frozenset()
+            wait_ms = 0
+            previous_end: int | None = None
+            for step in sequence:
+                if previous_end is not None:
+                    wait_ms += step.start_epoch_ms - previous_end
+                ran = frozenset(stage_id for stage_id in step.stage_ids if stage_id in work and work[stage_id].task_run_ms)
+                if not ran:
+                    wait_ms += step.span_ms
+                else:
+                    if awaited or wait_ms:
+                        gates.append(StageGate(awaited, ran, wait_ms))
+                    awaited, wait_ms = ran, 0
+                previous_end = step.end_epoch_ms
+            if wait_ms:
+                gates.append(StageGate(awaited, frozenset(), wait_ms))
+        return work, tuple(gates)
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -162,8 +197,9 @@ class Simulation:
     """A run's reference times, its core-hours, and its estimated wall time at each executor count, as Sparklens's model gives them.
 
     Every time is in ms. The reference times and the model's check use the log's executors and
-    cores. The curve uses `curve_executor_core_count`, which a caller may set. A field is null
-    where the log names no executor's cores.
+    cores. The curve uses `curve_executor_core_count`, which a caller may set. An executor runs
+    its cores over `task_cpu_count` tasks at once, rounded down. A field is null where the log
+    names no executor's cores.
     """
 
     generated_by: str
@@ -173,6 +209,7 @@ class Simulation:
     executor_count: int
     executor_core_count: int | None
     core_count: int | None
+    task_cpu_count: int
     resource_profile_id: int | None
     resource_profile_count: int
     job_group_count: int
@@ -207,7 +244,7 @@ def simulate(log: EventLog, *, executors: Sequence[int] | None = None, cores: in
     had alive at once, a count rounding to 0 dropped. `cores` is each executor's cores, by default
     the log's: those of the resource profile most executors ran under. A count under 1 raises
     `ValueError`. Where the log names no executor's cores and `cores` is not given, the curve is
-    empty.
+    empty. So is it where an executor's cores are fewer than the `spark.task.cpus` a task holds.
     """
     if cores is not None and cores < 1:
         raise ValueError(f'cores is {cores}, and an executor needs at least 1')
@@ -218,16 +255,22 @@ def simulate(log: EventLog, *, executors: Sequence[int] | None = None, cores: in
     model = RunModel.read(tables)
     run_executors: int = run['executor_count']
     log_cores: int | None = run['executor_core_count']
+    task_cpus: int = run['task_cpu_count']
     total_cores = run_executors * log_cores if run_executors and log_cores else None
+    run_slots = run_executors * (log_cores // task_cpus) if run_executors and log_cores else 0
     curve_cores = cores or log_cores
     if executors is not None:
         counts = sorted(set(executors))
     else:
         counts = sorted({run_executors * percent // 100 for percent in DEFAULT_EXECUTOR_PERCENTS} - {0})
     task_run_ms = model.task_run_ms
+    task_core_ms = task_run_ms * task_cpus
     driver_ms, executor_ms = model.driver_ms, model.executor_ms
-    estimate = model.estimate_wall_ms(total_cores) if total_cores else None
+    estimate = model.estimate_wall_ms(run_slots) if run_slots else None
     wall_ms = model.wall_ms
+    curve: tuple[CurvePoint, ...] = ()
+    if curve_cores and curve_cores >= task_cpus:
+        curve = tuple(_point(model, count, curve_cores, task_cpus, run['platform']) for count in counts)
     return Simulation(
         generated_by=f'sparkxray {installed_version()}',
         app_id=run['app_id'],
@@ -236,6 +279,7 @@ def simulate(log: EventLog, *, executors: Sequence[int] | None = None, cores: in
         executor_count=run_executors,
         executor_core_count=log_cores,
         core_count=total_cores,
+        task_cpu_count=task_cpus,
         resource_profile_id=run['resource_profile_id'],
         resource_profile_count=run['resource_profile_count'],
         job_group_count=len(model.groups),
@@ -245,27 +289,27 @@ def simulate(log: EventLog, *, executors: Sequence[int] | None = None, cores: in
         driver_ms=driver_ms,
         executor_ms=executor_ms,
         critical_path_ms=model.critical_path_ms(),
-        perfect_parallel_ms=driver_ms + round(task_run_ms / total_cores) if total_cores else None,
+        perfect_parallel_ms=driver_ms + round(task_run_ms / run_slots) if run_slots else None,
         single_core_ms=driver_ms + task_run_ms,
         model_estimate_ms=estimate,
         model_error_share=round(abs(wall_ms - estimate) / wall_ms, 4) if estimate is not None and wall_ms > 0 else None,
         available_core_hours=_hours(total_cores * wall_ms) if total_cores else None,
         executor_lifetime_core_hours=_hours(run['core_time_ms']) if run['core_time_ms'] is not None else None,
-        used_core_hours=_hours(task_run_ms),
+        used_core_hours=_hours(task_core_ms),
         driver_wasted_core_hours=_hours(total_cores * driver_ms) if total_cores else None,
-        executor_wasted_core_hours=_hours(total_cores * executor_ms - task_run_ms) if total_cores else None,
+        executor_wasted_core_hours=_hours(total_cores * executor_ms - task_core_ms) if total_cores else None,
         curve_executor_core_count=curve_cores,
-        curve=tuple(_point(model, count, curve_cores, run['platform']) for count in counts) if curve_cores else (),
+        curve=curve,
     )
 
 
-def _point(model: RunModel, executor_count: int, cores: int, platform: str) -> CurvePoint:
-    estimate = model.estimate_wall_ms(executor_count * cores)
+def _point(model: RunModel, executor_count: int, cores: int, task_cpus: int, platform: str) -> CurvePoint:
+    estimate = model.estimate_wall_ms(executor_count * (cores // task_cpus))
     core_ms = estimate * executor_count * cores
     return CurvePoint(
         executor_count=executor_count,
         estimated_wall_ms=estimate,
-        utilization_share=round(model.task_run_ms / core_ms, 4) if core_ms else None,
+        utilization_share=round(model.task_run_ms * task_cpus / core_ms, 4) if core_ms else None,
         core_hours=_hours(core_ms),
         dpu_hours=_hours(core_ms / GLUE_DPU_CORES) if platform == 'glue' else None,
     )

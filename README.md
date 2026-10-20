@@ -149,11 +149,12 @@ sparkxray logs diff last-good-run tonights-run --fail-on high
 ```
 
 `executors simulate` estimates the run's wall time at other executor counts, with Sparklens's
-model. Each group of jobs that ran together is replayed onto executors times cores task slots,
-every task taking the time it took, and the time no job ran stays the same. The counts default to
+model. Each group of jobs that ran together is replayed onto the executors' task slots, every
+task taking the time it took, and the time no job ran stays the same. An executor has its cores
+over `spark.task.cpus` slots. The counts default to
 10% to 500% of the most executors the run had alive at once. `--executors 2..64` or
 `--executors 4,8,16` names others, and `--cores` sets each executor's cores. Beside the curve it
-prints the run on unlimited executors, at today's size with no skew, and on one core, and the
+prints the run on unlimited executors, at today's size with no skew, and one task at a time, and the
 core-hours the driver and the executors left idle. Its model error compares the estimate at the
 run's own size with the wall time. A large one, as dynamic allocation gives, says to trust the
 curve less. A task's time is held fixed, so the spill fewer executors cause and the shuffle more

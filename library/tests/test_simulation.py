@@ -35,6 +35,14 @@ _FOUR_JOBS = RunModel(
     {0: StageWork((1,)), 1: StageWork((1,)), 2: StageWork((1,))},
 )
 
+# Execution 1 ran a broadcast job, then 100 ms later the join job reading it through the driver,
+# while execution 2's job ran across both. The join cannot start before the broadcast and the gap.
+_GATED_STEPS = RunModel(
+    300,
+    group_jobs([JobSpan(0, 1, 0, 100, (0,)), JobSpan(1, 2, 50, 250, (2,)), JobSpan(2, 1, 200, 300, (1,))])[0],
+    {0: StageWork((100,)), 1: StageWork((100,)), 2: StageWork((200,))},
+)
+
 
 @pytest.mark.parametrize(
     ('model', 'slots', 'expected_ms'),
@@ -52,6 +60,7 @@ _FOUR_JOBS = RunModel(
         ],
         (_one_job(_fan_in(100)), 100, 2),
         (_FOUR_JOBS, 1, 3),
+        (_GATED_STEPS, 3, 300),
     ],
 )
 def test_the_replay_gives_the_diamond_dags_times_and_sparklens_suites(model: RunModel, slots: int, expected_ms: int) -> None:

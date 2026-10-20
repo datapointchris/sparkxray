@@ -122,11 +122,11 @@ def simulate_executors(
 ) -> None:
     """Estimate the run's wall time at other executor counts, and split its time between the driver and the executors.
 
-    Each group of jobs that ran together is replayed onto executors times cores task slots, every
-    task taking the run time it took, as Sparklens's model replays them. The time no job ran stays
-    the same at every count. The reference times frame the curve: the run on unlimited executors,
-    at today's size with no skew, and on one core. The model's error is its estimate at the run's
-    own size against the run's wall time.
+    Each group of jobs that ran together is replayed onto the executors' task slots, every task
+    taking the run time it took, as Sparklens's model replays them. An executor has its cores over
+    spark.task.cpus slots. The time no job ran stays the same at every count. The reference times
+    frame the curve: the run on unlimited executors, at today's size with no skew, and one task at
+    a time. The model's error is its estimate at the run's own size against the run's wall time.
 
     Exits 0 when it ran and 2 on a usage error. Exits 3 when the log could not be read, or its stages could not be replayed.
     """
@@ -140,8 +140,16 @@ def simulate_executors(
             f'executors ran under {simulation.resource_profile_count} resource profiles, '
             f'and the cores are those of profile {simulation.resource_profile_id}, which most ran under'
         )
-    if not simulation.curve:
+    if simulation.curve:
+        return
+    curve_cores = simulation.curve_executor_core_count
+    if curve_cores is None or curve_cores >= simulation.task_cpu_count:
         render.note("no curve was estimated, because the log names no executor's cores; --executors and --cores set them")
+    else:
+        render.note(
+            f'no curve was estimated, because {simulation.curve_executor_core_count} cores an executor are fewer than '
+            f'the {simulation.task_cpu_count} spark.task.cpus each task holds; --cores sets them'
+        )
 
 
 def _print_simulation(simulation: Simulation) -> None:

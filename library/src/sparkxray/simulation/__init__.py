@@ -2,6 +2,7 @@
 
 from sparkxray.simulation.job_groups import JobGroup
 from sparkxray.simulation.job_groups import JobSpan
+from sparkxray.simulation.job_groups import JobStep
 from sparkxray.simulation.job_groups import group_jobs
 from sparkxray.simulation.simulated_run import DEFAULT_EXECUTOR_PERCENTS
 from sparkxray.simulation.simulated_run import MODEL_LIMITS
@@ -9,6 +10,7 @@ from sparkxray.simulation.simulated_run import CurvePoint
 from sparkxray.simulation.simulated_run import RunModel
 from sparkxray.simulation.simulated_run import Simulation
 from sparkxray.simulation.simulated_run import simulate
+from sparkxray.simulation.stage_scheduler import StageGate
 from sparkxray.simulation.stage_scheduler import StageWork
 from sparkxray.simulation.stage_scheduler import critical_path_ms
 from sparkxray.simulation.stage_scheduler import group_wall_ms
@@ -19,8 +21,10 @@ __all__ = [
     'CurvePoint',
     'JobGroup',
     'JobSpan',
+    'JobStep',
     'RunModel',
     'Simulation',
+    'StageGate',
     'StageWork',
     'critical_path_ms',
     'group_jobs',

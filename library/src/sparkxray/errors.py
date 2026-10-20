@@ -169,7 +169,7 @@ class UnknownMetricError(SparkxrayError):
 
 class SimulationStalledError(SparkxrayError):
     code = 'E-SIM-001'
-    raised_when = 'the executor simulation could not finish a job group, because a stage waits on one that never runs; names the stages'
+    raised_when = 'the executor simulation could not finish a job group, because its stages read each other in a cycle; names the stages'
     exit_code = 3
 
 
