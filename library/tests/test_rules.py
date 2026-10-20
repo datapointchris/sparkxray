@@ -80,12 +80,14 @@ def _misfired(description: str, fired: set[str], families: tuple[str, ...]) -> t
     [
         ('logs/spark-3.5.9/local-1792406949080.zstd', ('plan.',)),
         ('logs/spark-4.2.0/eventlog_v2_local-1792407003364', ('plan.',)),
+        ('logs/spark-3.5.9-warmup/local-1792454673559.zstd', ('plan.',)),
         ('logs/spark-3.5.9-plan-rules/local-1792441743480.zstd', ('plan.',)),
         ('logs/spark-4.2.0-plan-rules/local-1792441776528.zstd', ('plan.',)),
         ('explain/spark-3.5.9-plan-rules/cost-mode.json', ('plan.',)),
         ('explain/spark-4.2.0-plan-rules/cost-mode.json', ('plan.',)),
         ('logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd', ('stage.', 'config.')),
         ('logs/spark-4.2.0-stage-rules/eventlog_v2_app-20261019215829-0000', ('stage.', 'config.')),
+        ('logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd', ('stage.', 'config.')),
     ],
 )
 def test_each_rule_fires_where_a_fixture_lists_it_and_a_claimed_family_fires_nowhere_else(
