@@ -235,8 +235,8 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "number", "parent", "children", "subqueries", "operator", "label", "headline", "details", "runtime_size_bytes",
-        "runtime_row_count", "stage_ids", "metrics", "finding_ids"
+        "number", "parent", "children", "subqueries", "operator", "label", "headline", "details", "codegen_stage",
+        "runtime_size_bytes", "runtime_row_count", "stage_ids", "metrics", "own_spill_bytes", "finding_ids"
       ],
       "properties": {
         "number": {"type": "integer"},
@@ -269,9 +269,17 @@
             "shuffle_read": {"type": ["string", "null"]}
           }
         },
+        "codegen_stage": {
+          "type": ["integer", "null"],
+          "description": "The whole-stage codegen pipeline the node runs in, whose duration its top node carries."
+        },
         "runtime_size_bytes": {"type": ["integer", "null"]},
         "runtime_row_count": {"type": ["integer", "null"]},
         "stage_ids": {"type": "array", "items": {"type": "integer"}},
+        "own_spill_bytes": {
+          "type": ["number", "null"],
+          "description": "The part of the node's spill size no node below it in its task also counts. Null where it declares none."
+        },
         "metrics": {
           "type": "array",
           "items": {

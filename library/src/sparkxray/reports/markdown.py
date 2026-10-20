@@ -17,7 +17,6 @@ from sparkxray.rules.findings import Finding
 from sparkxray.spark_ui_format import shown_in
 from sparkxray.summaries.annotated_plans import AnnotatedNode
 from sparkxray.summaries.annotated_plans import AnnotatedPlan
-from sparkxray.summaries.annotated_plans import NodeMetric
 from sparkxray.tables.registry import column_unit
 
 _LACKS = {
@@ -208,7 +207,7 @@ def plan_lines(plan: AnnotatedPlan, findings: Mapping[str, Finding]) -> list[str
 
     def draw(node: AnnotatedNode, prefix: str, under: str, named: str) -> None:
         lines.append(f'{prefix}{named}{_node_line(node, findings)}')
-        measured = _measured_line(node)
+        measured = _measured_line(plan, node)
         if measured:
             lines.append(f'{under}{measured}')
         branches = [(plan.nodes[number], '') for number in node.children]
@@ -227,7 +226,8 @@ def plan_lines(plan: AnnotatedPlan, findings: Mapping[str, Finding]) -> list[str
 
 
 def _node_line(node: AnnotatedNode, findings: Mapping[str, Finding]) -> str:
-    line = node.headline()
+    codegen = f'*({node.codegen_stage}) ' if node.codegen_stage is not None else ''
+    line = f'n{node.number} {codegen}{node.headline()}'
     runtime = []
     if node.runtime_size_bytes is not None:
         runtime.append(shown_in('bytes', node.runtime_size_bytes))
@@ -242,18 +242,10 @@ def _node_line(node: AnnotatedNode, findings: Mapping[str, Finding]) -> str:
     return line
 
 
-def _measured_line(node: AnnotatedNode) -> str:
+def _measured_line(plan: AnnotatedPlan, node: AnnotatedNode) -> str:
     measured = [f'stage{"s" if len(node.stage_ids) > 1 else ""} {shown_in(None, list(node.stage_ids))}'] if node.stage_ids else []
-    measured += [shown for shown in map(_shown_metric, node.metrics) if shown]
+    measured += [shown for shown in (plan.shown_metric(node, metric) for metric in node.metrics) if shown]
     return ' · '.join(measured)
-
-
-def _shown_metric(metric: NodeMetric) -> str | None:
-    if metric.total is None:
-        if not metric.max:
-            return None
-        return f'{metric.name} ({", ".join(shown_in(metric.unit, value) for value in (metric.min, metric.median, metric.max))})'
-    return f'{metric.name} {shown_in(metric.unit, metric.total)}' if metric.total else None
 
 
 def _config(report: Report) -> str:

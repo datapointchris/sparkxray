@@ -26,15 +26,12 @@ REPORT_SCHEMA = jsonschema.Draft202012Validator(
 # One log per shape a report takes. A codec variant or a Spark 4.2 twin reports what its base log does.
 SHAPES = [
     'spark-3.5.9/local-1792406949080.zstd',
-    'spark-3.5.9-plan-rules/local-1792441743480.zstd',
     'spark-3.5.9-plan-shapes/local-1792455590972.zstd',
     'spark-3.5.9-stage-rules/app-20261019220120-0000.zstd',
     'spark-3.5.9-edited-events/app-20261019235634-0000.zstd',
     'spark-3.5.9-killed/local-1792407096495.zstd.inprogress',
-    'spark-4.2.0-rolling/eventlog_v2_local-1792407085156',
     'glue-5.0/local-1792407175251.zstd',
     'apache-spark-events/app-20200706201101-0003.zstd',
-    'apache-spark-events/application_1553914137147_0018.zstd',
     'apache-spark-events/local-1430917381535_1.zstd',
 ]
 

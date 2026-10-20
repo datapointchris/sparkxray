@@ -10,7 +10,6 @@ from rich.tree import Tree
 from sparkxray.rules import Finding
 from sparkxray.summaries import AnnotatedNode
 from sparkxray.summaries import AnnotatedPlan
-from sparkxray.summaries import NodeMetric
 from sparkxray.summaries import annotated_plan
 
 from sparkxray_cli import render
@@ -142,29 +141,7 @@ def _label(plan: AnnotatedPlan, node: AnnotatedNode, findings: dict[str, Finding
         stage = f'stage {finding.scope.stage_id}, ' if finding.scope.stage_id is not None else ''
         label.append(f'  ◀ {finding.rule_id} ({stage}{finding.severity})', style=render.SEVERITY_STYLES[finding.severity])
     measured = [f'stage{"s" if len(node.stage_ids) > 1 else ""} {render.shown_in(None, list(node.stage_ids))}'] if node.stage_ids else []
-    measured += [shown for shown in (_shown_metric(plan, node, metric) for metric in node.metrics) if shown]
+    measured += [shown for shown in (plan.shown_metric(node, metric) for metric in node.metrics) if shown]
     if measured:
         label.append('\n' + ' · '.join(measured), style='dim')
     return label
-
-
-def _shown_metric(plan: AnnotatedPlan, node: AnnotatedNode, metric: NodeMetric) -> str | None:
-    """A metric as its name and total, or for an average its min, median and max. Zero, and an average nothing reported, print nothing.
-
-    A pipeline's `duration` names the operators it covers, and a `spill size` others count too states the node's own part.
-    """
-    if metric.total is None:
-        if not metric.max:
-            return None
-        spread = ', '.join(render.shown_in(metric.unit, value) for value in (metric.min, metric.median, metric.max))
-        return f'{metric.name} ({spread})'
-    if not metric.total:
-        return None
-    shown = f'{metric.name} {render.shown_in(metric.unit, metric.total)}'
-    members = plan.codegen_members(node) if metric.name == 'duration' else ()
-    if len(members) > 1:
-        covered = ', '.join(f'n{member.number} {member.operator}' for member in members)
-        return f'*({node.codegen_stage}) {shown}: {covered} and their inputs'
-    if metric.name == 'spill size' and node.own_spill_bytes is not None and node.own_spill_bytes != metric.total:
-        return f'{shown} with the nodes below, {render.shown_in(metric.unit, node.own_spill_bytes)} its own'
-    return shown
