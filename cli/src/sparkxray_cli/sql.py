@@ -93,9 +93,10 @@ def show(
     skipped_stage_ids are the stages it skipped, because an earlier stage had written their
     shuffle output. A node is numbered as `plans show` numbers the last plan, such as n9.
 
-    Each shuffle read AQE planned gives the partitions the exchange below it `written`, and the
-    partitions it `read` them as. Of those, `coalesced` merged small ones, `skewed` were split
-    into `splits` reads, and `empty` held no rows. `data` is the bytes it read.
+    In the shuffle reads AQE planned, `written` is the partitions the exchange below wrote, and
+    `read` the partitions AQE read them as. `coalesced` counts the reads that merged small
+    partitions, `skewed` the partitions split for skew, `splits` the reads those became, and
+    `empty` the partitions that held no rows. `data` is the bytes read.
     """
     detail = sql_detail(open_tables(log), execution_id)
     if as_json:
