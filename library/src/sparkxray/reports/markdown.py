@@ -6,8 +6,8 @@ word, so it reads the same in a plain-text viewer.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
-from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
 
@@ -19,6 +19,7 @@ from sparkxray.summaries.annotated_plans import AnnotatedNode
 from sparkxray.summaries.annotated_plans import AnnotatedPlan
 from sparkxray.tables.registry import column_unit
 
+_CODE_SPAN = re.compile(r'(`[^`]*`)')
 _LACKS = {
     'stage_executor_metrics': 'stage executor metrics',
     'block_updates': 'block updates',
@@ -112,8 +113,22 @@ def _finding_details(finding: Finding) -> list[str]:
         lines += ['What to try:', '', *(f'{index}. {_inline(step)}' for index, step in enumerate(finding.remediation, start=1)), '']
     if finding.docs:
         lines += ['Read more:', '', *(f'- <{link}>' for link in finding.docs), '']
-    lines += [f'How the rule decides: `sparkxray rules show {finding.rule_id}`', '', '</details>']
+    lines += [f'How the rule decides: `{_rule_command(finding)}`', '', '</details>']
     return lines
+
+
+def _rule_command(finding: Finding) -> str:
+    """`rules show` for the finding's rule at the thresholds it was judged by, so the lesson states the values its table does."""
+    overrides = ''.join(
+        f' --threshold {finding.rule_id}.{name}={_raw(applied.value)}'
+        for name, applied in finding.thresholds.items()
+        if applied.source != 'default'
+    )
+    return f'sparkxray rules show {finding.rule_id}{overrides}'
+
+
+def _raw(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else repr(float(value))
 
 
 def _skipped(report: Report) -> str:
@@ -162,23 +177,29 @@ def _sql(report: Report) -> str:
         ('Jobs', 'job_count'),
         ('Stages', 'stage_count'),
     )
-    rows = [(*(_shown(key, execution.execution[key]) for _, key in columns), str(len(execution.finding_ids))) for execution in report.sql]
-    lines = ['## SQL executions', '', *_table((*(title for title, _ in columns), 'Findings'), rows)]
-    findings = {finding.finding_id: finding for finding in report.findings}
+    rows = [
+        (
+            *(_shown(key, execution.execution[key]) for _, key in columns),
+            ', '.join(f'`{key}={value}`' for key, value in execution.modified_configs.items()),
+            str(len(execution.finding_ids)),
+        )
+        for execution in report.sql
+    ]
+    lines = ['## SQL executions', '', *_table((*(title for title, _ in columns), 'Settings it set', 'Findings'), rows)]
     for execution in report.sql:
         if execution.finding_ids and execution.plan is not None:
-            lines += ['', *_execution_details(execution, execution.plan, findings)]
+            lines += ['', *_execution_details(execution, execution.plan)]
     if any(not execution.finding_ids for execution in report.sql):
         lines += ['', 'An execution no finding names shows no plan here. The JSON report carries every plan.']
     return '\n'.join(lines)
 
 
-def _execution_details(execution: SqlSummary, plan: AnnotatedPlan, findings: Mapping[str, Finding]) -> list[str]:
+def _execution_details(execution: SqlSummary, plan: AnnotatedPlan) -> list[str]:
     description = execution.execution.get('description')
     title = f'SQL {plan.execution_id}' + (f' · {description}' if description else '')
     version = f'final plan, version {plan.version}' if plan.is_final else f'last plan, version {plan.version}, not final'
     lines = ['<details>', f'<summary>{_html(title)}: its {version}</summary>', '']
-    lines += [f'    {line}' for line in plan_lines(plan, findings)]
+    lines += [f'    {line}' for line in plan_lines(plan)]
     if plan.truncated:
         lines += ['', 'Spark cut this plan short, so a node past the cut is not in it.']
     changes = execution.aqe_changes
@@ -201,15 +222,15 @@ def _execution_details(execution: SqlSummary, plan: AnnotatedPlan, findings: Map
     return lines
 
 
-def plan_lines(plan: AnnotatedPlan, findings: Mapping[str, Finding]) -> list[str]:
-    """The plan as a tree of plain text: each node's headline and finding marks, then a line of its stages and metrics."""
+def plan_lines(plan: AnnotatedPlan) -> list[str]:
+    """The plan as a tree of plain text, each node drawn as `plans show` draws it: its line, then its stages and metrics."""
     lines: list[str] = []
 
     def draw(node: AnnotatedNode, prefix: str, under: str, named: str) -> None:
-        lines.append(f'{prefix}{named}{_node_line(node, findings)}')
-        measured = _measured_line(plan, node)
-        if measured:
-            lines.append(f'{under}{measured}')
+        line = plan.node_line(node)
+        lines.append(f'{prefix}{named}{line.headline()}')
+        if line.measured:
+            lines.append(f'{under}{line.measured}')
         branches = [(plan.nodes[number], '') for number in node.children]
         branches += [
             (plan.nodes[subquery.root], f'subquery {subquery.subquery_id}  ' if subquery.subquery_id is not None else 'subquery  ')
@@ -225,34 +246,17 @@ def plan_lines(plan: AnnotatedPlan, findings: Mapping[str, Finding]) -> list[str
     return [line.rstrip() for line in lines]
 
 
-def _node_line(node: AnnotatedNode, findings: Mapping[str, Finding]) -> str:
-    codegen = f'*({node.codegen_stage}) ' if node.codegen_stage is not None else ''
-    line = f'n{node.number} {codegen}{node.headline()}'
-    runtime = []
-    if node.runtime_size_bytes is not None:
-        runtime.append(shown_in('bytes', node.runtime_size_bytes))
-    if node.runtime_row_count is not None:
-        runtime.append(f'{shown_in("rows", node.runtime_row_count)} rows')
-    if runtime:
-        line += f'  {" · ".join(runtime)} (runtime)'
-    for finding_id in node.finding_ids:
-        finding = findings[finding_id]
-        stage = f'stage {finding.scope.stage_id}, ' if finding.scope.stage_id is not None else ''
-        line += f'  ◀ {finding.rule_id} ({stage}{finding.severity})'
-    return line
-
-
-def _measured_line(plan: AnnotatedPlan, node: AnnotatedNode) -> str:
-    measured = [f'stage{"s" if len(node.stage_ids) > 1 else ""} {shown_in(None, list(node.stage_ids))}'] if node.stage_ids else []
-    measured += [shown for shown in (plan.shown_metric(node, metric) for metric in node.metrics) if shown]
-    return ' · '.join(measured)
-
-
 def _config(report: Report) -> str:
     rows = [(f'`{entry.key}`', f'`{entry.value}`' if entry.value is not None else 'unset (default)') for entry in report.config]
-    return '\n'.join(
-        ['## Configuration', '', 'The settings the rules reason about, as the run recorded them.', '', *_table(('Key', 'Value'), rows)]
-    )
+    lines = [
+        '## Configuration',
+        '',
+        'The settings the rules read, and each one a fix above names, as the run launched with them. An execution that '
+        'set one itself shows it under "Settings it set" above, and the rules judge that execution by its own value.',
+        '',
+        *_table(('Key', 'Value'), rows),
+    ]
+    return '\n'.join(lines)
 
 
 def _shown(key: str, value: Any) -> str:
@@ -274,8 +278,18 @@ def _listed(items: Sequence[str]) -> str:
 
 
 def _inline(text: str) -> str:
-    return ' '.join(str(text).split())
+    """Text on one line, `&`, `<` and `>` escaped outside its code spans, so a renderer shows `<lambda>` rather than drop it as a tag."""
+    parts = _CODE_SPAN.split(_folded(text))
+    return ''.join(part if index % 2 else _escaped(part) for index, part in enumerate(parts))
 
 
 def _html(text: str) -> str:
-    return _inline(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    return _escaped(_folded(text))
+
+
+def _folded(text: str) -> str:
+    return ' '.join(str(text).split())
+
+
+def _escaped(text: str) -> str:
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')

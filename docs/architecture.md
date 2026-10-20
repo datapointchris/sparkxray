@@ -331,7 +331,9 @@ Each lists the values that would have worked.
 library, plan drawing included, so a Glue job writes the same report without the command line's
 Typer and rich.
 
-A report carries no timestamp and prints every instant in UTC. So the same log, thresholds and
+A report carries no timestamp and prints every instant in UTC. It names a local log by its file
+name, and each of its files by the path from the directory holding it. It leaves out the tables'
+cache key, which hashes each file's modification time. So the same log file, thresholds and
 sparkxray version write the same bytes on any machine, and a committed report diffs only where the
 run did. `generated_by` names the version, which is what changes the output.
 

@@ -1,8 +1,9 @@
 """One document per analyzed log: the run, its usage, what the rules found, and the stages, SQL and settings behind it.
 
 `build_report` gathers the `Report`, and `render_json` and `render_markdown` only format it. A
-report holds no time it was made, so the same log, thresholds and sparkxray version give the same
-bytes. `schemas/report.json` in the package is the JSON's schema. A removed field or a changed
+report holds no time it was made, and names a local log by its file name. So the same log file,
+thresholds and sparkxray version give the same bytes on any machine. `schemas/report.json` in the
+package is the JSON's schema. A removed field or a changed
 meaning bumps `SCHEMA_VERSION`, and an added field does not.
 """
 
@@ -11,6 +12,9 @@ from __future__ import annotations
 import dataclasses as dc
 import json
 import os
+import posixpath
+import re
+import urllib.parse
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -24,6 +28,7 @@ from sparkxray.plan.aqe_changes import AqeChanges
 from sparkxray.rules.analysis import Analysis
 from sparkxray.rules.analysis import SkippedRule
 from sparkxray.rules.findings import Finding
+from sparkxray.rules.spark_settings import READ_BY_RULES
 from sparkxray.summaries.annotated_plans import AnnotatedPlan
 from sparkxray.summaries.annotated_plans import annotated_plan
 from sparkxray.summaries.application import application_detail
@@ -71,34 +76,14 @@ _EXECUTOR_KEYS = (
     'peak_memory_source',
     'remove_reason',
 )
-# The settings the rules reason about. A family is listed by its keys the rules read, and any
-# other key of it the run set joins them.
-CONFIG_KEYS = (
-    'spark.sql.adaptive.enabled',
-    'spark.sql.adaptive.coalescePartitions.enabled',
-    'spark.sql.adaptive.skewJoin.enabled',
-    'spark.sql.adaptive.advisoryPartitionSizeInBytes',
-    'spark.sql.adaptive.autoBroadcastJoinThreshold',
-    'spark.sql.shuffle.partitions',
-    'spark.sql.autoBroadcastJoinThreshold',
-    'spark.sql.files.maxPartitionBytes',
-    'spark.executor.memory',
-    'spark.executor.cores',
-    'spark.executor.instances',
-    'spark.executor.memoryOverhead',
-    'spark.driver.memory',
-    'spark.driver.cores',
-    'spark.dynamicAllocation.enabled',
-    'spark.dynamicAllocation.minExecutors',
-    'spark.dynamicAllocation.maxExecutors',
-    'spark.speculation',
-    'spark.eventLog.logStageExecutorMetrics',
-)
+# A setting a finding's fix names, such as `spark.sql.autoBroadcastJoinThreshold`, and not a call such as `spark.conf.set(`.
+_SETTING_KEY = re.compile(r'\bspark(?:\.[A-Za-z][A-Za-z0-9]*)+(?![\w(])')
 _CONFIG_FAMILIES = ('spark.sql.adaptive.', 'spark.dynamicAllocation.')
 _CONFIG_SQL = f"""
 SELECT key, value FROM environment
 WHERE section = 'spark' AND (list_contains($keys, key) OR {' OR '.join(f"starts_with(key, '{family}')" for family in _CONFIG_FAMILIES)})
 """
+_MODIFIED_CONFIGS_SQL = 'SELECT execution_id, modified_configs FROM sql_executions'
 _USAGE_SQL = f"""
 WITH {CORE_TIME_CTES}
 SELECT round(core_totals.core_time_ms / 3600000, 4) AS core_hours,
@@ -131,7 +116,7 @@ class AppSummary:
 
 @dc.dataclass(frozen=True, slots=True)
 class LogFile:
-    """One file of the log, in read order."""
+    """One file of the log, in read order. A local file's `uri` is relative to the directory holding the log."""
 
     uri: str
     size_bytes: int
@@ -143,7 +128,7 @@ class LogFile:
 
 @dc.dataclass(frozen=True, slots=True)
 class LogSummary:
-    """The log the report read, and what it lacked. `tables_key` names the tables built from it, by the files and sparkxray's version."""
+    """The log the report read, and what it lacked. A local `source` is the log's name, and an `s3://` one its whole URI."""
 
     source: str
     layout: str
@@ -153,7 +138,6 @@ class LogSummary:
     in_progress: bool
     truncated_tail: bool
     lacks: tuple[str, ...]
-    tables_key: str
 
     def to_json(self) -> dict[str, Any]:
         return {**dc.asdict(self), 'files': [file.to_json() for file in self.files], 'lacks': list(self.lacks)}
@@ -176,12 +160,14 @@ class Usage:
 
 @dc.dataclass(frozen=True, slots=True)
 class SqlSummary:
-    """One SQL execution: its `sql list` row, the findings about it, what AQE changed, and its last plan annotated.
+    """One SQL execution: its `sql list` row, the settings it set, the findings about it, what AQE changed, and its last plan annotated.
 
-    `plan` is None where the log holds no plan for it.
+    `modified_configs` holds each setting the execution's session changed from the run's launch
+    value, which the rules judge it by. `plan` is None where the log holds no plan for it.
     """
 
     execution: Mapping[str, Any]
+    modified_configs: Mapping[str, str]
     finding_ids: tuple[str, ...]
     aqe_changes: AqeChanges | None
     plan: AnnotatedPlan | None
@@ -192,6 +178,7 @@ class SqlSummary:
             plan = {key: value for key, value in self.plan.to_json().items() if key not in ('execution', 'findings')}
         return {
             **self.execution,
+            'modified_configs': dict(self.modified_configs),
             'finding_ids': list(self.finding_ids),
             'aqe_changes': None if self.aqe_changes is None else self.aqe_changes.to_json(),
             'plan': plan,
@@ -200,7 +187,7 @@ class SqlSummary:
 
 @dc.dataclass(frozen=True, slots=True)
 class ConfigEntry:
-    """A setting the rules reason about, as the run recorded it. `value` is None where the run left it unset, at Spark's default."""
+    """A setting the rules read or a finding's fix names, as the run launched with it. `value` is None where the run left it unset."""
 
     key: str
     value: str | None
@@ -257,6 +244,7 @@ def build_report(log: EventLog, analysis: Analysis | None = None) -> Report:
     manifest = tables.manifest
     ingest = manifest.ingest
     usage = rows_of(tables.query(_USAGE_SQL)).to_json()
+    modified = {row['execution_id']: row['modified_configs'] or {} for row in rows_of(tables.query(_MODIFIED_CONFIGS_SQL)).to_json()}
     executions = []
     for execution in sql_summaries(tables).to_json():
         execution_id = execution['execution_id']
@@ -270,8 +258,11 @@ def build_report(log: EventLog, analysis: Analysis | None = None) -> Report:
             else tuple(finding.finding_id for finding in found.findings if finding.scope.sql_execution_id == execution_id)
         )
         changes = sql_detail(tables, execution_id).aqe_changes if execution['plan_version_count'] > 1 else None
-        executions.append(SqlSummary(execution, about, changes, plan))
-    recorded = dict(tables.query(_CONFIG_SQL, {'keys': list(CONFIG_KEYS)}).fetchall())
+        executions.append(SqlSummary(execution, dict(sorted(modified.get(execution_id, {}).items())), about, changes, plan))
+    named = {key for finding in found.findings for step in finding.remediation for key in _SETTING_KEY.findall(step)}
+    keys = set(READ_BY_RULES) | named
+    recorded = dict(tables.query(_CONFIG_SQL, {'keys': sorted(keys)}).fetchall())
+    source = ingest.source
     return Report(
         generated_by=f'sparkxray {installed_version()}',
         app=AppSummary(
@@ -284,15 +275,14 @@ def build_report(log: EventLog, analysis: Analysis | None = None) -> Report:
             wall_time_ms=application.get('duration_ms'),
         ),
         log=LogSummary(
-            source=ingest.source,
+            source=_portable(source, source),
             layout=ingest.layout,
-            files=tuple(LogFile(file.uri, file.size_bytes, file.codec) for file in ingest.files),
+            files=tuple(LogFile(_portable(file.uri, source), file.size_bytes, file.codec) for file in ingest.files),
             size_bytes=sum(file.size_bytes for file in ingest.files),
             compacted=ingest.compacted,
             in_progress=ingest.in_progress,
             truncated_tail=ingest.truncated_tail,
             lacks=tuple(manifest.lacks),
-            tables_key=manifest.key,
         ),
         usage=Usage(**usage[0]) if usage else Usage(None, None, None, None, None, None),
         findings=found.findings,
@@ -303,8 +293,16 @@ def build_report(log: EventLog, analysis: Analysis | None = None) -> Report:
         ),
         sql=tuple(executions),
         executors=tuple({key: executor[key] for key in _EXECUTOR_KEYS} for executor in executor_summaries(tables).to_json()),
-        config=tuple(ConfigEntry(key, recorded.get(key)) for key in sorted(set(CONFIG_KEYS) | set(recorded))),
+        config=tuple(ConfigEntry(key, recorded.get(key)) for key in sorted(keys | set(recorded))),
     )
+
+
+def _portable(uri: str, source: str) -> str:
+    """A local file as a path from the directory holding the log, so no path on the writing machine shows. Other URIs whole."""
+    if not source.startswith('file:'):
+        return uri
+    holding = posixpath.dirname(urllib.parse.unquote(urllib.parse.urlparse(source).path).rstrip('/'))
+    return posixpath.relpath(urllib.parse.unquote(urllib.parse.urlparse(uri).path), holding)
 
 
 def render_json(report: Report) -> str:
@@ -313,8 +311,9 @@ def render_json(report: Report) -> str:
 
 
 def write_report(text: str, path: str | os.PathLike[str]) -> Path:
-    """Write a rendered report to `path`, replacing what was there only once the new file is whole. Returns the path written."""
+    """Write a rendered report to `path`, creating its directory, and return the path. The old file goes once the new one is whole."""
     target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(f'{target.name}{PARTIAL_MARK}{os.getpid()}')
     partial.write_text(text, encoding='utf-8')
     partial.replace(target)

@@ -25,9 +25,9 @@
     "log": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source", "layout", "files", "size_bytes", "compacted", "in_progress", "truncated_tail", "lacks", "tables_key"],
+      "required": ["source", "layout", "files", "size_bytes", "compacted", "in_progress", "truncated_tail", "lacks"],
       "properties": {
-        "source": {"type": "string", "description": "The location read, as a file:// or s3:// URI."},
+        "source": {"type": "string", "description": "The location read: a local log's file or directory name, or an s3:// URI whole."},
         "layout": {"type": "string"},
         "files": {
           "type": "array",
@@ -35,15 +35,18 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["uri", "size_bytes", "codec"],
-            "properties": {"uri": {"type": "string"}, "size_bytes": {"type": "integer"}, "codec": {"type": "string"}}
+            "properties": {
+              "uri": {"type": "string", "description": "A local file's path from the directory holding the log, or an s3:// URI whole."},
+              "size_bytes": {"type": "integer"},
+              "codec": {"type": "string"}
+            }
           }
         },
         "size_bytes": {"type": "integer"},
         "compacted": {"type": "boolean"},
         "in_progress": {"type": "boolean"},
         "truncated_tail": {"type": "boolean"},
-        "lacks": {"type": "array", "items": {"type": "string"}, "description": "What Spark wrote the log without, by default: stage_executor_metrics, block_updates, process_tree_metrics."},
-        "tables_key": {"type": "string", "description": "The SHA-256 naming the tables built from the log, over its files and sparkxray's version."}
+        "lacks": {"type": "array", "items": {"type": "string"}, "description": "What Spark wrote the log without, by default: stage_executor_metrics, block_updates, process_tree_metrics."}
       }
     },
     "usage": {
@@ -98,7 +101,8 @@
         "additionalProperties": false,
         "required": [
           "execution_id", "description", "status", "start_epoch_ms", "duration_ms", "wall_share", "job_count", "stage_count",
-          "plan_version_count", "node_count", "exchange_count", "join_count", "scan_count", "finding_ids", "aqe_changes", "plan"
+          "plan_version_count", "node_count", "exchange_count", "join_count", "scan_count", "modified_configs", "finding_ids", "aqe_changes",
+          "plan"
         ],
         "properties": {
           "execution_id": {"type": "integer"},
@@ -114,6 +118,11 @@
           "exchange_count": {"type": "integer"},
           "join_count": {"type": "integer"},
           "scan_count": {"type": "integer"},
+          "modified_configs": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "description": "Each setting the execution's session changed from the run's launch value, which the rules judge the execution by."
+          },
           "finding_ids": {"type": "array", "items": {"type": "string"}, "description": "The findings about the execution or a stage it ran."},
           "aqe_changes": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/aqe_changes"}], "description": "Null where AQE never re-planned it."},
           "plan": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/plan"}], "description": "Its last plan with each node's numbers. Null where the log holds no plan."}
@@ -150,7 +159,7 @@
     },
     "config": {
       "type": "array",
-      "description": "The settings the rules reason about, by key. A value of null is a key the run left unset, at Spark's default.",
+      "description": "The settings the rules read, and each one a finding's remediation names, as the run launched with them, by key. A value of null is a key the run left unset, at Spark's default. An execution that set one itself carries it in its modified_configs.",
       "items": {
         "type": "object",
         "additionalProperties": false,

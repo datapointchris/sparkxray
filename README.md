@@ -121,13 +121,17 @@ sparkxray findings list "$LOG" --fail-on critical
 with nothing on stdout means the log was not read.
 
 `reports write` puts one run into one document to read, attach to a ticket or keep. It lists the
-findings worst first, each with its evidence, thresholds and fixes folded under it. Then come the
-longest stages, the plan of each SQL execution a finding names, and the settings the rules read.
-`--format markdown` is the default, and reads on GitHub. `--format json` carries every plan, and
-`sparkxray/schemas/report.json` pins its shape. A report holds no timestamp, and prints its times
-in UTC. So the same log, thresholds and sparkxray version write the same bytes on any machine.
-`--out FILE` replaces the file only once the new one is whole, then prints its path.
-`reports write` gates on `--fail-on` as `findings list` does, and writes the report either way.
+findings as `findings list` orders them, the most wall time a fix could recover first. Each comes
+with its evidence, thresholds and fixes folded under it. Then come the longest stages, each SQL
+execution with the settings it set, and the plan of each execution a finding names. Last come the
+launch values of the settings the rules read and the fixes name. `--format markdown` is the default, and reads on GitHub. `--format json`
+carries every plan, and `sparkxray/schemas/report.json` pins its shape.
+
+A report holds no timestamp, prints its times in UTC, and names a local log by its file name. So
+the same log file, thresholds and sparkxray version write the same bytes on any machine.
+`--out FILE` creates FILE's directory, replaces the file only once the new one is whole, then
+prints its path. `reports write` gates on `--fail-on` as `findings list` does. It writes the
+report whether the gate passes or not.
 
 ## Open an event log from a path or S3
 

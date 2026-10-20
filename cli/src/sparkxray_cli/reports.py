@@ -33,18 +33,26 @@ def write(
     out: Annotated[
         Path | None,
         typer.Option(
-            '--out', metavar='FILE', help='Write to FILE, whole or not at all, and print its path. Stdout by default.', show_default=False
+            '--out',
+            metavar='FILE',
+            dir_okay=False,
+            help='Write to FILE, whole or not at all, creating its directory, and print its path. Stdout by default.',
+            show_default=False,
         ),
     ] = None,
     threshold: ThresholdOption = None,
     thresholds: ThresholdFileOption = None,
     fail_on: FailOnOption = 'high',
 ) -> None:
-    """Write one report of a log: its findings worst first with their evidence, then its longest stages, SQL plans and settings.
+    """Write one report of a log: its findings with their evidence, then its longest stages, SQL plans and settings.
 
-    The same log, thresholds and sparkxray version write the same bytes, so a report diffs and
-    commits cleanly. Exits 0 when no finding reaches `--fail-on`, 2 on a usage error, and 3 when
-    one does or the log could not be read. The report is written either way.
+    The findings come in the order `findings list` gives them, the most wall time a fix could
+    recover first. A report names a local log by its file name and holds no time it was made. So
+    the same log file, thresholds and sparkxray version write the same bytes on any machine, and a
+    report diffs and commits cleanly.
+
+    Exits 0 when no finding reaches `--fail-on` and 3 when one does, and the report is written in
+    both cases. Exits 2 on a usage error, and 3 when the log could not be read.
     """
     opened = open_log(log)
     analysis = analyze_log(opened, None, threshold, thresholds)
