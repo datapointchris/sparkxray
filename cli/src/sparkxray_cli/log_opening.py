@@ -11,10 +11,10 @@ from sparkxray.tables import Tables
 from sparkxray_cli import render
 
 
-def open_log(location: str) -> EventLog:
-    """The log, resolved and decoded, its tables not yet built."""
+def open_log(location: str, *, app: str | None = None) -> EventLog:
+    """The log, resolved and decoded, its tables not yet built. `app` picks one application on a server."""
     with render.status(f'Reading {location}'):
-        log = EventLog.open(location)
+        log = EventLog.open(location, app=app)
     render.ingest_notes(log.manifest)
     return log
 

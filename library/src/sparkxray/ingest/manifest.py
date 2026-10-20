@@ -24,8 +24,9 @@ ReadCodec = Literal['none', 'zstd', 'gzip']
 class IngestedFile:
     """One file of a log, in read order.
 
-    `uri` is where the file lives: `file://` for a local file, `s3://` for an object. `etag` is
-    the object's S3 ETag, and `mtime_ns` a local file's modification time. Together with
+    `uri` is where the file lives: `file://` for a local file, `s3://` for an object, and
+    `http(s)://` for what a server answered. `etag` is the object's S3 ETag, or the server's
+    application version, and `mtime_ns` a local file's modification time. Together with
     `size_bytes` they identify one version of the file.
 
     `read_path` is the local file holding its events, which `read_codec` compresses. That is the

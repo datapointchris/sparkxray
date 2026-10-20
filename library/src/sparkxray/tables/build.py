@@ -177,10 +177,27 @@ _LACKS = """
     SELECT
       count(*) FILTER (WHERE kind = 'SparkListenerStageExecutorMetrics') = 0,
       count(*) FILTER (WHERE kind = 'SparkListenerBlockUpdated') = 0,
-      NOT (SELECT measured FROM process_tree)
+      NOT (SELECT measured FROM process_tree),
+      count(*) FILTER (
+        WHERE kind IN ('SparkListenerStageSubmitted', 'SparkListenerStageCompleted') AND "Stage Info"."Parent IDs" IS NULL
+      ) > 0,
+      count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd') > 0
+        AND count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd' AND "Task Executor Metrics" IS NOT NULL) = 0,
+      count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd') > 0
+        AND count(*) FILTER (WHERE kind = 'SparkListenerTaskEnd' AND len("Task Info"."Accumulables") > 0) = 0,
+      count(*) FILTER (WHERE kind = 'SparkListenerSQLExecutionStart') > 0
+        AND count(*) FILTER (WHERE kind = 'SparkListenerSQLExecutionStart' AND modifiedConfigs IS NOT NULL) = 0
     FROM events
 """
-_LACK_ORDER: tuple[Lack, ...] = ('stage_executor_metrics', 'block_updates', 'process_tree_metrics')
+_LACK_ORDER: tuple[Lack, ...] = (
+    'stage_executor_metrics',
+    'block_updates',
+    'process_tree_metrics',
+    'stage_parents',
+    'task_executor_metrics',
+    'task_accumulators',
+    'execution_configs',
+)
 
 
 def build_tables(log: EventLog) -> Tables:

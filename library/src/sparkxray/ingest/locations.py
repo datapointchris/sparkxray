@@ -1,4 +1,6 @@
-"""List the files under a local path or an S3 URI, and give each one back as a local file.
+"""List the files under a local path, an S3 URI or a Spark server's address, and give each one back as a local file.
+
+`history_server` reads a server's. Of the other two:
 
 An S3 object is downloaded into the cache once per ETag and size, under
 `logs/s3/<bucket>/<key>/<etag>-<size>`. So an unchanged object is never downloaded twice, and a
@@ -16,6 +18,8 @@ from typing import Protocol
 from sparkxray.cache_directory import remove_superseded
 from sparkxray.cache_directory import used
 from sparkxray.errors import NoEventLogError
+from sparkxray.ingest.history_server import SCHEMES
+from sparkxray.ingest.history_server import HistoryServerLocation
 from sparkxray.ingest.layouts import ROLLING_DIRECTORY
 from sparkxray.ingest.layouts import ListedFile
 from sparkxray.ingest.layouts import ignored
@@ -28,6 +32,8 @@ class Location(Protocol):
     uri: str
     # Whether a file `local_path` returns can still grow, as a log Spark is writing does.
     files_may_grow: bool
+    # Whether the files are a log sparkxray rebuilt from a server's REST JSON, rather than one Spark wrote.
+    rest_rebuild: bool
 
     def list(self) -> tuple[list[ListedFile], ListedFile | None]:
         """Every file under the location, and the file itself when the location names one."""
@@ -38,8 +44,15 @@ class Location(Protocol):
     def local_path(self, listed: ListedFile, cache: Path) -> Path: ...
 
 
-def location_for(location: str, *, profile: str | None, region: str | None) -> Location:
-    """The location a string names: an `s3://` URI, or else a local path."""
+def location_for(location: str, *, profile: str | None, region: str | None, app: str | None, cache: Path) -> Location:
+    """The location a string names: an `s3://` URI, a History Server or driver UI's `http(s)://` address, or else a local path.
+
+    `app` names the application on a server, and raises ValueError beside any other location.
+    """
+    if location.startswith(SCHEMES):
+        return HistoryServerLocation(location, app=app, cache=cache)
+    if app is not None:
+        raise ValueError(f'{location} is no server address, and only a server address takes an app id beside it')
     if location.startswith(_S3_SCHEMES):
         return S3Location(location, profile=profile, region=region)
     return LocalLocation(Path(location))
@@ -47,6 +60,7 @@ def location_for(location: str, *, profile: str | None, region: str | None) -> L
 
 class LocalLocation:
     files_may_grow = True
+    rest_rebuild = False
 
     def __init__(self, path: Path) -> None:
         path = path.expanduser().resolve()
@@ -90,6 +104,7 @@ class LocalLocation:
 
 class S3Location:
     files_may_grow = False  # every file is a downloaded copy
+    rest_rebuild = False
 
     def __init__(self, location: str, *, profile: str | None, region: str | None) -> None:
         from sparkxray.ingest import aws  # boto3 is imported only when a log is on S3

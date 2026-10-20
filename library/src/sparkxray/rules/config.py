@@ -162,7 +162,8 @@ on, the SQL tab shows the join as `SortMergeJoin(skew=true)` and its stage reads
 SKEW_JOIN_OFF_WITH_SKEW = Rule(
     rule_id='config.skew-join-off-with-skew',
     title="AQE's skew join was off for stage {stage_id}, whose largest join partition read {max_shuffle_read_bytes:bytes}",
-    signals=frozenset({'tasks'}),
+    # Which stages ran a join is read from node_stages.
+    signals=frozenset({'tasks', 'plan_stages'}),
     scope='stage',
     thresholds=(),
     severity_ladder={'medium': 'stage.shuffle-skew fired on a stage running a shuffled join, with the skew join off'},

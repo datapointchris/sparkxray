@@ -9,6 +9,8 @@ from typing import Any
 
 from sparkxray.plan import labels
 from sparkxray.plan import tree
+from sparkxray.plan.display_values import DisplayValue
+from sparkxray.plan.display_values import parse_display_value
 
 _CODEGEN_NUMBER = re.compile(r'\((\d+)\)')
 
@@ -19,8 +21,9 @@ def parse_rest_graph(obj: Mapping[str, Any]) -> tree.Plan:
     The server builds this graph from the same tree the event log holds, but drops every query
     stage and `InputAdapter` node, so a REST plan has no `ShuffleQueryStage`. It draws a reused
     exchange as a second edge into the original, which becomes a `ReusedExchange` leaf here, as
-    JSON and text show it. Metrics arrive by name, with display strings `parse_display_value` reads.
-    Raises ValueError when the graph has more than one root.
+    JSON and text show it. Metrics arrive by name, each with the numbers `parse_display_value`
+    reads from its display string as its `display_value`. Raises ValueError when the graph has
+    more than one root.
     """
     nodes = {int(node['nodeId']): node for node in obj.get('nodes') or []}
     clusters = {node_id for node_id, node in nodes.items() if str(node['nodeName']).startswith('WholeStageCodegen')}
@@ -75,7 +78,20 @@ def parse_rest_graph(obj: Mapping[str, Any]) -> tree.Plan:
 
 
 def _metrics(info: Mapping[str, Any]) -> list[tree.MetricRef]:
-    return [tree.MetricRef(name=str(metric['name']), accumulator_id=None, metric_type=None) for metric in info.get('metrics') or []]
+    return [
+        tree.MetricRef(name=str(metric['name']), accumulator_id=None, metric_type=None, display_value=_display_value(metric.get('value')))
+        for metric in info.get('metrics') or []
+    ]
+
+
+def _display_value(text: object) -> DisplayValue | None:
+    """The numbers a metric's display string holds, or None where the server displayed nothing it reads as one."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    try:
+        return parse_display_value(text)
+    except ValueError:
+        return None
 
 
 def _codegen_number(info: Mapping[str, Any]) -> int | None:

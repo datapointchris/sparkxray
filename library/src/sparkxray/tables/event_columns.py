@@ -81,6 +81,11 @@ EVENT_COLUMNS: dict[str, str] = {
     'errorMessage': 'VARCHAR',
     'accumUpdates': 'BIGINT[][]',
     'sqlPlanMetrics': 'STRUCT("name" VARCHAR, "accumulatorId" BIGINT, "metricType" VARCHAR)[]',
+    # Only a log rebuilt from a server's REST JSON carries it, on its sparkxray.RestPlanMetrics events.
+    'restPlanMetrics': (
+        'STRUCT("node" BIGINT, "name" VARCHAR, "unit" VARCHAR, "total" DOUBLE, "min" DOUBLE, "median" DOUBLE, "max" DOUBLE, '
+        '"maxStageId" BIGINT, "maxTaskId" BIGINT)[]'
+    ),
     # executors
     'Executor ID': 'VARCHAR',
     'Executor Info': 'STRUCT("Host" VARCHAR, "Total Cores" BIGINT, "Resource Profile Id" BIGINT)',

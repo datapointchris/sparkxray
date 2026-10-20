@@ -20,7 +20,22 @@ SCHEMA_VERSION = 1
 #   block_updates           spark.eventLog.logBlockUpdates.enabled, every cached block's changes
 #   process_tree_metrics    spark.executor.processTreeMetrics.enabled, the RSS of each executor's
 #                           processes, Python workers included
-Lack = Literal['stage_executor_metrics', 'block_updates', 'process_tree_metrics']
+# What a log rebuilt from a server's REST JSON goes without, and an older Spark's log may too:
+#   stage_parents           the stages each stage reads, which the simulation then infers
+#   task_executor_metrics   each executor's peaks while a task ran
+#   task_accumulators       each task's accumulator updates, so no plan node's metrics aggregate
+#                           from tasks and node_stages is empty
+#   execution_configs       the settings each SQL execution changed from the application's, so a
+#                           setting changed at runtime reads as the application's
+Lack = Literal[
+    'stage_executor_metrics',
+    'block_updates',
+    'process_tree_metrics',
+    'stage_parents',
+    'task_executor_metrics',
+    'task_accumulators',
+    'execution_configs',
+]
 
 
 @dc.dataclass(frozen=True, slots=True)

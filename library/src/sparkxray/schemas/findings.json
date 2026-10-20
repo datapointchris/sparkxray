@@ -39,8 +39,8 @@
   },
   "$defs": {
     "signal": {
-      "description": "plan: a physical plan. plan_metrics: its nodes' measured metrics. plan_estimates: the optimizer's size estimates, which only explain(mode='cost') text prints and no event log carries. tasks: task metrics. executors: executor lifetimes and sizes. environment: the run's configuration. timeline: when stages ran.",
-      "enum": ["plan", "plan_metrics", "plan_estimates", "tasks", "executors", "environment", "timeline"]
+      "description": "plan: a physical plan. plan_metrics: its nodes' measured metrics. plan_stages: which stages ran each node, which a log rebuilt from REST JSON lacks. plan_estimates: the optimizer's size estimates, which only explain(mode='cost') text prints and no event log carries. tasks: task metrics. executors: executor lifetimes and sizes. environment: the run's configuration. timeline: when stages ran.",
+      "enum": ["plan", "plan_metrics", "plan_stages", "plan_estimates", "tasks", "executors", "environment", "timeline"]
     },
     "severity": {"enum": ["info", "low", "medium", "high", "critical"]},
     "evidence_value": {

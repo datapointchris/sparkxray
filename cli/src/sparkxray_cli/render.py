@@ -282,3 +282,9 @@ def ingest_notes(manifest: IngestManifest) -> None:
         note(f"{manifest.app_id}: the log's last line was cut off partway, and is left out")
     if manifest.compacted:
         note(f'{manifest.app_id}: a History Server compacted this log, which dropped the events of finished tasks')
+    if manifest.layout == 'rest_rebuild':
+        note(
+            f'{manifest.app_id}: the server serves no event log for it, so this one was rebuilt from its REST JSON. '
+            "That holds no stage's parents, no task's accumulator updates or executor metrics, and no setting a SQL "
+            'execution changed at runtime'
+        )

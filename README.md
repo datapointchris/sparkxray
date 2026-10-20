@@ -60,8 +60,8 @@ Upload the zip, pass its `s3://` path to `--additional-python-modules`, and pass
 ## Find what slowed a run from a terminal
 
 Every command is `sparkxray <resource> <verb> LOG`. `LOG` is a log file or directory, an `s3://`
-URI, or the app id of a log already read. The first command on a log reads it into the cache, and
-every later one opens the cache.
+URI, the `http(s)://` address of a History Server or driver UI, or the app id of a log already
+read. The first command on a log reads it into the cache, and every later one opens the cache.
 
 ```bash
 sparkxray findings list s3://your-bucket/spark-logs/spark-application-1729
@@ -208,6 +208,19 @@ open of an unchanged object downloads nothing. Credentials come from boto3's def
 `profile=` and `region=` narrow. An S3-compatible store is reached through `AWS_ENDPOINT_URL_S3`.
 A copy of an older version of a file stays a day after its last use, so a log opened before the
 file changed still reads.
+
+`EventLog.open` also takes the address of a Spark History Server or a live driver UI. That can be
+its root, an application's page, or its REST API address with an attempt id. `app=` picks one
+application where the server holds several, and `sparkxray logs ingest URL --app APP_ID` does the
+same. A History Server's log is downloaded. A driver UI serves none, so sparkxray rebuilds one from
+its REST JSON. That rebuild lacks each stage's parents, each task's accumulator updates and
+executor peaks, and the settings a query changed. The manifest's `lacks` names them, and the rule
+that needs one is skipped.
+
+```python
+log = EventLog.open('http://localhost:18080', app='spark-application-1729')
+log = EventLog.open('http://driver-host:4040')  # a running application, never cached
+```
 
 A refusal raises a `sparkxray.errors.SparkxrayError` subclass, whose `code` never changes meaning.
 Printed, it gives its message, the values that would have worked, and a hint. `E-INGEST-005`, for

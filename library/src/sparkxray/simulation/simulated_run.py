@@ -44,6 +44,8 @@ MODEL_LIMITS = (
     'scales better here than on a cluster, the case stage.tiny-tasks and stage.scheduler-delay report.',
     "SQL executions whose jobs ran at once all replay from their group's start. A thread that submitted its query "
     'only after another of its own finished is not seen, so such a query may start sooner here than it could.',
+    "Where the log names no stage's parents, as one rebuilt from a server's REST JSON does not, a stage waits on "
+    'every lower-numbered stage of its job that ended before it was submitted.',
 )
 _MS_AN_HOUR = 3_600_000
 
@@ -56,14 +58,15 @@ SELECT application.app_id, application.platform, run.end_epoch_ms - run.start_ep
 FROM application, run, pool, task_cpus, core_totals
 """
 # A stage counts toward the first job listing it, the job that ran it. A later job lists it only to skip it.
-# A job still running when the log ended runs to the run's end.
-_JOBS_SQL = f"""
-WITH run AS ({RUN_SPAN_SQL}), ran AS (
+_RAN_CTE = """ran AS (
   SELECT stage_id, min(job_id) AS job_id
   FROM (SELECT job_id, unnest(stage_ids) AS stage_id FROM jobs)
   WHERE stage_id IN (SELECT stage_id FROM stages)
   GROUP BY stage_id
-)
+)"""
+# A job still running when the log ended runs to the run's end.
+_JOBS_SQL = f"""
+WITH run AS ({RUN_SPAN_SQL}), {_RAN_CTE}
 SELECT jobs.job_id, jobs.sql_execution_id, jobs.submit_epoch_ms, coalesce(jobs.end_epoch_ms, run.end_epoch_ms) AS end_epoch_ms,
   coalesce(list(ran.stage_id ORDER BY ran.stage_id) FILTER (WHERE ran.stage_id IS NOT NULL), []) AS stage_ids
 FROM jobs CROSS JOIN run LEFT JOIN ran USING (job_id)
@@ -72,15 +75,26 @@ GROUP BY ALL
 ORDER BY jobs.job_id
 """
 # Each stage's effective tasks, a partition's first success across the attempts, in partition order.
-_STAGE_WORK_SQL = """
-WITH work AS (
+# A stage the log names no parents for waits on each lower-numbered stage of its job that ended before it was submitted.
+_STAGE_WORK_SQL = f"""
+WITH {_RAN_CTE}, work AS (
   SELECT stage_id,
     list(coalesce(executor_run_time_ms, 0) ORDER BY coalesce(partition_id, task_index), stage_attempt, task_index) AS task_run_ms
   FROM tasks_effective GROUP BY stage_id
+), last_attempts AS (
+  SELECT stage_id, parent_ids, submit_epoch_ms, complete_epoch_ms FROM stages WHERE is_highest_attempt
+), inferred AS (
+  SELECT stage.stage_id, list(earlier.stage_id ORDER BY earlier.stage_id) AS parent_ids
+  FROM last_attempts AS stage
+  JOIN ran USING (stage_id)
+  JOIN ran AS earlier_ran ON earlier_ran.job_id = ran.job_id AND earlier_ran.stage_id < stage.stage_id
+  JOIN last_attempts AS earlier ON earlier.stage_id = earlier_ran.stage_id AND earlier.complete_epoch_ms <= stage.submit_epoch_ms
+  WHERE stage.parent_ids IS NULL
+  GROUP BY stage.stage_id
 )
-SELECT stages.stage_id, coalesce(stages.parent_ids, []) AS parent_ids, coalesce(work.task_run_ms, []) AS task_run_ms
-FROM stages LEFT JOIN work USING (stage_id)
-WHERE stages.is_highest_attempt
+SELECT last_attempts.stage_id, coalesce(last_attempts.parent_ids, inferred.parent_ids, []) AS parent_ids,
+  coalesce(work.task_run_ms, []) AS task_run_ms
+FROM last_attempts LEFT JOIN work USING (stage_id) LEFT JOIN inferred USING (stage_id)
 """
 
 

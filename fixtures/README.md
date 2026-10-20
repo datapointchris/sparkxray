@@ -36,6 +36,12 @@ them byte for byte.
 serves at `/api/v1/applications/<app>/sql?details=true&planDescription=true`, compacted and zstd'd.
 Its graphs must count the same operators as the log's JSON plans, less the query stages.
 
+`history-server-rest/` holds, for the 3.5.9 stage-rules log, every answer a History Server over it
+gives the requests a rebuild from REST makes, as zstd'd JSON Lines of `path`, `status` and `body`.
+`record_history_server_rest.py ADDRESS APP_ID OUT` writes it from a running server, and
+`regenerate.sh` runs it after the variant. A test serves it again, with the log zipped at `/logs`,
+and reads the rebuild's tables against the log's.
+
 `explain/` holds, for each plan-rules variant, `cost-mode.json`. It is two queries'
 `explain(mode='cost')` text, each beside a description in the job's `fires=` form. No event log
 carries the optimizer's size estimates, which `plan.estimate-unreliable` reads. So the job prints

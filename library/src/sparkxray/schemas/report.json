@@ -27,7 +27,7 @@
       "additionalProperties": false,
       "required": ["source", "layout", "files", "size_bytes", "compacted", "in_progress", "truncated_tail", "lacks"],
       "properties": {
-        "source": {"type": "string", "description": "The location read: a local log's file or directory name, or an s3:// URI whole."},
+        "source": {"type": "string", "description": "The location read: a local log's file or directory name, or an s3:// or server URI whole."},
         "layout": {"type": "string"},
         "files": {
           "type": "array",
@@ -36,7 +36,7 @@
             "additionalProperties": false,
             "required": ["uri", "size_bytes", "codec"],
             "properties": {
-              "uri": {"type": "string", "description": "A local file's path from the directory holding the log, or an s3:// URI whole."},
+              "uri": {"type": "string", "description": "A local file's path from the directory holding the log, or an s3:// or server URI whole."},
               "size_bytes": {"type": "integer"},
               "codec": {"type": "string"}
             }
@@ -46,7 +46,7 @@
         "compacted": {"type": "boolean"},
         "in_progress": {"type": "boolean"},
         "truncated_tail": {"type": "boolean"},
-        "lacks": {"type": "array", "items": {"type": "string"}, "description": "What Spark wrote the log without, by default: stage_executor_metrics, block_updates, process_tree_metrics."}
+        "lacks": {"type": "array", "items": {"type": "string"}, "description": "What the log was written without, as the tables manifest names it: stage_executor_metrics, block_updates and process_tree_metrics by Spark's defaults, and stage_parents, task_executor_metrics, task_accumulators and execution_configs where it was rebuilt from a server's REST JSON."}
       }
     },
     "usage": {
@@ -301,7 +301,7 @@
               "name": {"type": "string"},
               "metric_type": {"type": ["string", "null"]},
               "unit": {"type": ["string", "null"]},
-              "value_count": {"type": "integer"},
+              "value_count": {"type": ["integer", "null"], "description": "How many values were reported, null where the log was rebuilt from a server's REST JSON, which carries only what the SQL tab displayed."},
               "total": {"type": ["number", "null"]},
               "min": {"type": ["number", "null"]},
               "median": {"type": ["number", "null"]},

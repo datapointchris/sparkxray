@@ -6,6 +6,7 @@ from typing import Annotated
 from typing import Any
 
 import typer
+from sparkxray.ingest.history_server import SCHEMES
 from sparkxray.rules import Severity
 from sparkxray.run_diff import RunDiff
 from sparkxray.run_diff import diff_logs
@@ -17,6 +18,7 @@ from sparkxray_cli import render
 from sparkxray_cli.findings import exit_if_gated
 from sparkxray_cli.log_opening import open_log
 from sparkxray_cli.log_opening import open_tables
+from sparkxray_cli.log_opening import tables_of
 from sparkxray_cli.shared_parameters import LOG_HELP
 from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import LimitOption
@@ -46,13 +48,30 @@ _APPLICATION_KEYS = (
 
 
 @app.command('ingest')
-def ingest(log: LogArgument, as_json: JsonOption = False) -> None:
+def ingest(
+    log: LogArgument,
+    app_id: Annotated[
+        str | None,
+        typer.Option(
+            '--app',
+            metavar='APP_ID',
+            help="The application to read from a server holding several. Its newest attempt, unless LOG's address names one.",
+            show_default=False,
+        ),
+    ] = None,
+    as_json: JsonOption = False,
+) -> None:
     """Read a log, build its tables, and print the directory that holds them.
 
     Reading an unchanged log again reads the tables already built, so every other command is
-    as fast on the second run as the first was slow.
+    as fast on the second run as the first was slow. A server's address reads the event log it
+    serves, or rebuilds one from its REST JSON where it serves none, as a live driver UI does.
     """
-    cached = CachedLog.of(open_tables(log))
+    if app_id is not None and not log.startswith(SCHEMES):
+        raise typer.BadParameter(
+            '--app picks an application on a server, so LOG must be an http:// or https:// address', param_hint='--app'
+        )
+    cached = CachedLog.of(tables_of(open_log(log, app=app_id)))
     if as_json:
         render.emit_json(cached.to_json())
     else:
