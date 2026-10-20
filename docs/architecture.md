@@ -440,3 +440,36 @@ these are proposed.
 
 *Rejected:* one key per exception class. A run that failed on every attempt and a run that
 recovered on retry both throw a `PythonException`, and only the line tells them apart.
+
+## The executor simulation replays Sparklens's model, with overlapping jobs replayed together
+
+`sparkxray.simulation` ports Sparklens's executor-count model, because Sparklens needs a JVM and
+has had no code change since 2021. Each group of jobs that ran together replays onto executors
+times cores task slots. A stage is runnable once every parent with tasks has finished. A parent
+the log lacks was skipped, its shuffle output reused, so it counts as done. Runnable stages start
+in stage-id order, and each queues every task. With every slot busy, the task finishing first
+leaves. A task costs its executor run time, at least 1 ms, as Sparklens charges it. The time no job
+ran is the driver's, and every executor count keeps it.
+
+Jobs group as Sparklens groups them. Jobs of one SQL execution form a group, split where a job
+starts after the one before it ended, and a job of no execution is a group alone. Sparklens then
+replays the groups one after another, which counts a thread pool's concurrent jobs twice. So a
+group starting before the groups ahead of it have ended merges into them, and the driver's time
+is the wall time less the merged spans, which is never negative. On a run with no overlap, both
+models give the same estimate.
+
+A stage counts toward the first job listing it, the job that ran it. Its tasks are its effective
+ones, a partition's first success across the stage's attempts, as every rule reads them. Every
+other attempt is reported as `retry_run_ms` and never replayed. A group replays every stage it
+holds with tasks, rather than walking back from each job's highest stage id as Sparklens does.
+That gives the same time on a whole log. On a log cut mid-job, it still replays a job whose
+result stage never ran a task.
+
+The model is checked against the run itself. Its estimate at the run's own size against the wall
+time is `model_error_share`, and a large one says the curve deserves less trust. Dynamic allocation
+is the usual cause, because the model assumes a fixed pool. A stalled replay raises `E-SIM-001`
+naming the stages, where Sparklens returns 0.
+
+*Rejected:* scaling each stage's measured time by the change in cores. A stage's time is set by
+its longest task as much as by its total, so halving the executors does not double a skewed
+stage, and the replay gets that from the tasks themselves.

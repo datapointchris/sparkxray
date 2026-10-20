@@ -7,6 +7,8 @@ from typing import Any
 
 from sparkxray.errors import NotInRunError
 from sparkxray.summaries.ordering import ordered_rows
+from sparkxray.tables.registry import EXECUTOR_POOL_CTE
+from sparkxray.tables.registry import EXECUTOR_TIME_CTES
 from sparkxray.tables.registry import GC_SHARE
 from sparkxray.tables.registry import WALL_SHARES_SQL
 from sparkxray.tables.relations import Tables
@@ -15,9 +17,11 @@ from sparkxray.tables.rows import rows_of
 
 # A stage's status is its highest attempt's. Metric totals and task durations come from
 # `tasks_effective`, so a partition a retry ran again counts once. The task counts are every
-# attempt's, so a retry shows as a failed task.
+# attempt's, so a retry shows as a failed task. A stage's core-hours are Sparklens's
+# (`analyzer/StageSkewAnalyzer.scala`): the run's cores over the stage's wall time, against its
+# tasks' run time, and its parallelism is its partitions over the run's cores.
 STAGE_SUMMARIES_SQL = f"""
-WITH walls AS (
+WITH {EXECUTOR_TIME_CTES}, {EXECUTOR_POOL_CTE}, walls AS (
   SELECT id AS stage_id, wall_ms, share AS wall_share FROM ({WALL_SHARES_SQL}) WHERE level = 'stage'
 ), attempts AS (
   SELECT stage_id, max(name) AS name, count(*) AS attempt_count, min(submit_epoch_ms) AS submit_epoch_ms,
@@ -38,8 +42,12 @@ WITH walls AS (
     sum(memory_spilled_bytes)::BIGINT AS memory_spilled_bytes,
     sum(disk_spilled_bytes)::BIGINT AS disk_spilled_bytes,
     sum(jvm_gc_time_ms)::BIGINT AS gc_time_ms,
-    round({GC_SHARE}, 4) AS gc_share
+    round({GC_SHARE}, 4) AS gc_share,
+    count(*) AS partition_count,
+    coalesce(sum(executor_run_time_ms), 0) AS run_time_ms
   FROM tasks_effective GROUP BY stage_id
+), run_cores AS (
+  SELECT nullif(executor_count * executor_core_count, 0) AS core_count FROM pool
 )
 SELECT attempts.stage_id, attempts.name, attempts.status, attempts.attempt_count,
   coalesce(task_attempts.task_count, 0) AS task_count, coalesce(task_attempts.failed_task_count, 0) AS failed_task_count,
@@ -47,8 +55,13 @@ SELECT attempts.stage_id, attempts.name, attempts.status, attempts.attempt_count
   effective.durations[len(effective.durations) // 2 + 1] AS median_task_duration_ms,
   list_max(effective.durations) AS max_task_duration_ms,
   effective.input_bytes, effective.output_bytes, effective.shuffle_read_bytes, effective.shuffle_write_bytes,
-  effective.memory_spilled_bytes, effective.disk_spilled_bytes, effective.gc_time_ms, effective.gc_share
+  effective.memory_spilled_bytes, effective.disk_spilled_bytes, effective.gc_time_ms, effective.gc_share,
+  round(run_cores.core_count * walls.wall_ms / 3600000, 4) AS available_core_hours,
+  round(coalesce(effective.run_time_ms, 0) / 3600000, 4) AS used_core_hours,
+  round((run_cores.core_count * walls.wall_ms - coalesce(effective.run_time_ms, 0)) / 3600000, 4) AS wasted_core_hours,
+  round(coalesce(effective.partition_count, 0) / run_cores.core_count, 2) AS parallelism_ratio
 FROM attempts
+CROSS JOIN run_cores
 LEFT JOIN task_attempts USING (stage_id)
 LEFT JOIN effective USING (stage_id)
 LEFT JOIN walls USING (stage_id)

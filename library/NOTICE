@@ -1,9 +1,10 @@
 sparkxray
 Copyright (c) 2026 Chris Birch. Licensed under the MIT License, in LICENSE.
 
-Parts of the rule catalog and the metric glossary adapt wording from four
-projects licensed under the Apache License, Version 2.0, a copy of which is in
-LICENSE-APACHE-2.0.txt beside this file.
+Parts of the rule catalog and the metric glossary adapt wording, and the
+executor simulation ports code, from five projects licensed under the Apache
+License, Version 2.0, a copy of which is in LICENSE-APACHE-2.0.txt beside this
+file.
 
 Apache Spark (https://github.com/apache/spark), tag v4.2.0
 (commit 32f7299601108917fb01920a54e084595b7b3bf8).
@@ -52,3 +53,21 @@ lessons of stage.gc-pressure and executor.memory-over adapt how
 app/com/linkedin/drelephant/spark/heuristics/ExecutorGcHeuristic.scala reads
 its GC ratio: high as too little executor memory, and low as more than the
 tasks need.
+
+Sparklens (https://github.com/qubole/sparklens), version 0.3.2, commit
+7f2ea4bac91eff4435923881c263e6d42caa0949. It ships no NOTICE file. The
+sparkxray.simulation package ports its executor-count model from these files
+under src/main/scala/com/qubole/sparklens/:
+
+  stage_scheduler.py  scheduler/CompletionEstimator.scala,
+                      scheduler/PQParallelStageScheduler.scala and
+                      timespan/JobTimeSpan.scala
+  job_groups.py       helper/JobOverlapHelper.scala
+  simulated_run.py    analyzer/ExecutorWallclockAnalyzer.scala,
+                      analyzer/EfficiencyStatisticsAnalyzer.scala and
+                      common/AppContext.scala
+
+The core-hour columns of stage summaries follow
+analyzer/StageSkewAnalyzer.scala. The simulation's test takes its cases and
+expected times from
+src/test/scala/com/qubole/sparklens/scheduler/PQParallelStageSchedulerSuite.scala.
