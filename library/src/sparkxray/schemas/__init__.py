@@ -3,7 +3,7 @@
 A schema covers a document a program keeps or checks, the error envelope, or a row of a table. A
 command's listing, such as `stages list --json`, has none.
 
-`capabilities`, `findings`, `ingest-manifest`, `report` and `tables-manifest` are files in this
+`capabilities`, `diff`, `findings`, `ingest-manifest`, `report` and `tables-manifest` are files in this
 package. `errors` and `tables` are built from the error registry and the table registry when they
 are read, so neither can drift from the code. A `$ref` to another document names its file, as
 `findings.json` does for the document named `findings`.

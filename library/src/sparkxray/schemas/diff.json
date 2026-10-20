@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sparkxray diff",
+  "description": "Run B of a job against run A, as sparkxray logs diff LOG_A LOG_B --json prints it: each SQL execution and stage both ran, with its cost in each, the settings that differ, the findings new in B, resolved since A and in both, and the exceptions each run logged, triaged. Ids are assigned in submission order, so executions and stages are paired by what they ran, never by id. Both runs are analyzed at the same thresholds. A field removed or a meaning changed raises schema_version, and a field added does not.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_by", "a", "b", "baselines", "sql", "stages", "config", "findings", "exceptions"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "generated_by": {"type": "string", "description": "The sparkxray version that wrote it, as `sparkxray 0.12.0`."},
+    "a": {"$ref": "#/$defs/run", "description": "The reference run, usually the good or the older one."},
+    "b": {"$ref": "#/$defs/run", "description": "The run being explained."},
+    "baselines": {"type": "array", "items": {"$ref": "#/$defs/run"}, "description": "The runs --baseline named, read for their exceptions alone."},
+    "gate": {
+      "$ref": "findings.json#/properties/gate",
+      "description": "Present where --fail-on is given. It judges run B's new findings alone: it passes when none is at or above fail_on, and blocking names those that are."
+    },
+    "sql": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matched", "only_a", "only_b"],
+      "properties": {
+        "matched": {"type": "array", "items": {"$ref": "#/$defs/matched_execution"}, "description": "In run B's order."},
+        "only_a": {"type": "array", "items": {"$ref": "#/$defs/unmatched_execution"}, "description": "Executions run B has no match for."},
+        "only_b": {"type": "array", "items": {"$ref": "#/$defs/unmatched_execution"}, "description": "Executions run A has no match for."}
+      }
+    },
+    "stages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matched", "only_a", "only_b"],
+      "properties": {
+        "matched": {"type": "array", "items": {"$ref": "#/$defs/matched_stage"}, "description": "In run B's stage order."},
+        "only_a": {"type": "array", "items": {"$ref": "#/$defs/unmatched_stage"}},
+        "only_b": {"type": "array", "items": {"$ref": "#/$defs/unmatched_stage"}}
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ignored", "added", "removed", "changed", "unknown"],
+      "description": "The spark, hadoop and system properties that differ, compared as strings, each list in section and key order.",
+      "properties": {
+        "ignored": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "The glob patterns of keys left out: the keys Spark sets anew for every run, then each --ignore-config."
+        },
+        "added": {"type": "array", "items": {"$ref": "#/$defs/setting"}, "description": "Keys only run B set. a is null."},
+        "removed": {"type": "array", "items": {"$ref": "#/$defs/setting"}, "description": "Keys only run A set. b is null."},
+        "changed": {"type": "array", "items": {"$ref": "#/$defs/setting"}},
+        "unknown": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/setting"},
+          "description": "Keys both runs set where either wrote the value redacted, as *********(redacted). Spark writes the same mask over any value, so equal masks say nothing."
+        }
+      }
+    },
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["new", "resolved", "persisting"],
+      "description": "Two findings match when one rule reported them about paired parts of the runs: the paired execution or stage, a node of the paired execution, the application, or executors in id order. A finding_id carries its run's ids, so it never matches.",
+      "properties": {
+        "new": {"type": "array", "items": {"$ref": "findings.json#/$defs/finding"}, "description": "Run B's findings run A lacks, in run B's analysis order."},
+        "resolved": {"type": "array", "items": {"$ref": "findings.json#/$defs/finding"}, "description": "Run A's findings run B lacks, in run A's analysis order."},
+        "persisting": {
+          "type": "array",
+          "description": "The findings both runs report, in run B's analysis order. A severity that moved shows as the two findings' severities.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["a", "b"],
+            "properties": {"a": {"$ref": "findings.json#/$defs/finding"}, "b": {"$ref": "findings.json#/$defs/finding"}}
+          }
+        }
+      }
+    },
+    "exceptions": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/exception"},
+      "description": "Every exception key either run logged: new first, then recurring, routine and resolved, the most logged first in each."
+    }
+  },
+  "$defs": {
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app_id", "app_name", "spark_version", "wall_ms", "succeeded"],
+      "properties": {
+        "app_id": {"type": ["string", "null"]},
+        "app_name": {"type": ["string", "null"]},
+        "spark_version": {"type": ["string", "null"]},
+        "wall_ms": {"type": ["integer", "null"], "description": "From the start to the end, or to the last thing the log saw finish."},
+        "succeeded": {"type": "boolean", "description": "The application ended and every job it ran succeeded."}
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "unit", "a", "b", "delta", "delta_share", "notable"],
+      "description": "One metric in both runs. A stage's sums are over its effective tasks, as stages list takes them, and its task_count counts every attempt.",
+      "properties": {
+        "metric": {"type": "string", "description": "A column name of stages list --json."},
+        "unit": {"type": "string", "description": "The unit a, b and delta are in, from the metric's name: ms, ns, bytes, records, count or x."},
+        "a": {"type": ["number", "null"]},
+        "b": {"type": ["number", "null"]},
+        "delta": {"type": ["number", "null"], "description": "b less a. Null where either is."},
+        "delta_share": {"type": ["number", "null"], "description": "delta over a. Null where a is 0 or null."},
+        "notable": {
+          "type": "boolean",
+          "description": "The change is at least 10% of a, and at least the unit's floor: 5000 ms, 5e9 ns, 64 MiB, 1 for a ratio, and 10% of a for records and counts."
+        }
+      }
+    },
+    "matched_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a_execution_id", "b_execution_id", "description", "matched_by", "final_plan_changed", "operator_changes", "metrics"],
+      "properties": {
+        "a_execution_id": {"type": "integer"},
+        "b_execution_id": {"type": "integer"},
+        "description": {"type": ["string", "null"], "description": "Run B's description of it."},
+        "matched_by": {
+          "description": "The pass that paired it, strongest first. description_and_initial_plan: the description and the plan before AQE ran. description_and_final_operators: the description and the last plan's operator counts. initial_plan: the plan before AQE ran alone, for a description that changed. description_and_order: the nth execution with a description in each run.",
+          "enum": ["description_and_initial_plan", "description_and_final_operators", "initial_plan", "description_and_order"]
+        },
+        "final_plan_changed": {"type": "boolean", "description": "The two last plans differ in anything but their ids."},
+        "operator_changes": {
+          "type": "array",
+          "description": "Each operator the two last plans hold a different number of.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operator", "a_count", "b_count"],
+            "properties": {"operator": {"type": "string"}, "a_count": {"type": "integer"}, "b_count": {"type": "integer"}}
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/metric"},
+          "description": "Its stages' sums, but wall_ms, which is the execution's own. The two max-to-median ratios are left out."
+        }
+      }
+    },
+    "unmatched_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_id", "description", "wall_ms"],
+      "properties": {
+        "execution_id": {"type": "integer"},
+        "description": {"type": ["string", "null"]},
+        "wall_ms": {"type": ["integer", "null"]}
+      }
+    },
+    "matched_stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a_stage_id", "b_stage_id", "a_execution_id", "b_execution_id", "name", "matched_by", "metrics"],
+      "properties": {
+        "a_stage_id": {"type": "integer"},
+        "b_stage_id": {"type": "integer"},
+        "a_execution_id": {"type": ["integer", "null"], "description": "The SQL execution of the first job that ran it. Null for a stage of no SQL execution."},
+        "b_execution_id": {"type": ["integer", "null"]},
+        "name": {"type": ["string", "null"], "description": "Run B's name for it, which is Spark's call site."},
+        "matched_by": {
+          "description": "plan_nodes: inside paired executions, the set of plan nodes its tasks reported metrics to, then its order among stages with the same set. name: its name, then its order among stages with the same name.",
+          "enum": ["plan_nodes", "name"]
+        },
+        "metrics": {"type": "array", "items": {"$ref": "#/$defs/metric"}}
+      }
+    },
+    "unmatched_stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage_id", "execution_id", "name", "wall_ms"],
+      "properties": {
+        "stage_id": {"type": "integer"},
+        "execution_id": {"type": ["integer", "null"]},
+        "name": {"type": ["string", "null"]},
+        "wall_ms": {"type": ["integer", "null"]}
+      }
+    },
+    "setting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["section", "key", "a", "b"],
+      "properties": {
+        "section": {"enum": ["spark", "hadoop", "system"]},
+        "key": {"type": "string"},
+        "a": {"type": ["string", "null"]},
+        "b": {"type": ["string", "null"]}
+      }
+    },
+    "exception": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "source", "key", "example", "a_count", "b_count", "baseline_count", "first_task_id", "first_stage_id", "first_epoch_ms"
+      ],
+      "properties": {
+        "status": {
+          "description": "new: only run B logged it. recurring: run B and a run A that failed. routine: run B and a run that succeeded, A or a baseline, so a healthy run throws it too. resolved: only run A.",
+          "enum": ["new", "recurring", "routine", "resolved"]
+        },
+        "source": {"description": "What logged it: a task attempt that did not succeed, a stage attempt that failed, or a job that failed.", "enum": ["task", "stage", "job"]},
+        "key": {
+          "type": "string",
+          "description": "The one line naming the error, with the run's hosts, paths, UUIDs, hex ids and numbers replaced by <host>, <path>, <uuid>, <hex> and <n>. A task's line leads with its end reason, but for an ExceptionFailure, whose line leads with the exception's class."
+        },
+        "example": {"type": "string", "description": "The first line logged under the key, as logged."},
+        "a_count": {"type": "integer"},
+        "b_count": {"type": "integer"},
+        "baseline_count": {"type": "integer", "description": "How many times the baselines that succeeded logged it."},
+        "first_task_id": {"type": ["integer", "null"], "description": "Where run B first logged it, or run A for a resolved key."},
+        "first_stage_id": {"type": ["integer", "null"]},
+        "first_epoch_ms": {"type": ["integer", "null"]}
+      }
+    }
+  }
+}

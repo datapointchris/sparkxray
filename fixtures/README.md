@@ -109,9 +109,9 @@ The skewed join's maximum is 54 times its median and 702 MiB, past the 256 MiB f
 run-time maximum is 27 times its median but under half a second, which the task-skew floor exists
 to ignore.
 
-`spark-3.5.9-warmup` runs one extra job first, so every stage id is 6 higher. Its skewed join is
-stage 10. Skew-join handling splits it into 19 tasks with a maximum read of 184,510,075 B, under
-the 256 MiB floor. Each split still spills far more than the median task. So under skew-join
+`spark-3.5.9-warmup` runs one extra job first, as SQL execution 0. So every later execution id is
+1 higher and every stage id 6 higher, and its skewed join is stage 10. Skew-join handling splits
+it into 19 tasks with a maximum read of 184,510,075 B, under the 256 MiB floor. Each split still spills far more than the median task. So under skew-join
 handling the job describes that query with `stage.spill-skew` firing and `stage.shuffle-skew`
 silent.
 
