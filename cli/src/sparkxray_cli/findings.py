@@ -124,7 +124,7 @@ def show(
     render.print_records(applied, ('name', 'value', 'source', 'default', 'default_source'), title='Thresholds')
     render.print_list('How to fix it', finding.remediation)
     render.print_links(finding.docs)
-    render.note(f'how the rule decides: sparkxray rules show {finding.rule_id}')
+    render.note(f'how the rule decides: {rule_command(finding.rule_id, threshold, thresholds)}')
 
 
 def _print_findings(listed: Analysis, found: int) -> None:
@@ -151,7 +151,15 @@ def _print_findings(listed: Analysis, found: int) -> None:
 
 def show_command(log: str, finding_id: str, flags: list[str] | None, file: Path | None) -> str:
     """`findings show` for one finding with the same thresholds, so it shows the finding as the command printing this judged it."""
-    command = ['sparkxray', 'findings', 'show', log, finding_id]
+    return _with_thresholds(['sparkxray', 'findings', 'show', log, finding_id], flags, file)
+
+
+def rule_command(rule_id: str, flags: list[str] | None, file: Path | None) -> str:
+    """`rules show` for one rule with the same thresholds, so its lesson states the values the finding was judged by."""
+    return _with_thresholds(['sparkxray', 'rules', 'show', rule_id], flags, file)
+
+
+def _with_thresholds(command: list[str], flags: list[str] | None, file: Path | None) -> str:
     for flag in flags or ():
         command += ['--threshold', flag]
     if file is not None:

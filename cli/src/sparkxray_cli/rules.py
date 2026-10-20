@@ -69,13 +69,13 @@ def show(
     render.print_records(ladder, ('severity', 'when'), title='Severity')
     render.stdout.print(Markdown(lesson.text))
     if lesson.example is not None:
-        _print_example(lesson.example)
+        _print_example(lesson.example, at_defaults=lesson.overridden)
     render.print_links(lesson.rule.docs)
 
 
-def _print_example(example: LessonExample) -> None:
+def _print_example(example: LessonExample, *, at_defaults: bool) -> None:
     render.stdout.print()
-    render.stdout.print(Markdown('## What it found on a fixture log'))
+    render.stdout.print(Markdown('## What it found on a fixture log' + (', at the default thresholds' if at_defaults else '')))
     render.stdout.print(Text(example.title, style='bold'))
     render.print_record(
         {

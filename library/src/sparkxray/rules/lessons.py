@@ -67,12 +67,20 @@ class RuleLesson:
     text: str
     example: LessonExample | None
 
+    @property
+    def overridden(self) -> bool:
+        """Whether a threshold is set past its default, so the example, judged at the defaults, may not hold at these."""
+        return any(applied.source != 'default' for applied in self.thresholds.values())
+
     def to_json(self) -> dict[str, Any]:
+        example = None
+        if self.example is not None:
+            example = {**self.example.to_json(), 'thresholds': {name: applied.default for name, applied in self.thresholds.items()}}
         return {
             **self.rule.to_json(),
             'lesson': self.text,
             'applied_thresholds': {name: applied.to_json() for name, applied in self.thresholds.items()},
-            'example': None if self.example is None else self.example.to_json(),
+            'example': example,
         }
 
 
