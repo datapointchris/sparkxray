@@ -13,6 +13,7 @@ from typing import Any
 
 from sparkxray.reports.report import Report
 from sparkxray.reports.report import SqlSummary
+from sparkxray.rules.analysis import Gate
 from sparkxray.rules.findings import Finding
 from sparkxray.spark_ui_format import shown_in
 from sparkxray.summaries.annotated_plans import AnnotatedNode
@@ -31,7 +32,7 @@ def render_markdown(report: Report) -> str:
     """The report as Markdown, ending in one newline."""
     sections = [
         _header(report),
-        _findings(report.findings),
+        _findings(report.findings, report.gate),
         _skipped(report),
         _stages(report),
         _sql(report),
@@ -64,7 +65,7 @@ def _header(report: Report) -> str:
     return '\n'.join(lines)
 
 
-def _findings(findings: Sequence[Finding]) -> str:
+def _findings(findings: Sequence[Finding], gate: Gate) -> str:
     if not findings:
         return '## Findings\n\nNo rule found a problem.'
     lines = ['## Findings', '']
@@ -74,7 +75,15 @@ def _findings(findings: Sequence[Finding]) -> str:
         largest = max(measured, key=lambda finding: finding.impact_seconds or 0)
         count += f' The largest single impact is {shown_in("s", largest.impact_seconds)}, from `{largest.finding_id}`.'
         count += ' Findings on one stage can count the same seconds, so the impacts do not add.'
-    lines += [count, '']
+    if gate.passed:
+        judged = f'No finding is at or above `{gate.fail_on}`, the severity this report was judged at.'
+    else:
+        blocking = len(gate.blocking)
+        judged = (
+            f'{blocking} finding{"s are" if blocking > 1 else " is"} at or above `{gate.fail_on}`, the severity this report was judged at: '
+            f'{", ".join(f"`{finding_id}`" for finding_id in gate.blocking)}.'
+        )
+    lines += [count, '', judged, '']
     lines += _table(
         ('Severity', 'Finding', 'Scope', 'Title', 'Impact'),
         [

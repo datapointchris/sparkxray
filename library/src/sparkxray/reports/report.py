@@ -26,8 +26,10 @@ from sparkxray.errors import NotInRunError
 from sparkxray.ingest.event_log import EventLog
 from sparkxray.plan.aqe_changes import AqeChanges
 from sparkxray.rules.analysis import Analysis
+from sparkxray.rules.analysis import Gate
 from sparkxray.rules.analysis import SkippedRule
 from sparkxray.rules.findings import Finding
+from sparkxray.rules.rule import Severity
 from sparkxray.rules.spark_settings import READ_BY_RULES
 from sparkxray.summaries.annotated_plans import AnnotatedPlan
 from sparkxray.summaries.annotated_plans import annotated_plan
@@ -40,7 +42,7 @@ from sparkxray.tables.registry import CORE_TIME_CTES
 from sparkxray.tables.registry import GLUE_DPU_CORES
 from sparkxray.tables.rows import rows_of
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ReportFormat = Literal['markdown', 'json']
 LONGEST_STAGE_COUNT = 10
 
@@ -200,6 +202,7 @@ class ConfigEntry:
 class Report:
     """One analyzed log, everything a person or a program reading the run needs, in the order a reader acts on it.
 
+    `gate` is the analysis judged at the report's `fail_on`, as `findings list --fail-on` judges it.
     `findings` and `skipped_rules` are the analysis's, in its order. `stages` holds the
     `LONGEST_STAGE_COUNT` longest by wall time. `sql` holds every execution, `executors` every
     executor and the driver.
@@ -209,6 +212,7 @@ class Report:
     app: AppSummary
     log: LogSummary
     usage: Usage
+    gate: Gate
     findings: tuple[Finding, ...]
     skipped_rules: tuple[SkippedRule, ...]
     stages: tuple[Mapping[str, Any], ...]
@@ -224,6 +228,7 @@ class Report:
             'app': self.app.to_json(),
             'log': self.log.to_json(),
             'usage': self.usage.to_json(),
+            'gate': self.gate.to_json(),
             'findings': [finding.to_json() for finding in self.findings],
             'skipped_rules': [skipped.to_json() for skipped in self.skipped_rules],
             'stages': [dict(stage) for stage in self.stages],
@@ -233,8 +238,8 @@ class Report:
         }
 
 
-def build_report(log: EventLog, analysis: Analysis | None = None) -> Report:
-    """The report of one log. Without an `analysis`, it runs `log.analyze()` at the default thresholds.
+def build_report(log: EventLog, analysis: Analysis | None = None, fail_on: Severity = 'high') -> Report:
+    """The report of one log, judged at `fail_on`. Without an `analysis`, it runs `log.analyze()` at the default thresholds.
 
     A report takes its thresholds from the analysis only, so every finding in it states the ones it was judged by.
     """
@@ -285,6 +290,7 @@ def build_report(log: EventLog, analysis: Analysis | None = None) -> Report:
             lacks=tuple(manifest.lacks),
         ),
         usage=Usage(**usage[0]) if usage else Usage(None, None, None, None, None, None),
+        gate=found.gate(fail_on),
         findings=found.findings,
         skipped_rules=found.skipped,
         stages=tuple(
