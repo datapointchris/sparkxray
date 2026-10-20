@@ -1,26 +1,43 @@
 sparkxray
 Copyright (c) 2026 Chris Birch. Licensed under the MIT License, in LICENSE.
 
-Parts of the rule catalog adapt wording from two projects licensed under the
+Parts of the rule catalog adapt wording from three projects licensed under the
 Apache License, Version 2.0, a copy of which is in LICENSE-APACHE-2.0.txt
-beside this file. Neither project ships a NOTICE file.
+beside this file.
 
 DataFlint (https://github.com/dataflint/spark), tag v0.9.9
-(commit 27b995bba2027c3001765642ac662ffe2174af72). The remediation text of
-these rules adapts the suggestions in these files under
-spark-ui/src/reducers/Alerts/:
+(commit 27b995bba2027c3001765642ac662ffe2174af72). It ships no NOTICE file.
+The remediation text of these rules adapts the suggestions in these files
+under spark-ui/src/reducers/Alerts/:
 
-  plan.smj-small-side          JoinToBroadcastAlert.ts
-  plan.broadcast-too-large     BroadcastTooLargeAlert.ts
-  plan.cartesian               LargeCrossJoinScanAlert.ts
-  plan.long-filter             LongFilterConditions.ts
-  plan.small-files-read        MemorySQLInputOutputAlerts.ts
-  plan.small-files-written     MemorySQLInputOutputAlerts.ts
+  plan.smj-small-side           JoinToBroadcastAlert.ts
+  plan.broadcast-too-large      BroadcastTooLargeAlert.ts
+  plan.cartesian                LargeCrossJoinScanAlert.ts
+  plan.long-filter              LongFilterConditions.ts
+  plan.small-files-read         MemorySQLInputOutputAlerts.ts
+  plan.small-files-written      MemorySQLInputOutputAlerts.ts
+  stage.oversized-partitions    MaxPartitionToBigAlert.ts
+  stage.tiny-tasks              SmallTasksAlert.ts
+  executor.idle-cores           WastedCoresAlertsReducer.ts
+  executor.memory-under         MemoryAlertsReducer.ts
+  executor.memory-over          MemoryAlertsReducer.ts
+  executor.driver-memory-under  MemoryAlertsReducer.ts
 
 The way plan.smj-small-side sizes each join side, through the chain of
 operators above it, follows spark-ui/src/reducers/PlanGraphUtils.ts.
 
 SparkDoctor (https://github.com/khodosko/sparkDoctor), tag v0.1.5.
-Copyright 2026 SparkDoctor contributors. The lessons of plan.many-exchanges,
-plan.repeated-subtree and plan.missed-exchange-reuse adapt the detection
-criteria described in docs/detections.md.
+Copyright 2026 SparkDoctor contributors. It ships no NOTICE file. The lessons
+of these rules adapt the detection criteria described in docs/detections.md:
+plan.many-exchanges, plan.repeated-subtree, plan.missed-exchange-reuse,
+stage.task-skew, stage.shuffle-skew, stage.oversized-partitions,
+stage.low-shuffle-parallelism, stage.tiny-tasks, stage.spill,
+stage.spill-skew, stage.executor-imbalance, stage.host-imbalance,
+stage.retry-waste and stage.speculation.
+
+Dr. Elephant (https://github.com/linkedin/dr-elephant), commit
+916c25d5845f534ec2648fe17d978cd48a8bd284. Copyright 2016 LinkedIn Corp. The
+lessons of stage.gc-pressure and executor.memory-over adapt how
+app/com/linkedin/drelephant/spark/heuristics/ExecutorGcHeuristic.scala reads
+its GC ratio: high as too little executor memory, and low as more than the
+tasks need.

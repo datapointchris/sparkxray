@@ -14,6 +14,9 @@ So every ratio comes with an absolute amount, the way AQE's own skew test pairs
 `skewedPartitionFactor` (5) with `skewedPartitionThresholdInBytes` (256 MB). Stage rules lead with
 bytes and records, and use duration as a secondary signal. `stage.task-skew` needs a gap of at
 least 30 s between the slowest and the median task, which keeps it silent on the 200-task stage.
+`stage.scheduler-delay` and `stage.deserialization` need 30 s at stake too: their summed time over
+the stage's concurrent slots. So the first stage on fresh executors, which loads its classes
+once, stays quiet.
 
 ## Severity is the rule's grade, moved one step by the stage's share of the run
 
@@ -56,14 +59,20 @@ An exit 3 with no `gate` on stdout means the log was not read. A severity outsid
 
 ## `impact_seconds` is wall time a fix could recover, and null where nobody can say
 
-| Rule family | `impact_seconds` |
+| Rule | `impact_seconds` |
 | --- | --- |
-| skew | the slowest task minus the median task, on the stage's critical path |
-| spill | the spilling tasks' run time × (disk spill ÷ (shuffle read + input)), capped at stage wall time |
-| tiny tasks, scheduler delay, deserialization | the summed overhead ÷ the stage's concurrent slots |
-| driver gaps | the gap lengths |
-| retry waste | the failed attempts' run time ÷ concurrent slots |
-| plan-only rules | null |
+| `stage.task-skew` | the slowest task's run time minus the median task's |
+| `stage.shuffle-skew`, `stage.spill-skew` | the slowest task's duration minus the median task's |
+| `stage.spill` | the spilling tasks' run time ÷ concurrent slots, × disk spill ÷ (shuffle read + input) up to 1, capped at stage wall time, and null where the stage read nothing |
+| `stage.tiny-tasks` | the tasks' summed duration less their run time, ÷ the stage's concurrent slots |
+| `stage.scheduler-delay` | the summed scheduler delay ÷ concurrent slots |
+| `stage.deserialization` | the summed deserialization time ÷ concurrent slots |
+| `stage.retry-waste` | the failed attempts' run time ÷ concurrent slots |
+| `app.driver-gaps` | the gaps' summed length |
+| every other rule | null |
+
+A stage's concurrent slots are its task count or the cores of the executors that ran its tasks,
+whichever is fewer.
 
 Findings sort by `impact_seconds`, largest first and nulls last, then by severity.
 
@@ -86,9 +95,34 @@ Rule ids are dotted by the evidence they read:
 | --- | --- |
 | `plan.` | plan nodes, and their metrics where present |
 | `stage.` | effective tasks and stages |
-| `executor.` | executors and task memory peaks |
+| `executor.` | executors, their memory peaks and their memory settings |
 | `app.` | jobs, stages and executors as a timeline |
 | `config.` | the environment, against other findings |
+
+## A rule may read another rule's findings, and that rule runs first
+
+A Python rule names the rules whose findings it reads in `reads_findings_of`. Its context's
+`findings` holds them by rule id. Selecting the rule runs those it reads first. Where one of
+theirs lacks a signal, the reading rule skips too.
+
+A rule run only because a selected rule reads it reports nothing. Its findings reach the reading
+rule alone, and `rules_run` lists it with `reported` false. So `findings list --rule
+stage.oversized-partitions --fail-on high` lists and gates that rule's findings, and never the
+`stage.shuffle-skew` finding it read. A narrowing flag that gated on rules the caller never named
+would fail a CI job for a reason it did not ask about.
+
+Only a Python rule may read findings, and no rule reads its own. `register` refuses a rule reading
+one the catalog does not hold. So the order is always known before the first rule runs.
+
+`rules list --json` names the rules each rule reads. A rule reading `stage.shuffle-skew` either
+leaves out the stages it found, as `stage.oversized-partitions` and `stage.spill-skew` do, or
+builds on them, as `config.skew-join-off-with-skew` does. A skewed partition is too large, and
+spills unevenly, because it is skewed, and the skew finding names the fix. A rule that would point
+a run the wrong way stays silent where another finding proves the opposite, as
+`executor.memory-over` does where a task or an executor ran out of memory.
+
+*Rejected:* reading the findings table from SQL. It holds the last analysis, which need not have
+run the rule read, or run it with the same thresholds.
 
 ## A SQL rule reads its thresholds as parameters, and a Python rule reads the plans
 
@@ -111,7 +145,9 @@ a taken id, or a finding that breaks the contract is `E-RULE-004`, naming the ru
 A rule's `title` is a `str.format` template over the finding's scope ids and evidence. In it,
 `{key:bytes}` prints a byte count as the Spark UI's `Utils.bytesToString` does, `702.5 MiB`, and
 `{key:duration}` prints milliseconds as its `UIUtils.formatDuration` does, `26 s`. So a title reads
-the way the Stages tab shows the same number.
+the way the Stages tab shows the same number. `{key:plural gap}` prints a count with its noun
+agreeing, `1 gap` or `3 gaps`, so a title never reads "1 gaps". A count no threshold can bring
+below 2, such as a repeated subtree's occurrences, prints bare.
 
 ## A finding is named by its rule and its scope
 
@@ -135,11 +171,10 @@ A `Threshold` carries a `source` beside its default. Most defaults come from pub
   repeated-subtree sizes;
 - DataFlint's alert reducers, for wasted cores, memory provisioning and partition size, and for
   join sides, broadcast size, file sizes and filter length;
-- Dr. Elephant's Spark heuristics, for the GC ladder and task failure rates;
+- Dr. Elephant's `ExecutorGcHeuristic`, for the GC ladder;
 - Spark's own defaults, for the partition size at which AQE calls a partition skewed;
 - AWS Glue's observability docs, for the skewness score;
-- kubeflow's Spark tools, for spill and GC;
-- Sparklens, for the executor simulation.
+- the Databricks Spark UI guide, for a driver gap of a minute and a job of a few seconds.
 
 A threshold no prior art supplies is marked `proposed`. `sparkxray rules show <rule id>` prints
 each threshold's source.
@@ -278,3 +313,63 @@ The Python worker's time shows in no operator metric, only in the stage's run ti
 Python UDF rules report presence. Their evidence names the stages running the UDF, and those
 stages' share of the run's task time. Spark 4 renamed several Python operators, and the rules read
 both releases' names.
+
+## A memory finding names where it read the heap's size and its peak
+
+An executor's peak is the most JVM heap any stage or task peak reported for it, as the Executors
+tab's Peak JVM Memory OnHeap shows it. Spark writes stage peaks only under
+`spark.eventLog.logStageExecutorMetrics`, which is off by default. Without them the peak is a
+task-end poll, which can miss the top. So `executor.memory-over` takes medium confidence there,
+and `config.event-log-incomplete` names the setting.
+
+The heap's size is the executor's resource profile memory, then `spark.executor.memory`, then
+Spark's 1 GiB default. A setting reads as Spark reads it, so a bare number is MiB. The driver's
+size comes from `spark.driver.memory` the same way. Each finding names both sources, as
+`peak_memory_source` and `executor_memory_source` or `driver_memory_source`.
+
+DataFlint's bars apply to the fullest non-driver executor. Over 95% of its heap is too little, and
+under 70% is too much. The suggestion is 20% over the heap that filled, or 20% over the peak.
+
+An allocation that fails never reaches the peak, and a lost executor's last metrics can go with
+it. So a run where a task ran out of memory can show every peak low. `executor.memory-over` stays
+silent where `stage.task-oom` fired or `executor.lost` graded a loss high, rather than advise
+cutting the memory that ran out.
+
+## Idle cores count the cores each task holds
+
+`executor.idle-cores` follows DataFlint: the share of executor core time, lifetime × cores, that
+no task held. A task holds `spark.task.cpus` cores, so two-core tasks keep a two-core executor
+busy. In local mode the driver runs the tasks, so the driver is counted instead. A Glue run's
+evidence adds the idle DPU-hours, at four cores to a DPU. DataFlint pairs its 50% share with no
+amount, so a run of seconds fires on its start-up alone. The rule also needs `min_idle_core_ms`,
+five minutes of one core by default, before the share counts. A short local run idles a core
+minute or two starting and stopping, so the floor sits above that.
+
+## An executor's loss is reported unless it was ended on purpose
+
+`executor.lost` reports every executor removal but those Spark or the cluster manager meant:
+dynamic allocation's kill and decommission, and YARN's explicit termination and shutdown. Each
+cluster manager words the reason its own way. The exit code is read from YARN's `Exit status: N`,
+Kubernetes' `exit code N` and standalone's `exited with code N`.
+
+The loss is `high` where its reason or a task on the executor names running out of memory. That is
+an `OutOfMemoryError`, YARN's memory limit, or exit code 52, 137 or 143. Spark exits 52 on an
+`OutOfMemoryError`. 137 is SIGKILL, which a container's memory limit sends, and 143 is SIGTERM,
+which YARN sends first.
+
+## A stage or job Spark stopped for another's failure is not a failure
+
+When a job fails or is cancelled, Spark's `DAGScheduler` ends every running stage only that job
+ran, and gives each the job's reason. A failed job's reason blames the stage whose task failed, as
+`Job aborted due to stage failure: Task 0 in stage 2.0 failed 4 times`. A cancelled job's reads
+`Job 4 cancelled …`, and Spark 4 prefixes it with `[SPARK_JOB_CANCELLED]`. AQE cancels the other
+query stages of a query when one fails, and each cancellation ends a job of its own.
+
+So `stage.failed` reports a stage only where its reason blames that stage. Spark 4 passes a
+user-facing error through unwrapped, as `[PYTHON_EXCEPTION] …`, which blames no stage. There a
+stage counts where one of its own task attempts failed rather than being killed, because a
+stopped sibling's running tasks end killed. `app.failed-jobs` counts cancelled jobs apart, in
+`cancelled_job_count`, and reads its reason from the first job that was not cancelled.
+
+A stage that fails before any task runs, such as on task serialization, blames no stage and has
+no failed attempt, so `stage.failed` leaves it out. `app.failed-jobs` still reports its job.

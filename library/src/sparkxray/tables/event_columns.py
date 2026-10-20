@@ -90,6 +90,8 @@ EVENT_COLUMNS: dict[str, str] = {
     'Maximum Memory': 'BIGINT',
     'Resource Profile Id': 'BIGINT',
     'Executor Resource Requests': 'STRUCT("memory" STRUCT("Amount" BIGINT))',
+    # SparkListenerStageExecutorMetrics: one executor's peaks over one stage attempt.
+    'Executor Metrics': 'STRUCT("JVMHeapMemory" BIGINT, "JVMOffHeapMemory" BIGINT)',
     # the environment
     'JVM Information': _PROPERTIES,
     'Spark Properties': _PROPERTIES,

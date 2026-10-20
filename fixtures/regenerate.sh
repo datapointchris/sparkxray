@@ -30,6 +30,8 @@ readonly VARIANTS=(
   spark-4.2.0-plan-shapes
   spark-3.5.9-plan-rules
   spark-4.2.0-plan-rules
+  spark-3.5.9-stage-rules
+  spark-4.2.0-stage-rules
   glue-5.0
   apache-spark-events
 )
@@ -85,6 +87,22 @@ readonly PLAN_RULES_CONF=(
   --conf spark.eventLog.rolling.enabled=false
   --conf spark.sql.autoBroadcastJoinThreshold=-1
   --conf spark.sql.shuffle.partitions=8
+)
+
+# Settings the stage-rules job runs under. Two executors of two cores and a 1 GiB heap each let one
+# run out of memory and be replaced. Executor peaks go into the log, and shuffle blocks stay
+# uncompressed, so a seed's row count sets its shuffle bytes. Skew joins and AQE stay on by default,
+# and the job turns each off for the session where a seed needs it.
+readonly STAGE_RULES_CONF=(
+  --master 'local-cluster[2,2,1024]'
+  --conf spark.executor.memory=1g
+  --conf spark.eventLog.enabled=true
+  --conf spark.eventLog.dir=file:///out
+  --conf spark.eventLog.logStageExecutorMetrics=true
+  --conf spark.sql.autoBroadcastJoinThreshold=-1
+  --conf spark.sql.adaptive.coalescePartitions.enabled=false
+  --conf spark.sql.shuffle.partitions=16
+  --conf spark.shuffle.compress=false
 )
 
 # A pandas UDF needs pyarrow and pandas, and neither Spark image ships them. Spark 4.2 refuses a
@@ -257,6 +275,13 @@ run_variant() {
       mkdir -p "$work/explain/$variant"
       mv "$work/data/plan-rules-estimates.json" "$work/explain/$variant/cost-mode.json"
       zstd_plain "$out"/local-*
+      ;;
+    spark-3.5.9-stage-rules)
+      submit "$SPARK_3" "$out" /opt/spark/bin/spark-submit "${STAGE_RULES_CONF[@]}" /job/stage_rules_job.py
+      zstd_plain "$out"/app-*
+      ;;
+    spark-4.2.0-stage-rules)
+      submit "$SPARK_4" "$out" /opt/spark/bin/spark-submit "${STAGE_RULES_CONF[@]}" /job/stage_rules_job.py
       ;;
     glue-5.0)
       # Glue's own spark-defaults.conf stays in force, apart from where the log goes.

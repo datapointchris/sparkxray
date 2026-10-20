@@ -24,7 +24,15 @@ app = typer.Typer(
 
 RuleOption = Annotated[
     list[str] | None,
-    typer.Option('--rule', metavar='RULE_ID', help='Run only this rule. Repeat for more. Every rule by default.', show_default=False),
+    typer.Option(
+        '--rule',
+        metavar='RULE_ID',
+        help=(
+            'List and gate only this rule. A rule reading the findings of another runs that one first, unlisted. '
+            'Repeat for more. Every rule by default.'
+        ),
+        show_default=False,
+    ),
 ]
 ThresholdOption = Annotated[
     list[str] | None,

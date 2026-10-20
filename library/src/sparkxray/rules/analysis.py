@@ -73,15 +73,20 @@ GROUP BY ALL
 
 @dc.dataclass(frozen=True, slots=True)
 class RuleRun:
-    """A rule the analysis ran, and the thresholds it applied, whether or not it found anything."""
+    """A rule the analysis ran, and the thresholds it applied, whether or not it found anything.
+
+    `reported` is False for a rule that ran only because a selected rule reads its findings. Its
+    findings reached that rule alone, so the analysis neither lists them nor gates on them.
+    """
 
     rule_id: str
     rule_version: int
     thresholds: Mapping[str, AppliedThreshold]
+    reported: bool = True
 
     def to_json(self) -> dict[str, Any]:
         thresholds = {name: applied.to_json() for name, applied in self.thresholds.items()}
-        return {'rule_id': self.rule_id, 'rule_version': self.rule_version, 'thresholds': thresholds}
+        return {'rule_id': self.rule_id, 'rule_version': self.rule_version, 'thresholds': thresholds, 'reported': self.reported}
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -102,9 +107,10 @@ class Analysis:
 
     `findings` runs from the most wall time a fix could recover to the least, with findings of
     unknown impact last, then by severity. `signals` names what the input held. `rules_run`
-    names every rule that ran with the thresholds it applied, and each rule needing a signal the
-    input lacked is in `skipped`. So a partial analysis reads as partial, and a rule silenced by
-    an override reads as silenced rather than clean.
+    names every rule that ran with the thresholds it applied, and each selected rule needing a
+    signal the input lacked is in `skipped`. So a partial analysis reads as partial, and a rule
+    silenced by an override reads as silenced rather than clean. `findings` and `skipped` hold
+    the selected rules alone, and not the rules run only because a selected rule reads them.
     """
 
     app_id: str | None
@@ -205,9 +211,7 @@ def analyze(
     A flag beats the SDK, the SDK beats the file, and the file beats the rule's default. Each
     applied value records the layer that set it.
     """
-    selected, every_rule = _selected(rules)
-    if rules is None:
-        selected = [rule for rule in selected if rule.signals <= _LOG_SIGNALS]
+    selected, reported, every_rule = _selected(rules, feedable=_LOG_SIGNALS)
     applied = resolve_thresholds(selected, every_rule, sdk=thresholds, file=threshold_file, flags=threshold_flags)
     tables = log.tables
     plans: dict[int | None, Plan] = {execution_id: plan for execution_id, plan in tables.last_plans().items()}
@@ -222,6 +226,7 @@ def analyze(
     shares = {(level, scope_id): share for level, scope_id, _, share in tables.query(WALL_SHARES_SQL).fetchall() if share is not None}
     analysis = _run(
         selected,
+        reported,
         applied,
         _Input(
             app_id=None if application is None else application[0],
@@ -258,7 +263,7 @@ def analyze_plan(
     skipped. A plan read from `explain(mode='cost')` text holds the optimizer's estimates too,
     which no log does. The thresholds are set as `analyze` sets them. Nothing is written.
     """
-    selected, every_rule = _selected(rules)
+    selected, reported, every_rule = _selected(rules)
     applied = resolve_thresholds(selected, every_rule, sdk=thresholds, file=threshold_file, flags=threshold_flags)
     held: set[Signal] = {'plan'}
     if node_metrics:
@@ -268,6 +273,7 @@ def analyze_plan(
     signals = frozenset(held)
     return _run(
         selected,
+        reported,
         applied,
         _Input(
             app_id=None,
@@ -281,32 +287,59 @@ def analyze_plan(
     )
 
 
-def _selected(rules: Iterable[str] | None) -> tuple[list[Rule], list[Rule]]:
+def _selected(
+    rules: Iterable[str] | None, *, feedable: frozenset[Signal] = frozenset(SIGNALS)
+) -> tuple[list[Rule], frozenset[str], list[Rule]]:
+    """The rules to run, each after the rules whose findings it reads; the ids of the selected ones; and every rule in the catalog.
+
+    With no `rules`, every rule runs whose signals are all `feedable`.
+    """
     every_rule = catalog()
-    if rules is None:
-        return every_rule, every_rule
     known = {rule.rule_id: rule for rule in every_rule}
-    wanted = {rules} if isinstance(rules, str) else set(rules)
-    for rule_id in sorted(wanted):
+    if rules is None:
+        wanted = {rule.rule_id for rule in every_rule if rule.signals <= feedable}
+    else:
+        wanted = {rules} if isinstance(rules, str) else set(rules)
+        for rule_id in sorted(wanted):
+            if rule_id not in known:
+                raise UnknownRuleError(f'no rule is called {rule_id!r}', field='rules', valid=sorted(known))
+    ordered: dict[str, Rule] = {}
+
+    def visit(rule_id: str) -> None:
+        if rule_id in ordered:
+            return
         if rule_id not in known:
-            raise UnknownRuleError(f'no rule is called {rule_id!r}', field='rules', valid=sorted(known))
-    return [known[rule_id] for rule_id in sorted(wanted)], every_rule
+            raise InvalidRuleError(f'a rule reads the findings of {rule_id!r}, which no rule is called', field='rule')
+        for prerequisite in known[rule_id].reads_findings_of:
+            visit(prerequisite)
+        ordered[rule_id] = known[rule_id]
+
+    for rule_id in sorted(wanted):
+        visit(rule_id)
+    return list(ordered.values()), frozenset(wanted), every_rule
 
 
-def _run(rules: Sequence[Rule], applied: Mapping[str, Mapping[str, AppliedThreshold]], given: _Input) -> Analysis:
+def _run(rules: Sequence[Rule], reported: frozenset[str], applied: Mapping[str, Mapping[str, AppliedThreshold]], given: _Input) -> Analysis:
     findings: list[Finding] = []
+    by_rule: dict[str, tuple[Finding, ...]] = {}
+    lacking: dict[str, tuple[Signal, ...]] = {}
     ran = []
     skipped = []
     for rule in rules:
-        missing = tuple(signal for signal in SIGNALS if signal in rule.signals and signal not in given.signals)
+        selected = rule.rule_id in reported
+        needed = set(rule.signals).union(*(lacking.get(prerequisite, ()) for prerequisite in rule.reads_findings_of))
+        missing = tuple(signal for signal in SIGNALS if signal in needed and signal not in given.signals)
         if missing:
-            skipped.append(SkippedRule(rule.rule_id, rule.rule_version, missing))
+            lacking[rule.rule_id] = missing
+            if selected:
+                skipped.append(SkippedRule(rule.rule_id, rule.rule_version, missing))
             continue
-        ran.append(RuleRun(rule.rule_id, rule.rule_version, applied[rule.rule_id]))
+        ran.append(RuleRun(rule.rule_id, rule.rule_version, applied[rule.rule_id], reported=selected))
         values = {name: threshold.value for name, threshold in applied[rule.rule_id].items()}
         rows: Iterable[Mapping[str, Any]]
         if rule.check is not None:
-            rows = rule.check(RuleContext(given.plans, given.numbered, given.node_metrics, values, given.tables))
+            read = {prerequisite: by_rule[prerequisite] for prerequisite in rule.reads_findings_of}
+            rows = rule.check(RuleContext(given.plans, given.numbered, given.node_metrics, values, given.tables, read))
         elif rule.sql is not None and given.tables is not None:
             relation = given.tables.query(rule.sql, values or None)
             rows = [dict(zip(relation.columns, row, strict=True)) for row in relation.fetchall()]
@@ -316,7 +349,9 @@ def _run(rules: Sequence[Rule], applied: Mapping[str, Mapping[str, AppliedThresh
         ids = [finding.finding_id for finding in rule_findings]
         if len(set(ids)) != len(ids):
             raise InvalidRuleError(f'rule {rule.rule_id} gave two findings for one scope: {sorted(ids)}', field='rule')
-        findings.extend(rule_findings)
+        by_rule[rule.rule_id] = tuple(rule_findings)
+        if selected:
+            findings.extend(rule_findings)
     findings.sort(
         key=lambda finding: (
             finding.impact_seconds is None,
@@ -411,13 +446,21 @@ def _evidence(rule: Rule, key: str, value: Any) -> Evidence:
 
 
 class _TitleFormatter(string.Formatter):
-    """`str.format`, with `bytes` and `duration` specs that print a value as the Spark UI does."""
+    """`str.format`, with `bytes` and `duration` specs that print a value as the Spark UI does, and a `plural` spec for a count.
+
+    `{gap_count:plural gap}` prints the count and the noun agreeing with it, as `1 gap` or `3 gaps`.
+    A noun whose plural is not its singular and an `s` names both, as `{count:plural copy|copies}`.
+    """
 
     def format_field(self, value: Any, format_spec: str) -> str:
         if format_spec == 'bytes':
             return bytes_to_string(round(value))
         if format_spec == 'duration':
             return format_duration(round(value))
+        if format_spec.startswith('plural '):
+            singular, _, plural = format_spec.removeprefix('plural ').partition('|')
+            count = round(value)
+            return f'{count} {singular if count == 1 else plural or singular + "s"}'
         return str(super().format_field(value, format_spec))
 
 

@@ -283,5 +283,5 @@ release.
 
 MIT. The Apache Spark test logs under `fixtures/logs/apache-spark-events/` are copied from Apache
 Spark and stay under the Apache License 2.0, as `fixtures/NOTICE` records. Some of the rule
-catalog's wording is adapted from DataFlint and SparkDoctor, both under the Apache License 2.0, as
-`library/NOTICE` records.
+catalog's wording is adapted from DataFlint, SparkDoctor and Dr. Elephant, all under the Apache
+License 2.0, as `library/NOTICE` records.

@@ -126,11 +126,12 @@
     "rule_run": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["rule_id", "rule_version", "thresholds"],
+      "required": ["rule_id", "rule_version", "thresholds", "reported"],
       "properties": {
         "rule_id": {"type": "string"},
         "rule_version": {"type": "integer", "minimum": 1},
-        "thresholds": {"type": "object", "additionalProperties": {"$ref": "#/$defs/applied_threshold"}}
+        "thresholds": {"type": "object", "additionalProperties": {"$ref": "#/$defs/applied_threshold"}},
+        "reported": {"type": "boolean", "description": "False for a rule that ran only because a selected rule reads its findings. Its findings reached that rule alone, so they are not in findings, and the gate does not judge them."}
       }
     },
     "skipped_rule": {
