@@ -358,8 +358,9 @@ the three has a hand-written copy to fall behind the code, and a command or erro
 docs still appears.
 
 A command's exit codes are read from its parameters. One taking `--fail-on` exits 3 on a finding
-at or above it, and one taking `LOG` exits 3 when the log cannot be read. Every refused input
-exits 2, and its error code says which input.
+at or above it, and one taking a log exits 3 when the log cannot be read. A log parameter shows
+as `LOG`, or `LOG_<role>` where a command takes two. Every refused input exits 2, and its error
+code says which input.
 
 The other outputs' schemas are files, because their shape is the contract a program holds the
 output to. Every object in them is closed, so a key the code adds without its schema fails a

@@ -41,14 +41,13 @@ def _walk(ctx: typer.Context, group: Any, path: tuple[str, ...], commands: list[
 
 
 def _command(path: tuple[str, ...], command: Any) -> dict[str, Any]:
-    names = {parameter.name for parameter in command.params}
     exit_codes = {'0': 'it ran', '2': _USAGE}
-    if 'fail_on' in names:
+    if any('--fail-on' in parameter.opts for parameter in command.params):
         exit_codes |= {
             '0': 'it ran, and no finding is at or above --fail-on',
             '3': 'a finding is at or above --fail-on, or the log could not be read',
         }
-    elif 'log' in names:
+    elif any(_names_a_log(parameter) for parameter in command.params):
         exit_codes['3'] = 'the log could not be read'
     return {
         'path': list(path),
@@ -65,8 +64,19 @@ def _command(path: tuple[str, ...], command: Any) -> dict[str, Any]:
     }
 
 
+def _names_a_log(parameter: Any) -> bool:
+    """Whether a parameter takes a log location, which `LogArgument` and every other log parameter show as `LOG` or `LOG_<role>`."""
+    metavar = parameter.metavar or ''
+    return metavar == 'LOG' or metavar.startswith('LOG_')
+
+
+def flag_names(option: Any) -> list[str]:
+    """An option's names, its first long one first, as capabilities and a refusal's `field` name it."""
+    return sorted(option.opts, key=lambda name: (not name.startswith('--'), name))
+
+
 def _flag(option: Any) -> dict[str, Any]:
-    names = sorted(option.opts, key=lambda name: (not name.startswith('--'), name))
+    names = flag_names(option)
     choices = getattr(option.type, 'choices', None)
     return {
         'name': names[0],
