@@ -20,8 +20,9 @@ from typing import Any
 import duckdb
 
 from sparkxray.cache_directory import PARTIAL_MARK
+from sparkxray.enrichment.driver_logs import RECORDS_SQL
 from sparkxray.enrichment.driver_logs import driver_log_files
-from sparkxray.enrichment.driver_logs import records_sql
+from sparkxray.enrichment.driver_logs import driver_log_lines
 from sparkxray.errors import NoGlueMetricsError
 from sparkxray.errors import SparkxrayError
 from sparkxray.tables.build import write_table
@@ -65,7 +66,7 @@ def enrich(
     """Read each source given, then write its table beside `tables`, and point their views at it.
 
     `glue_run` reads the run's metrics, over the window the log's application ran in, and its job
-    run insights. CloudWatch listing no metric for the run is the `NoGlueMetricsError` warning,
+    run insights. CloudWatch listing no observability metric for the run is the `NoGlueMetricsError` warning,
     and the insights are still read. `driver_logs` are the locations `driver_log_files` takes.
     Every source is read before any table is written, so a refusal leaves the tables as they were.
     `cache` holds S3 downloads. `profile` and `region` narrow boto3's credential chain.
@@ -73,13 +74,12 @@ def enrich(
     read: set[str] = set()
     warnings: list[SparkxrayError] = []
     connection = duckdb.connect()
-    # A driver log's line numbers count its lines only where one thread reads them in order.
-    connection.execute('SET threads = 1')
     try:
         with tempfile.TemporaryDirectory(prefix='.enrichment-', dir=tables.path) as scratch:
             if driver_logs:
                 files = driver_log_files(driver_logs, cache=cache, scratch=Path(scratch), profile=profile, region=region)
-                connection.execute(f'CREATE TEMP TABLE driver_log_records AS {records_sql(files)}')
+                connection.register('driver_log_lines', driver_log_lines(files))
+                connection.execute(f'CREATE TEMP TABLE driver_log_records AS {RECORDS_SQL}')
                 read.add('driver_log')
             if glue_run is not None:
                 from sparkxray.enrichment.glue_insights import glue_insight_events  # boto3 is imported only when AWS is read
@@ -116,7 +116,7 @@ def _no_metrics(glue_run: GlueRun, start_epoch_ms: int | None) -> NoGlueMetricsE
             field='glue_run',
         )
     return NoGlueMetricsError(
-        f'CloudWatch lists no Glue metric for {glue_run.job_name} run {glue_run.run_id}, so glue_metrics holds no rows. '
+        f'CloudWatch lists no Glue observability metric for {glue_run.job_name} run {glue_run.run_id}, so glue_metrics holds no rows. '
         'The job may have run without --enable-observability-metrics true, or over two weeks ago, '
         'past when CloudWatch lists a metric',
         field='glue_run',

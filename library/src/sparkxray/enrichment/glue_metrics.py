@@ -5,7 +5,8 @@ Glue publishes them every 30 seconds in the `Glue` namespace when the job runs w
 `JobName`, `JobRunId`, `Type` and `ObservabilityGroup`, and a throughput metric `Source` or `Sink`
 as well. ListMetrics names every metric the run published, and GetMetricData reads each one over
 the run. ListMetrics returns no metric without data in the last two weeks, so an older run reads
-as having none.
+as having none. A job run with `--enable-metrics` also publishes Glue's older job metrics, whose
+names start the same way. They carry no `ObservabilityGroup`, so they are left out.
 """
 
 from __future__ import annotations
@@ -60,7 +61,11 @@ def glue_metric_samples(cloudwatch: CloudWatch, job_name: str, run_id: str, star
     Sum and a gauge as its Average, the statistics AWS's reference lists for each. A throughput
     gauge, one with a `Source` or `Sink`, is read as its Maximum, as AWS's Grafana dashboard reads it.
     """
-    listed = cloudwatch.list_metrics(NAMESPACE, {'JobName': job_name, 'JobRunId': run_id})
+    listed = [
+        metric
+        for metric in cloudwatch.list_metrics(NAMESPACE, {'JobName': job_name, 'JobRunId': run_id})
+        if 'ObservabilityGroup' in _dimensions(metric)
+    ]
     metrics = list({(metric['MetricName'], tuple(sorted(_dimensions(metric).items()))): metric for metric in listed}.values())
     start = dt.datetime.fromtimestamp(start_epoch_ms / 1000, tz=dt.UTC)
     period = _period(start)

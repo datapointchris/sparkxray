@@ -411,13 +411,14 @@ Where a Glue run is joined, two rules add Glue's figure beside the one the log g
 
 Neither figure changes whether its rule fires. Glue's stage skewness carries no stage dimension.
 So stages that ran at once share one value, while the log's ratio comes from the stage's own
-tasks. Both rules' `rule_version` rose with the new evidence.
+tasks.
 
 `app.driver-memory-pressure` reads Glue's heap metric alone, and fires on a span, never a peak.
 The heap fills between collections, so one full sample can be a collection about to run. It
 reports each run of consecutive periods at or over `min_heap_used_fraction` that lasted at least
-`min_sustained_ms`. The default is three of Glue's 30-second samples. No prior art gives either
-threshold, so both are proposed.
+`min_sustained_ms`. Glue publishes every 30 seconds, but sparkxray reads one-minute averages, the
+shortest period it asks CloudWatch for. So the default is two of those minutes. No prior art
+gives either threshold, so both are proposed.
 
 `app.driver-oom` reads the driver's log alone, because the event log holds no trace of a driver
 OOM. In the fixture run, a `collect` larger than the driver's heap ended its job as succeeded. Its

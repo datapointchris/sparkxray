@@ -371,9 +371,14 @@ by name, and a stream that does not exist reads as no events. A run that succeed
 **A driver log is structured when a record appears in its first 64 KiB.** Spark's structured
 logging writes one JSON record a line. A driver's stderr holds more: the JVM's warnings before
 log4j starts, and the plain-text trace of an error no logger caught. So the first line is no
-test, and a log whose first 64 KiB hold no record is refused as `E-ENRICH-002`. DuckDB reads each
-log with `ignore_errors=true` and Spark's record schema as explicit columns, and the table keeps
-the lines that parsed. One DuckDB thread reads them, so `line_number` counts lines in order.
+test, and a log whose first 64 KiB hold no record is refused as `E-ENRICH-002`. sparkxray numbers
+each line as it decodes the log, blank lines included, so `line_number` is the line `rg -n` shows.
+DuckDB parses each line that is a JSON object with Spark's record schema, and the table keeps
+those with a `ts`.
+
+*Rejected:* DuckDB's `read_json` with `ignore_errors=true`, numbering its rows. It reads a line
+that is no JSON as a row of nulls, but a blank line as no row at all. A chained Python traceback
+prints blank lines, so every row number after one falls short of its line.
 
 ## A column's description sits beside its SQL, so the glossary and `tables list` never disagree
 

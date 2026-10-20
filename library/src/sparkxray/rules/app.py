@@ -304,11 +304,12 @@ _DRIVER_MEMORY_PRESSURE_LESSON = """\
 
 Glue's `glue.driver.memory.heap.used.percentage`, the share of the driver's heap in use, as one
 CloudWatch average per period. The rule reports each run of consecutive periods at or over
-{min_heap_used_fraction} that lasted at least {min_sustained_ms}. AWS gives the metric's unit
-only as Percentage, and the values it publishes for its percentage metrics run from 0 to 1. So
-a series reads as 0 to 100 only where one of its values passes 1, and `heap_percentage_scale`
-says which reading applied. The metric exists only where `logs ingest --glue-run` joined a run
-that had Glue's observability metrics on.
+{min_heap_used_fraction} that lasted at least {min_sustained_ms}. A period is one minute, or
+longer for a run that started over 15 days ago, so a span is whole periods. AWS gives the
+metric's unit only as Percentage, and the values it publishes for its percentage metrics run
+from 0 to 1. So a series reads as 0 to 100 only where one of its values passes 1, and
+`heap_percentage_scale` says which reading applied. The metric exists only where
+`logs ingest --glue-run` joined a run that had Glue's observability metrics on.
 
 ## Why it costs time
 
@@ -339,7 +340,7 @@ DRIVER_MEMORY_PRESSURE = Rule(
     scope='application',
     thresholds=(
         Threshold('min_heap_used_fraction', 0.9, 'fraction', 'proposed'),
-        Threshold('min_sustained_ms', 90000, 'ms', 'proposed: three of the 30-second samples Glue publishes'),
+        Threshold('min_sustained_ms', 120000, 'ms', 'proposed: two consecutive one-minute CloudWatch averages, the shortest period read'),
     ),
     severity_ladder={'medium': "the driver's heap stayed at or over min_heap_used_fraction for at least min_sustained_ms"},
     remediation=(

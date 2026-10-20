@@ -98,9 +98,9 @@ Everything goes under `$XDG_CACHE_HOME/sparkxray/`, or the `cache_dir` a caller 
 objects go under `logs/s3/`, what a History Server or driver UI served, or the log rebuilt from
 it, under `logs/rest/`, decoded copies under `logs/decoded/`, and Parquet tables under
 `tables/<source hash>/<key>/`. `analyze` writes `findings.parquet` into the tables' directory, and
-`enrich` writes `glue_metrics`, `glue_insights` and `driver_log` there. Nothing is ever written beside a user's log. An entry for an older version of a
-file is removed by a later open once it has gone a day unused, because an `EventLog` opened
-earlier still reads it.
+`enrich` writes each table it joins there. Nothing is ever written beside a user's log. An entry
+for an older version of a file is removed by a later open once it has gone a day unused, because
+an `EventLog` opened earlier still reads it.
 
 Decoded copies and tables are keyed on the installed sparkxray version, so no constant is bumped
 when a decoder or the build changes. A working tree's installed version moves only when `uv sync`

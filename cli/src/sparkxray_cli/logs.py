@@ -97,17 +97,19 @@ def ingest(
     serves, or rebuilds one from its REST JSON where it serves none, as a live driver UI does.
 
     --glue-run and --driver-log join what the event log does not hold, each as a table of its own
-    that rules read. Giving one again replaces its table.
+    that rules read. Giving one again replaces its table. With --json, `enrichment` gives each
+    joined table's rows and each warning, and is null where neither flag was given.
     """
     opened = open_log(log, app=app_id)
     tables = tables_of(opened)
+    enrichment = None
     if glue is not None or driver_logs:
         with render.status(f'Joining sources to {opened.manifest.app_id}'):
             enrichment = opened.enrich(glue_run=glue, driver_logs=driver_logs or ())
         render.enrichment_notes(opened.manifest.app_id, enrichment)
     cached = CachedLog.of(tables)
     if as_json:
-        render.emit_json(cached.to_json())
+        render.emit_json({**cached.to_json(), 'enrichment': None if enrichment is None else enrichment.to_json()})
     else:
         print(cached.tables_path)
 

@@ -336,10 +336,10 @@ sparkxray logs ingest s3://your-bucket/spark-logs/spark-application-1729 \
 ```
 
 `--glue-run JOB_NAME:RUN_ID` reads the run's metrics over the window the application ran in. The
-job must have run with `--enable-observability-metrics true`. CloudWatch lists no metric silent
-for two weeks, so an older run joins without them, and `logs ingest` says so. It also reads the
-run's insights from `/aws-glue/jobs/logs-v2`, which a job writes only when it fails with
-`--enable-job-insights true`.
+job must have run with `--enable-observability-metrics true`. The older job metrics that
+`--enable-metrics` publishes are not read. CloudWatch lists no metric silent for two weeks, so an
+older run joins without them, and `logs ingest` says so. It also reads the run's insights from
+`/aws-glue/jobs/logs-v2`, which a job writes only when it fails with `--enable-job-insights true`.
 
 `--driver-log` takes a local file, an `s3://` object, or a CloudWatch Logs stream as
 `cloudwatch:GROUP:STREAM`, and repeats. A file may be gzip'd or zstd'd. Lines that are no JSON
@@ -355,7 +355,7 @@ from sparkxray.enrichment import GlueRun
 
 enrichment = log.enrich(glue_run=GlueRun('nightly-orders', 'jr_0123abcd'), driver_logs=['stderr.log'])
 enrichment.row_counts     # the rows each table now holds
-enrichment.warnings       # E-ENRICH-003 where CloudWatch listed no metric for the run
+enrichment.warnings       # E-ENRICH-003 where CloudWatch listed no observability metric for the run
 ```
 
 | Table | One row per |
@@ -367,7 +367,8 @@ enrichment.warnings       # E-ENRICH-003 where CloudWatch listed no metric for t
 Joined tables feed the rules:
 
 - `app.driver-oom` reports an `OutOfMemoryError` in the driver log.
-- `app.driver-memory-pressure` reports the driver's heap held at least 90% full for at least 90 seconds.
+- `app.driver-memory-pressure` reports the driver's heap held at least 90% full for two minutes
+  or more.
 - `stage.task-skew` adds Glue's own skewness score to its evidence.
 - `executor.idle-cores` adds Glue's worker utilization to its evidence.
 

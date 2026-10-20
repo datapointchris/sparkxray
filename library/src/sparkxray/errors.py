@@ -144,7 +144,7 @@ class UnstructuredDriverLogError(SparkxrayError):
 class NoGlueMetricsError(SparkxrayError):
     code = 'E-ENRICH-003'
     raised_when = (
-        'returned as a warning beside the enrichment, never raised: CloudWatch lists no Glue metric for the job run, '
+        'returned as a warning beside the enrichment, never raised: CloudWatch lists no Glue observability metric for the job run, '
         'as where it ran without --enable-observability-metrics, or over two weeks ago'
     )
     exit_code = 3

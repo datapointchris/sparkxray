@@ -837,7 +837,7 @@ TABLES: tuple[Table, ...] = (
 #
 # - `glue_metric_samples`, one CloudWatch datapoint per row;
 # - `glue_insight_events`, one CloudWatch Logs event per row from the job run insights streams;
-# - `driver_log_records`, one line per row of each structured log, null where a line is no JSON.
+# - `driver_log_records`, one JSON object per row from each structured log, beside the line it was on.
 _GLUE_METRICS = Table(
     name='glue_metrics',
     description="Glue's observability metrics for the job run, one row per CloudWatch datapoint: a metric's statistic over one period.",
