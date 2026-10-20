@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from sparkxray.plan.node_fields import field
+from sparkxray.plan.node_fields import partitioning
 from sparkxray.rules.plan.node_reading import copies_counted_elsewhere
 from sparkxray.rules.plan.node_reading import counted_nodes
 from sparkxray.rules.plan.node_reading import metric
@@ -95,8 +95,7 @@ def _window_single_partition(context: RuleContext) -> Iterator[dict[str, Any]]:
             below = nodes[below.children[0]]
         if below.node.operator != 'Exchange':
             continue
-        partitioning = field(below.node, 'Arguments') or below.node.label.removeprefix('Exchange').strip()
-        if not partitioning.startswith('SinglePartition'):
+        if not (partitioning(below.node) or '').startswith('SinglePartition'):
             continue
         size = metric(context.metrics(execution_id, below.number), 'data size')
         size = stage_bytes if size is None else size

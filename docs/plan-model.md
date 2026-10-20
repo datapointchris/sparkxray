@@ -119,6 +119,32 @@ come from completed shuffles, not cost-model guesses, so plan rules can size a j
 task metrics. Spark 4 prints `8.0 EiB` on `ResultQueryStage`. That is `Long.MaxValue` used as a
 placeholder, and the parser reads it as unknown.
 
+## What AQE changed is the first plan against the last, less what every re-plan adds
+
+`aqe_changes` compares the plan `SQLExecutionStart` carries, version 0, with the last version.
+Three parts make up the result.
+
+- **Operator counts that changed.** AQE adds a query stage around each stage it creates, and an
+  `AQEShuffleRead` over each shuffle. Its `postStageCreationRules` insert `ColumnarToRow` and
+  `RowToColumnar` as each stage is created. So the first plan never holds any of them, and the
+  counts leave them out.
+- **Every `AQEShuffleRead` of the last plan.** Each comes with the kind Spark printed beside it:
+  `coalesced`, `skewed`, `coalesced and skewed` or `local`. Each also carries its partition
+  metrics, which the driver sets once, and the partition count of the `Exchange` it reads. A
+  `ReusedExchange` prints the exchange it reads again after its output, so the count is read from
+  there.
+- **Every join AQE switched or split for skew.** A join keeps its keys across one execution's plans,
+  because expression ids do. So each join of the last plan is paired, in pre-order, with the first
+  plan's join on the same keys and type. A pair is reported where the operator changed, or where the
+  last plan prints `(skew=true)` after it.
+
+Reuse shows in the counts as nodes the last plan lacks. AQE reuses a subquery as it optimizes each
+stage, so the first plan holds one copy per node that uses it. A shuffle stage AQE reuses prints as
+a `ReusedExchange` in place of its second copy.
+
+A join on a condition alone prints no keys, so it is never paired. A switch between a Cartesian
+product and a nested-loop join shows only in the operator counts.
+
 ## Cost-mode text adds the optimizer's estimates, kept beside the tree
 
 `explain(mode='cost')` prints the optimized logical plan, each node ending in

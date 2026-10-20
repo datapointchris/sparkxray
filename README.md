@@ -212,7 +212,7 @@ those settings fill, such as `peak_python_rss_bytes`, is null in a log written w
 | `stage_tasks` | one stage's task attempts |
 | `executor_summaries` | one row per executor and the driver: lifetime, cores, memory, task time, idle share |
 | `sql_summaries` | one row per SQL execution: duration, jobs, stages, the operators of its last plan |
-| `sql_detail` | one SQL execution, its jobs, and how many of each operator its last plan holds |
+| `sql_detail` | one SQL execution, its jobs, how many of each operator its last plan holds, and what AQE changed: joins it switched or split for skew, operators it added or removed, and how it read each shuffle |
 | `application_detail` | the application, its duration and its manifest |
 
 A stage's quantiles are taken as the Stages tab takes its summary metrics, so they print the

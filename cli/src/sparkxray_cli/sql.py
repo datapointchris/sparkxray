@@ -47,6 +47,19 @@ _SHOW_KEYS = (
     'final_plan_truncated',
     'modified_configs',
 )
+_JOIN_CHANGE_KEYS = ('final_node_id', 'initial_operator', 'final_operator', 'skew_split', 'join_type', 'left_keys', 'right_keys')
+_OPERATOR_CHANGE_KEYS = ('operator', 'initial_count', 'final_count')
+_SHUFFLE_READ_KEYS = (
+    'node_id',
+    'kind',
+    'exchange_partition_count',
+    'partition_count',
+    'coalesced_partition_count',
+    'skewed_partition_count',
+    'skewed_split_count',
+    'empty_partition_count',
+    'data_bytes',
+)
 
 
 @app.command('list')
@@ -67,7 +80,7 @@ def show(
     execution_id: Annotated[int, typer.Argument(metavar='ID', help='A SQL execution id, as sql list prints it.', show_default=False)],
     as_json: JsonOption = False,
 ) -> None:
-    """Show one SQL execution, the jobs it ran, and how many of each operator its last plan holds."""
+    """Show one SQL execution, the jobs it ran, how many of each operator its last plan holds, and what AQE changed in it."""
     detail = sql_detail(open_tables(log), execution_id)
     if as_json:
         render.emit_json(detail.to_json())
@@ -75,3 +88,15 @@ def show(
     render.print_record(detail.execution, _SHOW_KEYS, title=f'SQL execution {execution_id}')
     render.print_rows(detail.jobs, title='Jobs')
     render.print_rows(detail.operator_counts, title='Operators in the last plan')
+    changes = detail.aqe_changes
+    if changes is None:
+        return
+    printed = changes.to_json()
+    if printed['joins']:
+        render.print_records(printed['joins'], _JOIN_CHANGE_KEYS, title='Joins AQE changed')
+    if printed['operators']:
+        render.print_records(printed['operators'], _OPERATOR_CHANGE_KEYS, title='Operators AQE added or removed')
+    if printed['shuffle_reads']:
+        render.print_records(printed['shuffle_reads'], _SHUFFLE_READ_KEYS, title='Shuffle reads AQE planned')
+    if not any(printed.values()):
+        render.none_found('join, operator or shuffle read AQE changed')

@@ -63,6 +63,49 @@ def join_type(node: PlanNode) -> str | None:
     return labels.join_type(node.label)
 
 
+def join_keys(node: PlanNode) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """A join's left and right keys as Spark printed them, ids included, or None for a join on a condition alone.
+
+    Formatted text lists them as `Left keys` and `Right keys`. A label lists them as its first two
+    arguments, as in `SortMergeJoin [k#2L], [k#10L], Inner`.
+    """
+    left, right = node.details.get('Left keys'), node.details.get('Right keys')
+    if left is None or right is None:
+        arguments = split_top_level(node.label.partition(' ')[2], ',')
+        if len(arguments) < 2 or not all(argument.startswith('[') for argument in arguments[:2]):
+            return None
+        left, right = arguments[0], arguments[1]
+    return tuple(list_entries(left)), tuple(list_entries(right))
+
+
+def partitioning(node: PlanNode) -> str | None:
+    """How an `Exchange` partitions its output, as in `hashpartitioning(k#2L, 200), ENSURE_REQUIREMENTS`, or None for any other node.
+
+    A `ReusedExchange` prints the exchange it reads again after its output, so its partitioning is read from there.
+    """
+    if node.operator == 'Exchange':
+        return field(node, 'Arguments') or node.label.removeprefix('Exchange').strip()
+    if node.operator == 'ReusedExchange':
+        _, printed, reused = node.label.partition(', Exchange ')
+        return reused if printed else None
+    return None
+
+
+def partition_count(node: PlanNode) -> int | None:
+    """How many partitions an `Exchange` writes: the count its partitioning ends with, or 1 for `SinglePartition`."""
+    printed = partitioning(node)
+    if printed is None:
+        return None
+    scheme = split_top_level(printed, ',')[0]
+    if scheme == 'SinglePartition':
+        return 1
+    arguments = scheme.partition('(')[2]
+    if not arguments.endswith(')'):
+        return None
+    count = split_top_level(arguments[:-1], ',')[-1]
+    return int(count) if count.isdigit() else None
+
+
 def list_entries(value: str) -> list[str]:
     """The entries of a bracketed list Spark printed, such as `[IsNotNull(id), GreaterThan(id,10)]`."""
     inner = value.strip()

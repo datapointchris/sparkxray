@@ -1,5 +1,10 @@
 """Spark physical plans, read from event logs, explain text and the History Server into one tree."""
 
+from sparkxray.plan.aqe_changes import AqeChanges
+from sparkxray.plan.aqe_changes import JoinChange
+from sparkxray.plan.aqe_changes import OperatorChange
+from sparkxray.plan.aqe_changes import ShuffleRead
+from sparkxray.plan.aqe_changes import aqe_changes
 from sparkxray.plan.display_values import DisplayValue
 from sparkxray.plan.display_values import parse_display_value
 from sparkxray.plan.explain_text import parse_plan_text
@@ -16,14 +21,19 @@ from sparkxray.plan.tree import PlanSource
 from sparkxray.plan.tree import RuntimeStats
 
 __all__ = [
+    'AqeChanges',
     'DisplayValue',
+    'JoinChange',
     'LogicalEstimate',
     'MetricRef',
     'NumberedNode',
+    'OperatorChange',
     'Plan',
     'PlanNode',
     'PlanSource',
     'RuntimeStats',
+    'ShuffleRead',
+    'aqe_changes',
     'last_plans',
     'normalize_label',
     'parse_display_value',

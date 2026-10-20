@@ -27,6 +27,14 @@ _TASKS_EFFECTIVE_DESCRIPTION = (
     'A view of `tasks` where `effective` is true: each partition of each stage once, its first success across the stage attempts.'
 )
 _FINDINGS_DESCRIPTION = "The last analysis's findings, one row each, with their evidence and thresholds as JSON text."
+_NODE_METRIC_TOTALS_SQL = """
+SELECT metrics.execution_id, metrics.node_id, metrics.metric_name, arg_min(metrics.total, metrics.accumulator_id) AS total
+FROM plan_node_metrics AS metrics JOIN sql_executions USING (execution_id)
+WHERE metrics.total IS NOT NULL
+  AND (CAST($execution_id AS BIGINT) IS NULL OR metrics.execution_id = $execution_id)
+  AND metrics.plan_version = coalesce(CAST($version AS BIGINT), sql_executions.plan_version_count - 1)
+GROUP BY ALL
+"""
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -159,6 +167,19 @@ class Tables:
                 f'SQL execution {execution_id} has no plan version {missing}', field='version', valid=[str(row[0]) for row in held]
             )
         return plan
+
+    def node_metric_totals(self, execution_id: int | None = None, version: int | None = None) -> dict[int, dict[int, dict[str, float]]]:
+        """Each node's metric totals by name, keyed by execution id, then by the node's number in `Plan.numbered()`.
+
+        It covers one execution, or every one where `execution_id` is None, in one plan version, or
+        each execution's last where `version` is None. A name a node lists twice keeps its first
+        accumulator, and a node nothing measured is absent.
+        """
+        rows = self.connection.execute(_NODE_METRIC_TOTALS_SQL, {'execution_id': execution_id, 'version': version}).fetchall()
+        totals: dict[int, dict[int, dict[str, float]]] = {}
+        for held_id, node_id, name, total in rows:
+            totals.setdefault(held_id, {}).setdefault(node_id, {})[name] = total
+        return totals
 
     @property
     def application(self) -> duckdb.DuckDBPyRelation:
