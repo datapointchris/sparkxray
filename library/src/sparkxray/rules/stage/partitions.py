@@ -85,9 +85,9 @@ OVERSIZED_PARTITIONS = Rule(
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
-        Threshold('min_tasks', 2, 'count', 'sparkDoctor docs/detections.md'),
-        Threshold('p95_bytes', 268435456, 'bytes', 'sparkDoctor docs/detections.md'),
-        Threshold('max_bytes', 2147483648, 'bytes', 'sparkDoctor docs/detections.md'),
+        Threshold('min_tasks', 2, 'count', 'SparkDoctor docs/detections.md'),
+        Threshold('p95_bytes', 268435456, 'bytes', 'SparkDoctor docs/detections.md'),
+        Threshold('max_bytes', 2147483648, 'bytes', 'SparkDoctor docs/detections.md'),
         Threshold('critical_bytes', 5368709120, 'bytes', 'DataFlint MaxPartitionToBigAlert.ts'),
     ),
     severity_ladder={
@@ -106,7 +106,7 @@ OVERSIZED_PARTITIONS = Rule(
     reads_findings_of=('stage.shuffle-skew',),
 )
 
-# sparkDoctor's two cases, with SD's 10 GiB and 15 tasks for the second: a shuffle of a gigabyte or more
+# SparkDoctor's two cases, with SD's 10 GiB and 15 tasks for the second: a shuffle of a gigabyte or more
 # read by a handful of tasks of moderate size, or one of ten gigabytes or more read by a few more.
 _LOW_PARALLELISM_SQL = f"""
 WITH {STAGE_CTES}, few AS (
@@ -169,9 +169,9 @@ LOW_SHUFFLE_PARALLELISM = Rule(
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
-        Threshold('min_total_bytes', 1073741824, 'bytes', 'sparkDoctor docs/detections.md'),
-        Threshold('max_tasks', 7, 'count', 'sparkDoctor docs/detections.md'),
-        Threshold('max_average_bytes', 268435456, 'bytes', 'sparkDoctor docs/detections.md, the oversized-partitions floor'),
+        Threshold('min_total_bytes', 1073741824, 'bytes', 'SparkDoctor docs/detections.md'),
+        Threshold('max_tasks', 7, 'count', 'SparkDoctor docs/detections.md'),
+        Threshold('max_average_bytes', 268435456, 'bytes', 'SparkDoctor docs/detections.md, the oversized-partitions floor'),
     ),
     severity_ladder={
         'medium': 'at least min_total_bytes of shuffle read by at most max_tasks tasks, each averaging under max_average_bytes',
@@ -239,10 +239,10 @@ TINY_TASKS = Rule(
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
-        Threshold('min_tasks', 100, 'count', 'sparkDoctor docs/detections.md'),
-        Threshold('max_mean_ms', 500, 'ms', 'sparkDoctor docs/detections.md'),
-        Threshold('max_p95_ms', 1000, 'ms', 'sparkDoctor docs/detections.md'),
-        Threshold('max_mean_read_bytes', 1048576, 'bytes', 'sparkDoctor docs/detections.md'),
+        Threshold('min_tasks', 100, 'count', 'SparkDoctor docs/detections.md'),
+        Threshold('max_mean_ms', 500, 'ms', 'SparkDoctor docs/detections.md'),
+        Threshold('max_p95_ms', 1000, 'ms', 'SparkDoctor docs/detections.md'),
+        Threshold('max_mean_read_bytes', 1048576, 'bytes', 'SparkDoctor docs/detections.md'),
     ),
     severity_ladder={
         'medium': 'at least min_tasks tasks with a mean at most max_mean_ms, a 95th percentile at most max_p95_ms, '

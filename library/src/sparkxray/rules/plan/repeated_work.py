@@ -28,7 +28,7 @@ from sparkxray.rules.rule import Threshold
 from sparkxray.rules.spark_settings import EXCHANGE_REUSE
 
 REUSABLE_EXCHANGES = frozenset({'Exchange', 'BroadcastExchange'})
-_REPEATED_SUBTREE_SOURCE = 'sparkDoctor docs/detections.md'
+_REPEATED_SUBTREE_SOURCE = 'SparkDoctor docs/detections.md'
 _MIN_REPEATED_BYTES = Threshold('min_repeated_bytes', 128 * 2**20, 'bytes', 'proposed')
 _PLAN_ONLY = "an event log holds the physical plan without the optimizer's reasons, so two subtrees that print alike may still differ"
 _EXCHANGE_REUSE_SQL = f"""

@@ -95,9 +95,9 @@ TASK_SKEW = Rule(
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
-        Threshold('ratio', 5, 'x', 'AWS Glue observability: stage skewness factor; sparkDoctor docs/detections.md'),
+        Threshold('ratio', 5, 'x', 'AWS Glue observability: stage skewness factor; SparkDoctor docs/detections.md'),
         Threshold('min_gap_ms', 30000, 'ms', 'proposed: keeps a stage of sub-second tasks quiet'),
-        Threshold('min_tasks', 10, 'count', 'sparkDoctor docs/detections.md'),
+        Threshold('min_tasks', 10, 'count', 'SparkDoctor docs/detections.md'),
     ),
     severity_ladder={
         'medium': 'the slowest task ran ratio times the median and min_gap_ms past it, across at least min_tasks tasks',
@@ -215,9 +215,9 @@ SHUFFLE_SKEW = Rule(
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
-        Threshold('ratio', 5, 'x', 'sparkDoctor docs/detections.md; AQE spark.sql.adaptive.skewJoin.skewedPartitionFactor'),
+        Threshold('ratio', 5, 'x', 'SparkDoctor docs/detections.md; AQE spark.sql.adaptive.skewJoin.skewedPartitionFactor'),
         Threshold('min_bytes', 268435456, 'bytes', 'AQE spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes'),
-        Threshold('min_tasks', 10, 'count', 'sparkDoctor docs/detections.md'),
+        Threshold('min_tasks', 10, 'count', 'SparkDoctor docs/detections.md'),
     ),
     severity_ladder={
         'medium': 'the largest shuffle read is over min_bytes and over ratio times the median, across at least min_tasks tasks',

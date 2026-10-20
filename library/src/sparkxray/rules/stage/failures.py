@@ -83,8 +83,8 @@ RETRY_WASTE = Rule(
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
-        Threshold('min_attempts', 3, 'count', 'sparkDoctor docs/detections.md'),
-        Threshold('min_wasted_ms', 30000, 'ms', 'sparkDoctor docs/detections.md'),
+        Threshold('min_attempts', 3, 'count', 'SparkDoctor docs/detections.md'),
+        Threshold('min_wasted_ms', 30000, 'ms', 'SparkDoctor docs/detections.md'),
     ),
     severity_ladder={
         'medium': 'at least min_attempts unsuccessful attempts, which ran for min_wasted_ms or more',
@@ -156,9 +156,9 @@ SPECULATION = Rule(
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
-        Threshold('min_tasks', 10, 'count', 'sparkDoctor docs/detections.md'),
-        Threshold('min_attempts', 3, 'count', 'sparkDoctor docs/detections.md'),
-        Threshold('min_share', 0.2, 'fraction', 'sparkDoctor docs/detections.md'),
+        Threshold('min_tasks', 10, 'count', 'SparkDoctor docs/detections.md'),
+        Threshold('min_attempts', 3, 'count', 'SparkDoctor docs/detections.md'),
+        Threshold('min_share', 0.2, 'fraction', 'SparkDoctor docs/detections.md'),
     ),
     severity_ladder={
         'medium': 'across at least min_tasks tasks, at least min_attempts speculative copies won, min_share of the tasks or more',

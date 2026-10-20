@@ -42,9 +42,9 @@ ORDER BY heaviest.stage_id
 
 
 _THRESHOLDS = (
-    Threshold('min_tasks', 10, 'count', 'sparkDoctor docs/detections.md'),
-    Threshold('min_duration_share', 0.75, 'fraction', 'sparkDoctor docs/detections.md'),
-    Threshold('min_task_share', 0.5, 'fraction', 'sparkDoctor docs/detections.md'),
+    Threshold('min_tasks', 10, 'count', 'SparkDoctor docs/detections.md'),
+    Threshold('min_duration_share', 0.75, 'fraction', 'SparkDoctor docs/detections.md'),
+    Threshold('min_task_share', 0.5, 'fraction', 'SparkDoctor docs/detections.md'),
 )
 _LADDER: dict[Severity, str] = {
     'medium': 'across at least min_tasks tasks on two workers or more, one ran at least min_duration_share of the task time '

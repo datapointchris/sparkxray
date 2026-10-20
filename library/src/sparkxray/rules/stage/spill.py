@@ -28,7 +28,7 @@ _SPILL_NODES = f"""{OWN_SPILLS_CTE}, spill_nodes AS (
   QUALIFY row_number() OVER (PARTITION BY node_stages.stage_id ORDER BY spills.own_spill_bytes DESC, spills.node_id) = 1
 )"""
 
-# A single-task stage has no other task to compare with, so sparkDoctor holds it to higher floors.
+# A single-task stage has no other task to compare with, so SparkDoctor holds it to higher floors.
 # The impact is the spilling tasks' run time spread over the stage's slots, times the disk spill's
 # share of what the stage read, which is never past 1. It is never more than the stage's wall time.
 _SPILL_SQL = f"""
@@ -106,10 +106,10 @@ SPILL = Rule(
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
-        Threshold('disk_bytes', 268435456, 'bytes', 'sparkDoctor docs/detections.md'),
-        Threshold('memory_bytes', 1073741824, 'bytes', 'sparkDoctor docs/detections.md'),
-        Threshold('single_task_disk_bytes', 1073741824, 'bytes', 'sparkDoctor docs/detections.md'),
-        Threshold('single_task_memory_bytes', 4294967296, 'bytes', 'sparkDoctor docs/detections.md'),
+        Threshold('disk_bytes', 268435456, 'bytes', 'SparkDoctor docs/detections.md'),
+        Threshold('memory_bytes', 1073741824, 'bytes', 'SparkDoctor docs/detections.md'),
+        Threshold('single_task_disk_bytes', 1073741824, 'bytes', 'SparkDoctor docs/detections.md'),
+        Threshold('single_task_memory_bytes', 4294967296, 'bytes', 'SparkDoctor docs/detections.md'),
     ),
     severity_ladder={
         'medium': 'over two tasks or more, at least disk_bytes spilled to disk or memory_bytes from memory; '
@@ -204,10 +204,10 @@ SPILL_SKEW = Rule(
     signals=frozenset({'tasks'}),
     scope='stage',
     thresholds=(
-        Threshold('ratio', 5, 'x', 'sparkDoctor docs/detections.md'),
-        Threshold('memory_bytes', 268435456, 'bytes', 'sparkDoctor docs/detections.md'),
-        Threshold('disk_bytes', 134217728, 'bytes', 'sparkDoctor docs/detections.md'),
-        Threshold('min_tasks', 10, 'count', 'sparkDoctor docs/detections.md'),
+        Threshold('ratio', 5, 'x', 'SparkDoctor docs/detections.md'),
+        Threshold('memory_bytes', 268435456, 'bytes', 'SparkDoctor docs/detections.md'),
+        Threshold('disk_bytes', 134217728, 'bytes', 'SparkDoctor docs/detections.md'),
+        Threshold('min_tasks', 10, 'count', 'SparkDoctor docs/detections.md'),
     ),
     severity_ladder={
         'medium': 'across at least min_tasks tasks, the most one spilled from memory is over memory_bytes and ratio times the median',

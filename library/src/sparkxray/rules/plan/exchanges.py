@@ -68,7 +68,7 @@ MANY_EXCHANGES = Rule(
     title='The query shuffles {exchange_count:plural time}',
     signals=frozenset({'plan'}),
     scope='sql_execution',
-    thresholds=(Threshold('min_exchanges', 4, 'count', 'sparkDoctor docs/detections.md'),),
+    thresholds=(Threshold('min_exchanges', 4, 'count', 'SparkDoctor docs/detections.md'),),
     severity_ladder={'info': 'the query runs at least min_exchanges exchanges'},
     remediation=(
         'partition once by a key several steps share',
