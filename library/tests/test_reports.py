@@ -1,6 +1,5 @@
-"""A fixture log's JSON report validates against the report schema, which takes its findings from the findings schema."""
+"""A fixture log's JSON report and tables manifest validate against their schemas, which take findings and the ingest manifest by `$ref`."""
 
-import importlib.resources
 import json
 import pathlib
 
@@ -11,16 +10,13 @@ from fixture_logs import FIXTURES
 from sparkxray.ingest import EventLog
 from sparkxray.reports import build_report
 from sparkxray.reports import render_json
+from sparkxray.schemas import schema_document
 
-
-def _schema(name: str) -> dict[str, object]:
-    return json.loads(importlib.resources.files('sparkxray').joinpath('schemas', name).read_text())
-
-
-REPORT_SCHEMA = jsonschema.Draft202012Validator(
-    _schema('report.json'),
-    registry=referencing.Registry().with_resource('findings.json', referencing.Resource.from_contents(_schema('findings.json'))),
+_REFERENCED = referencing.Registry().with_resources(
+    (f'{name}.json', referencing.Resource.from_contents(schema_document(name))) for name in ('findings', 'ingest-manifest')
 )
+REPORT_SCHEMA = jsonschema.Draft202012Validator(schema_document('report'), registry=_REFERENCED)
+TABLES_MANIFEST_SCHEMA = jsonschema.Draft202012Validator(schema_document('tables-manifest'), registry=_REFERENCED)
 
 
 # One log per shape a report takes. A codec variant or a Spark 4.2 twin reports what its base log does.
@@ -37,7 +33,9 @@ SHAPES = [
 
 
 @pytest.mark.parametrize('log', SHAPES)
-def test_each_shape_of_fixture_logs_json_report_validates_against_the_report_schema(log: str, tmp_path: pathlib.Path) -> None:
-    report = build_report(EventLog.open(FIXTURES / 'logs' / log, cache_dir=tmp_path))
+def test_each_shape_of_fixture_logs_report_and_tables_manifest_validate_against_their_schemas(log: str, tmp_path: pathlib.Path) -> None:
+    opened = EventLog.open(FIXTURES / 'logs' / log, cache_dir=tmp_path)
+    report = build_report(opened)
 
     REPORT_SCHEMA.validate(json.loads(render_json(report)))
+    TABLES_MANIFEST_SCHEMA.validate(opened.tables.manifest.to_json())

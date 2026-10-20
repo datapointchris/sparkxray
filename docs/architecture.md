@@ -364,13 +364,14 @@ code says which input.
 
 The root group reads whether a command asked for JSON from its words, before any parameter is
 parsed: `--json`, or `--format json`. A callback on `--json` would run only once parsing reached
-it. So `--fail-on hgih --json` would refuse in prose, and that misspelling is the refusal an agent
-hits most. The parser's refusal prints as `E-USAGE-001`, naming the parameter, the values a choice
-takes, and the command's `--help`. Without JSON it prints the parser's own text.
+it, so `--fail-on hgih --json` would refuse in prose. The parser's refusal prints as
+`E-USAGE-001`, naming the parameter, the values a choice takes, and the command's `--help`.
+Without JSON it prints the parser's own text.
 
-The other outputs' schemas are files, because their shape is the contract a program holds the
-output to. Every object in them is closed, so a key the code adds without its schema fails a
-test. `capabilities.json` is closed too, and a test validates the live document against it.
+The other schemas are files, because their shape is the contract a program holds the document to.
+Every object in them is closed, so a key the code adds without its schema fails the test that
+validates that document. Each file has one. The findings, the report and both manifests are
+validated over fixture logs, and capabilities and the error envelope over the live command.
 
 Every number a schema describes ends in its unit, from the suffixes the finding contract holds
 evidence keys to. The exemptions identify rather than measure: an `_id`, an attempt, a version or
