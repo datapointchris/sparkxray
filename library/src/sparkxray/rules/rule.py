@@ -18,8 +18,8 @@ from sparkxray.plan.tree import Plan
 if TYPE_CHECKING:
     from sparkxray.tables.relations import Tables
 
-Signal = Literal['plan', 'plan_metrics', 'tasks', 'executors', 'environment', 'timeline']
-SIGNALS: tuple[Signal, ...] = ('plan', 'plan_metrics', 'tasks', 'executors', 'environment', 'timeline')
+Signal = Literal['plan', 'plan_metrics', 'plan_estimates', 'tasks', 'executors', 'environment', 'timeline']
+SIGNALS: tuple[Signal, ...] = ('plan', 'plan_metrics', 'plan_estimates', 'tasks', 'executors', 'environment', 'timeline')
 Severity = Literal['info', 'low', 'medium', 'high', 'critical']
 SEVERITIES: tuple[Severity, ...] = ('info', 'low', 'medium', 'high', 'critical')
 # What one finding of a rule is about, which decides the ids its finding_id is built from.

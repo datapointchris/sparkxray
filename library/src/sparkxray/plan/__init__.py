@@ -7,6 +7,7 @@ from sparkxray.plan.labels import normalize_label
 from sparkxray.plan.last_plans import last_plans
 from sparkxray.plan.plan_info import parse_plan_info
 from sparkxray.plan.rest_graph import parse_rest_graph
+from sparkxray.plan.tree import LogicalEstimate
 from sparkxray.plan.tree import MetricRef
 from sparkxray.plan.tree import NumberedNode
 from sparkxray.plan.tree import Plan
@@ -16,6 +17,7 @@ from sparkxray.plan.tree import RuntimeStats
 
 __all__ = [
     'DisplayValue',
+    'LogicalEstimate',
     'MetricRef',
     'NumberedNode',
     'Plan',

@@ -76,7 +76,10 @@ def list_findings(
     else:
         _print_findings(listed, len(analysis.findings), _show_command(log, threshold, thresholds))
     for skipped in analysis.skipped:
-        render.note(f'skipped {skipped.rule_id}: the log holds no {", ".join(skipped.missing_signals)}')
+        if 'plan_estimates' in skipped.missing_signals:
+            render.note(f"skipped {skipped.rule_id}: it runs on explain(mode='cost') text only")
+        else:
+            render.note(f'skipped {skipped.rule_id}: the log holds no {", ".join(skipped.missing_signals)}')
     if not gate.passed:
         render.note(f'{len(gate.blocking)} at or above {fail_on}: {", ".join(gate.blocking)}')
         raise typer.Exit(3)

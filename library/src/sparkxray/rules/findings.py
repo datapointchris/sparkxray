@@ -25,11 +25,12 @@ Confidence = Literal['high', 'medium', 'low']
 CONFIDENCES: tuple[Confidence, ...] = ('high', 'medium', 'low')
 ThresholdLayer = Literal['default', 'file', 'sdk', 'flag']
 # Every numeric evidence key ends in one of these, so a value always names its unit.
-UNIT_SUFFIXES = ('_ms', '_ns', '_bytes', '_records', '_rows', '_count', '_share', '_ratio', '_hours', '_seconds', '_percent', '_id')
+UNIT_SUFFIXES = ('_ms', '_ns', '_bytes', '_records', '_rows', '_count', '_share', '_ratio', '_hours', '_seconds', '_percent', '_id', '_ids')
 # The key of `findings.parquet`'s metadata that holds the analysis document, its findings left out.
 ANALYSIS_METADATA_KEY = 'sparkxray.analysis'
 
 Evidence = bool | int | float | str | None | tuple[bool | int | float | str | None, ...]
+_LABEL_CHARACTERS = 100
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -47,11 +48,14 @@ class FindingScope:
     worst_task_ids: tuple[int, ...] = ()
 
     def key(self, level: ScopeLevel) -> str:
-        """The part of a `finding_id` after the rule id: `app`, `e0`, `e0n9`, `s4` or `x3`."""
+        """The part of a `finding_id` after the rule id: `app`, `e0`, `e0n9`, `s4` or `x3`.
+
+        A plan analyzed alone may have no execution id, so the plan itself is `plan` and its node 9 is `n9`.
+        """
         if level == 'application':
             return 'app'
         if level == 'sql_execution':
-            return f'e{_required(self.sql_execution_id, "sql_execution_id", level)}'
+            return 'plan' if self.sql_execution_id is None else f'e{self.sql_execution_id}'
         if level == 'plan_node':
             node = f'n{_required(self.plan_node_id, "plan_node_id", level)}'
             return node if self.sql_execution_id is None else f'e{self.sql_execution_id}{node}'
@@ -60,12 +64,16 @@ class FindingScope:
         return f'x{_required(self.executor_id, "executor_id", level)}'
 
     def describe(self) -> str:
-        """The scope as a person reads it, widest part first: `SQL 0 › SortMergeJoin [k#2L], [k#10L], Inner › stage 4`."""
+        """The scope as a person reads it, widest part first: `SQL 0 › SortMergeJoin [k#2L], [k#10L], Inner › stage 4`.
+
+        A node label past 100 characters is cut to 100, ending in `...`, as Spark cuts a long plan field.
+        """
         parts = []
         if self.sql_execution_id is not None:
             parts.append(f'SQL {self.sql_execution_id}')
         if self.plan_node_label is not None:
-            parts.append(self.plan_node_label)
+            label = self.plan_node_label
+            parts.append(label if len(label) <= _LABEL_CHARACTERS else f'{label[: _LABEL_CHARACTERS - 3]}...')
         elif self.plan_node_id is not None:
             parts.append(f'node {self.plan_node_id}')
         if self.stage_id is not None:

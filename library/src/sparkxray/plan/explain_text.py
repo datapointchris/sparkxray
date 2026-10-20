@@ -20,7 +20,9 @@ from sparkxray.plan import labels
 from sparkxray.plan import tree
 
 _PHYSICAL_HEADER = '== Physical Plan =='
+_OPTIMIZED_HEADER = '== Optimized Logical Plan =='
 _LOGICAL_HEADER = re.compile(r'== (?:Parsed|Analyzed|Optimized) Logical Plan ==\s*')
+_ESTIMATED_LABEL = re.compile(r'(?P<label>.*), (?P<stats>Statistics\([^()]*\))', re.DOTALL)
 _WHOLE_PLAN_TRUNCATED = re.compile(r'\s*Truncated plan of \d+ characters\s*$')
 _CUT_SUFFIX = re.compile(r'\.\.\. \d+ more characters\s*$', re.MULTILINE)
 _TREE_LINE = re.compile(r'(?P<lead>[ :]*?)(?P<marker>[+:]- )?(?P<body>[^ :].*)')
@@ -48,6 +50,7 @@ def parse_plan_text(text: str, *, execution_id: int | None = None, version: int 
     block under the first `AdaptiveSparkPlan` is the plan, and its initial block is `initial()`. A
     nested `AdaptiveSparkPlan`, as in a cached relation, keeps its final block only, which is what
     the JSON tree holds. `InMemoryRelation` is folded away, because the JSON tree never shows it.
+    Cost-mode text's `== Optimized Logical Plan ==` section becomes the plan's `estimates`.
     """
     raw, source = raw_plan_text(text)
     return tree.freeze(raw, source=source, execution_id=execution_id, version=version)
@@ -67,7 +70,9 @@ def raw_plan_text(text: str) -> tuple[tree.RawPlan, tree.PlanSource]:
     truncated = labels.is_truncated(text)
     if _WHOLE_PLAN_TRUNCATED.match(text):
         return tree.RawPlan(root=None, is_final=False, truncated=True), 'formatted_text'
-    lines = _physical_section(_CUT_SUFFIX.sub('', text))
+    text = _CUT_SUFFIX.sub('', text)
+    estimates = _logical_estimates(text)
+    lines = _physical_section(text)
     while lines and not lines[0].strip():
         lines.pop(0)
     end = next((index for index, line in enumerate(lines) if not line.strip()), len(lines))
@@ -119,7 +124,72 @@ def raw_plan_text(text: str) -> tuple[tree.RawPlan, tree.PlanSource]:
     if initial_root is not None:
         initial = tree.RawPlan(root=initial_root, is_final=False, truncated=truncated)
     is_final = _is_final(root, main) if root is not None else False
-    return tree.RawPlan(root=root, is_final=is_final, truncated=truncated, initial=initial), source
+    return tree.RawPlan(root=root, is_final=is_final, truncated=truncated, initial=initial, estimates=estimates), source
+
+
+def _logical_estimates(text: str) -> tuple[tree.LogicalEstimate, ...]:
+    """The optimized logical plan's nodes with their size estimates, empty where no node printed one.
+
+    Inner children, such as a subquery's plan drawn under the filter running it, are left out,
+    because each is sized against its own relations.
+    """
+    lines = text.split('\n')
+    start = next((index for index, line in enumerate(lines) if line.strip() == _OPTIMIZED_HEADER), None)
+    if start is None:
+        return ()
+    section = []
+    for line in lines[start + 1 :]:
+        if not line.strip() or (line.startswith('== ') and line.rstrip().endswith('==')):
+            break
+        section.append(line)
+    parsed = _build_tree(section, formatted=False)
+    order: list[tuple[tree.RawNode, int | None]] = []
+
+    def visit(node: tree.RawNode, parent: int | None) -> None:
+        index = len(order)
+        order.append((node, parent))
+        for child in node.children:
+            if id(child) not in parsed.inner:
+                visit(child, index)
+
+    if parsed.root is not None:
+        visit(parsed.root, None)
+    children: dict[int, list[int]] = {index: [] for index in range(len(order))}
+    for index, (_, parent) in enumerate(order):
+        if parent is not None:
+            children[parent].append(index)
+    labels_and_stats: list[tuple[str, dict[str, str]]] = []
+    for node, _ in order:
+        match = _ESTIMATED_LABEL.fullmatch(node.label)
+        labels_and_stats.append((node.label, {}) if match is None else (match['label'], dict(_STATISTIC.findall(match['stats']))))
+    if not any(stats for _, stats in labels_and_stats):
+        return ()
+    known: dict[int, bool] = {}
+    sizes: dict[int, int | None] = {}
+    for index in range(len(order) - 1, -1, -1):
+        size = _size_bytes(labels_and_stats[index][1].get('sizeInBytes', ''))
+        sizes[index] = size
+        below = children[index]
+        if not below:
+            known[index] = size is not None and size < _LONG_MAX_PLACEHOLDER
+        else:
+            known[index] = size is not None and all(known[child] for child in below)
+    estimates = []
+    for index, (node, parent) in enumerate(order):
+        label, stats = labels_and_stats[index]
+        row_count = stats.get('rowCount')
+        estimates.append(
+            tree.LogicalEstimate(
+                node_id=index,
+                parent_id=parent,
+                operator=node.operator,
+                label=label,
+                size_bytes=sizes[index] if known[index] else None,
+                row_count=None if row_count is None else round(float(row_count)),
+                children=tuple(children[index]),
+            )
+        )
+    return tuple(estimates)
 
 
 def _physical_section(text: str) -> list[str]:
@@ -341,13 +411,21 @@ def _read_sections(lines: list[str]) -> tuple[dict[int, tuple[int | None, dict[s
 
 def _statistics(text: str) -> tree.RuntimeStats:
     values = dict(_STATISTIC.findall(text))
-    size_bytes = None
-    size = values.get('sizeInBytes', '').split()
-    if len(size) == 2 and size[1] in _SIZE_UNITS:
-        size_bytes = round(float(size[0]) * _SIZE_UNITS[size[1]])
-        if size_bytes >= _LONG_MAX_PLACEHOLDER:
-            size_bytes = None
+    size_bytes = _size_bytes(values.get('sizeInBytes', ''))
+    if size_bytes is not None and size_bytes >= _LONG_MAX_PLACEHOLDER:
+        size_bytes = None
     row_count = None
     if 'rowCount' in values:
         row_count = round(float(values['rowCount']))
     return tree.RuntimeStats(size_bytes=size_bytes, row_count=row_count)
+
+
+def _size_bytes(text: str) -> int | None:
+    """A size as `Utils.bytesToString` prints it, such as `2.8 GiB`, or one past EiB such as `1.2E+21 B`, in bytes."""
+    size = text.split()
+    if len(size) != 2 or size[1] not in _SIZE_UNITS:
+        return None
+    try:
+        return round(float(size[0]) * _SIZE_UNITS[size[1]])
+    except ValueError:
+        return None

@@ -69,13 +69,33 @@ class PlanNode:
 
 
 @dc.dataclass(frozen=True, slots=True)
+class LogicalEstimate:
+    """One node of the optimized logical plan `explain(mode='cost')` prints, with the optimizer's estimate of its output.
+
+    The estimates are in pre-order, and `node_id` is the index. `size_bytes` is None where the
+    optimizer knew no size: a relation it printed as `8.0 EiB`, which is `Long.MaxValue`, and
+    every node whose estimate grew from one. `row_count` is None unless the table has statistics
+    from `ANALYZE TABLE`. An event log carries no estimate.
+    """
+
+    node_id: int
+    parent_id: int | None
+    operator: str
+    label: str
+    size_bytes: int | None
+    row_count: int | None
+    children: tuple[int, ...]
+
+
+@dc.dataclass(frozen=True, slots=True)
 class Plan:
     """One version of one SQL execution's physical plan.
 
     `nodes` is in pre-order, and a node's `node_id` is its index. A subquery is its own `Plan`
     in `subqueries`, linked back by `hosting_node_id` and named by `subquery_id`. `version` is
     0 for the plan `SQLExecutionStart` carries and n for the nth AQE update, and None for a
-    History Server graph, which serves only the latest.
+    History Server graph, which serves only the latest. `estimates` holds the optimized logical
+    plan's size estimates where the text was `explain(mode='cost')`, and is empty otherwise.
     """
 
     source: PlanSource
@@ -87,6 +107,7 @@ class Plan:
     subqueries: tuple[Plan, ...] = ()
     subquery_id: int | None = None
     hosting_node_id: int | None = None
+    estimates: tuple[LogicalEstimate, ...] = ()
     _initial: Plan | None = dc.field(default=None, repr=False)
 
     def walk(self) -> Iterator[PlanNode]:
@@ -170,6 +191,7 @@ class RawPlan:
     is_final: bool
     truncated: bool
     initial: RawPlan | None = None
+    estimates: tuple[LogicalEstimate, ...] = ()
 
 
 def raw_nodes(root: RawNode | None, *, subqueries: bool = True) -> Iterator[RawNode]:
@@ -263,6 +285,7 @@ def freeze(
         subqueries=tuple(subqueries),
         subquery_id=subquery_id,
         hosting_node_id=hosting_node_id,
+        estimates=raw.estimates,
         _initial=initial,
     )
 

@@ -18,7 +18,9 @@ least 30 s between the slowest and the median task, which keeps it silent on the
 ## Severity is the rule's grade, moved one step by the stage's share of the run
 
 The ladder is `info`, `low`, `medium`, `high`, `critical`. `info` is for rules that report
-presence only.
+presence only. A rule grading a plan shape by its size is `info` below its byte floor too, and
+wherever nothing measured the size. So a window over 30 aggregated rows reports without gating a
+run.
 
 Each rule's own ladder sets the base grade. The engine then lowers it one step when the scope
 takes under 5% of application wall time, and raises it one step above 50%. So a skewed 2-second
@@ -67,9 +69,16 @@ Findings sort by `impact_seconds`, largest first and nulls last, then by severit
 
 ## A rule declares the signals it reads, so it runs wherever they exist
 
-The signals are `plan`, `plan_metrics`, `tasks`, `executors`, `environment` and `timeline`. A rule
-whose signals are missing is skipped, and the skip names the missing signal. So `plan.*` rules run
-on a bare `explain()` plan with no event log, and a skipped rule says what it would have needed.
+The signals are `plan`, `plan_metrics`, `plan_estimates`, `tasks`, `executors`, `environment` and
+`timeline`. A rule whose signals are missing is skipped, and the skip names the missing signal. So
+`plan.*` rules run on a bare `explain()` plan with no event log, and a skipped rule says what it
+would have needed.
+
+`plan_estimates` is the optimizer's size estimates. Only `explain(mode='cost')` text prints them,
+and no event log carries them. So `plan.estimate-unreliable` runs through `analyze_plan` alone.
+`analyze` leaves it out of a log's default selection, so a log's analysis neither runs it nor
+lists it as skipped. Named with `rules=`, it is skipped, and `findings list` says it runs on
+cost-mode text only.
 
 Rule ids are dotted by the evidence they read:
 
@@ -95,7 +104,7 @@ Either returns one mapping per finding, and the engine sorts its keys three ways
 - every other key is evidence.
 
 A numeric evidence key must end in its unit, such as `_bytes`, `_ms`, `_records`, `_rows`,
-`_count`, `_share` or `_ratio`. The engine refuses a finding that breaks this, and the findings
+`_count`, `_share` or `_ratio`. A list of node or stage ids ends in `_ids`. The engine refuses a finding that breaks this, and the findings
 schema does too. So a rule registered by other code is held to the same shape. A malformed rule,
 a taken id, or a finding that breaks the contract is `E-RULE-004`, naming the rule.
 
@@ -108,8 +117,12 @@ the way the Stages tab shows the same number.
 
 `finding_id` is the rule id and a key built from the scope's ids: `app` for the application, `e0`
 for SQL execution 0, `e0n9` for its plan node 9, `s4` for stage 4, `x3` for executor 3. A plan
-analyzed alone has no execution id, so its node is `n9`. Analyzing a log again gives the same ids,
-and a rule giving two findings one id is refused.
+analyzed alone has no execution id, so its node is `n9`, and a finding about the whole query is
+`plan`. Analyzing a log again gives the same ids, and a rule giving two findings one id is
+refused.
+
+*Rejected:* naming a whole-query finding on a bare plan by its root, `n0`. Its scope is the query,
+and a node key would claim it is about one operator.
 
 The id is stable within one log only. Stage numbers shift between runs, so comparing two runs
 matches findings by rule and aligned scope, never by this string.
@@ -118,15 +131,18 @@ matches findings by rule and aligned scope, never by this string.
 
 A `Threshold` carries a `source` beside its default. Most defaults come from published prior art:
 
-- sparkDoctor's `docs/detections.md`, which supplies most stage floors;
-- DataFlint's alert reducers, for wasted cores, memory provisioning and partition size;
+- sparkDoctor's `docs/detections.md`, which supplies most stage floors, the exchange count and the
+  repeated-subtree sizes;
+- DataFlint's alert reducers, for wasted cores, memory provisioning and partition size, and for
+  join sides, broadcast size, file sizes and filter length;
 - Dr. Elephant's Spark heuristics, for the GC ladder and task failure rates;
+- Spark's own defaults, for the partition size at which AQE calls a partition skewed;
 - AWS Glue's observability docs, for the skewness score;
 - kubeflow's Spark tools, for spill and GC;
 - Sparklens, for the executor simulation.
 
-A threshold no prior art supplies is marked `proposed`. Scheduler delay, deserialization time and
-shuffle fetch wait are the cases.
+A threshold no prior art supplies is marked `proposed`. `sparkxray rules show <rule id>` prints
+each threshold's source.
 
 ## Each applied threshold records the layer that set it
 
@@ -185,3 +201,80 @@ inputs' rows, and over 10,000,000,000 is `critical`. Each input's rows are the f
 chain of single-child nodes. A node's `number of output rows` counts first, and a finished query
 stage's measured `rowCount` next. So a plan read from `explain()` text, with no metrics, still
 sizes a join whose sides AQE had already run.
+
+## A plan rule sizes what ran, so a plan that never ran stays quiet
+
+A join side or a broadcast takes its bytes from the first measured size down its chain. That is a
+finished query stage's `sizeInBytes`, then an exchange's `data size`, then a scan's `size of files
+read`. The chain passes through a sort, AQE's reads and a columnar conversion, which keep a side's
+size. A filter changes it, so a side measured only below a filter has no size.
+
+`plan.smj-small-side` weighs only a side Spark could broadcast for the join's type, as
+`canBuildBroadcastLeft` and `canBuildBroadcastRight` in Spark's optimizer decide. A full outer
+join has none. The rule also fires only where the other side passes an `Exchange`, because a
+broadcast saves that shuffle. A join of bucketed tables shuffles neither side.
+
+A plan printed before it ran measured nothing. So `plan.smj-small-side` finds no size in it, and
+the rules reading metrics are skipped. The optimizer's own estimate is no substitute. With the
+cost-based optimizer off, as it is by default, it sizes a join as the product of its inputs, whatever
+statistics the tables hold. In the plan-rules fixture, a
+396.5 KiB table joined to a 7.1 KiB one is estimated at 2.8 GiB. `plan.estimate-unreliable`
+reports that gap, from `explain(mode='cost')` text. A relation the optimizer could not size prints `8.0 EiB`, which is
+`Long.MaxValue`, and every estimate above it counts as unknown.
+
+## A cached plan counts once, at the copy that ran
+
+Spark prints a cached relation's plan under every `InMemoryTableScan` that reads it, and every
+copy shares the accumulators of the one run that filled the cache. So every plan rule counts each
+cached plan once: at its first copy whose metrics show it ran, or at its first copy in a plan with
+no metrics. Copies match by their accumulator ids. A plan read from text prints none, so there
+copies match by their hash and the locations their scans read. The scan that filled a cache is
+then reported once, however many queries read the cache.
+
+## A repeat is confirmed by the files beneath it, and is a miss only once Spark could reuse it
+
+`subtree_hash` writes every path as `<path>`, so two scans of different tables with one schema hash
+alike. The repeated-work rules therefore also compare the raw `Location` of every scan beneath each
+copy. Of nested repeats, only the widest is reported. A repeat rooted at an exchange belongs to
+`plan.missed-exchange-reuse`, and `plan.repeated-subtree` leaves it out.
+
+Spark replaces a repeated exchange with a `ReusedExchange` as it runs the plan. So a plan printed
+with `isFinalPlan=false` has reused nothing yet. `plan.missed-exchange-reuse` skips such a plan.
+There `plan.repeated-subtree` leaves out every repeat holding an exchange, and `plan.repeated-scan`
+every scan under a repeated exchange's later copies.
+
+`plan.missed-exchange-reuse` has high confidence where the execution set `spark.sql.exchange.reuse`
+to `false`, because the setting explains the miss. Elsewhere its confidence is low. Spark compares
+whole canonical plans, so a difference the normalized hash hides may be what kept it from reusing
+the exchange.
+
+## A cut or omitted value reads as unknown, never as empty
+
+Simple text cuts each scan field to 100 characters, ending in `...`, past
+`spark.sql.maxMetadataStringLength`. A rule that needs a whole value skips a cut one.
+`plan.repeated-scan` still reports a cut location, at low confidence, because two cut paths can
+hide two tables.
+
+Formatted text leaves out an empty `PushedFilters` or `PartitionFilters` line. So a formatted scan
+that has a `Location` and no such line has an empty list. A scan with no `Location` is not a file
+scan, and the line was never there to omit.
+
+## A filter is unpushed only when no pushed filter reads its columns
+
+Spark pushes an `isnotnull` for every column a comparison reads, even when the comparison itself
+stays in Spark. So `plan.filter-not-pushed` matches each conjunct of the `Filter` against the pushed
+list by the set of columns it reads, in order. An `isnotnull` check, a conjunct on a partition
+column, a subquery and a dynamic pruning expression are never counted as unpushed. A conjunct is
+reported when no pushed entry over the same columns is left to match it.
+
+`plan.partition-not-pruned` reads the scan's `number of partitions read`. A scan whose
+`PartitionFilters` hold only `isnotnull` checks and `dynamicpruningexpression(true)` pruned
+nothing. That last form is a dynamic pruning Spark dropped, as it does when no broadcast is left
+to reuse. The plan-shapes fixtures' pruning query shows it reading all 5 partitions.
+
+## A Python UDF is reported as `info`, because no JVM metric times it
+
+The Python worker's time shows in no operator metric, only in the stage's run time. So both
+Python UDF rules report presence. Their evidence names the stages running the UDF, and those
+stages' share of the run's task time. Spark 4 renamed several Python operators, and the rules read
+both releases' names.

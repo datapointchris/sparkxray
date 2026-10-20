@@ -51,6 +51,8 @@ _MINOR_SHARE = 0.05
 _MAJOR_SHARE = 0.5
 
 _COUNTED_SIGNALS = ('plan_metrics', 'tasks', 'executors', 'environment', 'timeline')
+# Only explain(mode='cost') text prints the optimizer's estimates, so no event log can feed a rule reading them.
+_LOG_SIGNALS: frozenset[Signal] = frozenset(SIGNALS) - {'plan_estimates'}
 _SIGNALS_SQL = """
 SELECT
   (SELECT count(*) FROM plan_node_metrics WHERE value_count > 0) > 0 AS plan_metrics,
@@ -195,13 +197,17 @@ def analyze(
 ) -> Analysis:
     """Run the rules over one log, and write its findings beside its tables as `findings.parquet`.
 
-    `rules` names the rule ids to run, and every catalog rule runs by default. `thresholds` sets
+    `rules` names the rule ids to run. By default every catalog rule runs that an event log can
+    feed, which leaves out those reading `plan_estimates`. A rule named here that reads them is
+    skipped. `thresholds` sets
     values by rule id and name, as in `{'stage.shuffle-skew': {'ratio': 8}}`. `threshold_file`
     is a TOML file of the same, and `threshold_flags` holds `<rule_id>.<name>=<value>` strings.
     A flag beats the SDK, the SDK beats the file, and the file beats the rule's default. Each
     applied value records the layer that set it.
     """
     selected, every_rule = _selected(rules)
+    if rules is None:
+        selected = [rule for rule in selected if rule.signals <= _LOG_SIGNALS]
     applied = resolve_thresholds(selected, every_rule, sdk=thresholds, file=threshold_file, flags=threshold_flags)
     tables = log.tables
     plans: dict[int | None, Plan] = {execution_id: plan for execution_id, plan in tables.last_plans().items()}
@@ -249,11 +255,17 @@ def analyze_plan(
 
     `node_metrics` gives each node's metric totals by name, keyed by its number in
     `plan.numbered()`. Without them only rules reading the plan alone run, and the rest are
-    skipped. The thresholds are set as `analyze` sets them. Nothing is written.
+    skipped. A plan read from `explain(mode='cost')` text holds the optimizer's estimates too,
+    which no log does. The thresholds are set as `analyze` sets them. Nothing is written.
     """
     selected, every_rule = _selected(rules)
     applied = resolve_thresholds(selected, every_rule, sdk=thresholds, file=threshold_file, flags=threshold_flags)
-    signals: frozenset[Signal] = frozenset({'plan', 'plan_metrics'} if node_metrics else {'plan'})
+    held: set[Signal] = {'plan'}
+    if node_metrics:
+        held.add('plan_metrics')
+    if plan.estimates:
+        held.add('plan_estimates')
+    signals = frozenset(held)
     return _run(
         selected,
         applied,
@@ -403,9 +415,9 @@ class _TitleFormatter(string.Formatter):
 
     def format_field(self, value: Any, format_spec: str) -> str:
         if format_spec == 'bytes':
-            return bytes_to_string(int(value))
+            return bytes_to_string(round(value))
         if format_spec == 'duration':
-            return format_duration(int(value))
+            return format_duration(round(value))
         return str(super().format_field(value, format_spec))
 
 

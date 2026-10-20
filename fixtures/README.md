@@ -2,7 +2,9 @@
 
 The event logs every test reads. Each variant is one Spark setting that changes what Spark writes,
 run over the fixture job in `job/eventlog_job.py`. The plan-shapes variants run
-`job/plan_shapes_job.py` instead, one small query per physical plan shape.
+`job/plan_shapes_job.py` instead, one small query per physical plan shape. The plan-rules variants
+run `job/plan_rules_job.py`, with one query that fires each `plan.*` rule and one that keeps it
+silent.
 
 ## Each variant exercises one way Spark writes a log
 
@@ -18,6 +20,7 @@ run over the fixture job in `job/eventlog_job.py`. The plan-shapes variants run
 | `spark-4.2.0-killed` | Spark 4.2.0, killed mid-run | an unfinished rolling directory: `appstatus_*.inprogress`, no `ApplicationEnd`, and whole zstd frames ending on a whole line |
 | `spark-3.5.9-warmup` | Spark 3.5.9, `--warmup` and skew-join handling on | the second run of a run diff: every stage id shifted, one config change |
 | `spark-3.5.9-plan-shapes`, `spark-4.2.0-plan-shapes` | each Spark version, one plain file, then zstd'd | subqueries, reused exchanges, dynamic pruning, a cached relation, a Cartesian product and a Python UDF; plan text cut by `spark.sql.maxPlanStringLength` of 400 and 0, and labels cut past `spark.sql.debug.maxToStringFields` |
+| `spark-3.5.9-plan-rules`, `spark-4.2.0-plan-rules` | each Spark version, broadcast joins off, a 6 GiB driver, one plain file, then zstd'd | every `plan.*` rule firing and kept silent, a pandas UDF, and a broadcast over 1 GiB |
 | `glue-5.0` | AWS's Glue 5.0 image (Spark 3.5.4), under Glue's own Spark defaults | a log as Glue's runtime configures it |
 | `apache-spark-events` | Apache Spark's own test logs at v4.2.0, zstd'd | a YARN application id, multi-attempt logs ending with no final newline, a standalone app id and older event shapes, and Spark's own rolling directory |
 
@@ -28,6 +31,11 @@ them byte for byte.
 `history-server-sql/` holds, for each plan-shapes log, what a History Server started over it
 serves at `/api/v1/applications/<app>/sql?details=true&planDescription=true`, compacted and zstd'd.
 Its graphs must count the same operators as the log's JSON plans, less the query stages.
+
+`explain/` holds, for each plan-rules variant, `cost-mode.json`. It is two queries'
+`explain(mode='cost')` text, each beside a description in the job's `fires=` form. No event log
+carries the optimizer's size estimates, which `plan.estimate-unreliable` reads. So the job prints
+them itself.
 
 Every plain log is committed zstd'd, Apache's included, under the name Spark gives a log it
 compressed itself. `local-1` becomes `local-1.zstd`, and `local-1.inprogress` becomes
@@ -49,18 +57,18 @@ test by cutting bytes off a fixture.
 
 ## Each job's description states what it seeds
 
-The fixture job sets each job's description to `fires=<rule ids>; silent=<rule ids>; <what it
+Each fixture job sets each job's description to `fires=<rule ids>; silent=<rule ids>; <what it
 does>`. Spark copies that description into every stage the job submits, so a test reads its
-expectation from the log itself.
+expectation from the log itself. The `describe(...)` calls in `job/eventlog_job.py` and
+`job/plan_rules_job.py` name, for each query, the rules that must fire on it and those that must
+stay silent. The cost-mode queries in `write_estimates` do the same, beside their text in
+`explain/`.
 
-| Job | Rule ids that must fire | Rule ids that must stay silent |
-| --- | --- | --- |
-| skewed sort-merge join | `stage.shuffle-skew`, `plan.smj-small-side` | |
-| wide sort | `stage.spill` | `stage.shuffle-skew` |
-| row-at-a-time Python UDF | `plan.python-udf-row-at-a-time` | |
-| sort-merge join with a 1,000-row side | `plan.smj-small-side` | |
-| 200-file write | `plan.small-files-written`, `stage.tiny-tasks` | `stage.task-skew` |
-| cached reuse | | `plan.repeated-subtree` |
+`glue-5.0` runs the base job under Glue's own defaults, which broadcast the 1,000-row side. Its
+description still names `plan.smj-small-side`, so no test reads a plan firing from that log.
+
+The rules test holds every `plan.*` rule to each description, in both plan-rules logs, both base
+logs and both captures. A rule fires on exactly the queries naming it under `fires=`.
 
 ## The base log crosses each seeded floor, and the warmup log splits the skew
 
@@ -96,6 +104,8 @@ fixtures/regenerate.sh spark-3.5.9-lz4      # one
 
 It needs docker, zstd, gzip, curl and jq, and the images `apache/spark:3.5.9-python3`,
 `apache/spark:4.2.0-python3` and `public.ecr.aws/glue/aws-glue-libs:5`. Each Spark run takes a
-2 GiB driver heap and about a minute. Each run gets a new application id and new timestamps, so a
+2 GiB driver heap and about a minute. A plan-rules run takes 6 GiB instead. Neither Spark image
+ships pyarrow or pandas, so a plan-rules run installs both from PyPI for its pandas UDF. Each run
+gets a new application id and new timestamps, so a
 regenerated log never matches the committed one byte for byte. Shuffle bytes and records come
 from the data, so they do not move between runs. A test pins what the job seeds, never a raw line.

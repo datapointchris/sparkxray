@@ -3,8 +3,8 @@ name = "sparkxray"
 dynamic = ["version"]
 description = "Read Spark event logs offline, with no JVM, and find why a run was slow: skew, spill, join choices, idle executors."
 authors = [{ name = "Chris Birch", email = "datapointchris@gmail.com" }]
-license = "MIT"
-license-files = ["LICENSE"]
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "LICENSE-APACHE-2.0.txt"]
 readme = "README.md"
 keywords = ["spark", "pyspark", "event-log", "performance", "duckdb", "glue"]
 classifiers = [
