@@ -9,6 +9,7 @@ from sparkxray.plan.display_values import DisplayValue
 from sparkxray.plan.display_values import parse_display_value
 from sparkxray.plan.explain_text import parse_plan_text
 from sparkxray.plan.labels import normalize_label
+from sparkxray.plan.labels import without_ids
 from sparkxray.plan.last_plans import last_plans
 from sparkxray.plan.plan_info import parse_plan_info
 from sparkxray.plan.rest_graph import parse_rest_graph
@@ -40,4 +41,5 @@ __all__ = [
     'parse_plan_info',
     'parse_plan_text',
     'parse_rest_graph',
+    'without_ids',
 ]

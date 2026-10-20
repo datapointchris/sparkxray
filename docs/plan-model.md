@@ -137,7 +137,8 @@ How many times AQE re-planned is the last version's number, which only an event 
 - **Every join AQE switched or split for skew.** A join keeps its keys across one execution's plans,
   because expression ids do. So each join of the last plan is paired, in pre-order, with the first
   plan's join on the same keys and type. A pair is reported where the operator changed, or where the
-  last plan prints `(skew=true)` after it.
+  last plan prints `(skew=true)` after it. Its keys keep their ids, which `sql show` leaves out of
+  its table as a headline does.
 
 Reuse shows in the counts as nodes the last plan lacks. AQE reuses a subquery as it optimizes each
 stage, so the first plan holds one copy per node that uses it. A shuffle stage AQE reuses prints as

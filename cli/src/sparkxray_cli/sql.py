@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 import typer
+from sparkxray.plan import without_ids
 from sparkxray.summaries import sql_detail
 from sparkxray.summaries import sql_summaries
 
@@ -94,7 +95,11 @@ def show(
     printed = changes.to_json()
     render.print_record(printed, ['update_count'], title='AQE')
     if printed['joins']:
-        render.print_records(printed['joins'], _JOIN_CHANGE_KEYS, title='Joins AQE changed')
+        joins = [
+            {**join, **{side: [without_ids(key) for key in join[side]] for side in ('left_keys', 'right_keys')}}
+            for join in printed['joins']
+        ]
+        render.print_records(joins, _JOIN_CHANGE_KEYS, title='Joins AQE changed')
     if printed['operators']:
         render.print_records(printed['operators'], _OPERATOR_CHANGE_KEYS, title='Operators AQE added or removed')
     if printed['shuffle_reads']:
