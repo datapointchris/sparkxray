@@ -16,7 +16,7 @@ LogArgument = Annotated[
         show_default=False,
     ),
 ]
-JsonOption = Annotated[bool, typer.Option('--json', help='Print JSON to stdout instead of a table.')]
+JsonOption = Annotated[bool, typer.Option('--json', help='Print JSON to stdout instead of a table, and a refusal as JSON on stderr.')]
 LimitOption = Annotated[
     int | None,
     typer.Option('--limit', '-n', min=0, help='Keep only the first N rows. Every row by default.', show_default=False),

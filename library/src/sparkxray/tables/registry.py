@@ -668,10 +668,10 @@ _PLAN_NODES = Table(
         ('node_id', 'BIGINT', 'node_id', "The node's number in the plan, in pre-order from 0 at the root."),
         ('parent_id', 'BIGINT', 'parent_id', "The node above it. Null at the root; a subquery's root has the node hosting it."),
         (
-            'formatted_number',
+            'operator_id',
             'BIGINT',
-            'formatted_number',
-            'The number formatted plan text gives the operator, as in `(3) Exchange`. Null where the text shows none.',
+            'operator_id',
+            'The operator id formatted plan text gives the node, as in `(3) Exchange`. Null where the text shows none.',
         ),
         ('operator', 'VARCHAR', 'operator', "The operator's name, the same whichever form of plan it was read from."),
         ('label', 'VARCHAR', 'label', 'The line Spark printed for the node, ids included.'),
@@ -681,7 +681,7 @@ _PLAN_NODES = Table(
             'normalized_label',
             'The label with every id Spark generates rewritten, so two builds of one transform compare equal.',
         ),
-        ('codegen_stage', 'BIGINT', 'codegen_stage', 'The whole-stage codegen pipeline the node runs in. Null outside one.'),
+        ('codegen_stage_id', 'BIGINT', 'codegen_stage_id', 'The whole-stage codegen pipeline the node runs in. Null outside one.'),
         (
             'enclosing_sort_id',
             'BIGINT',
@@ -803,6 +803,9 @@ TABLES: tuple[Table, ...] = (
 # Each partition of each stage once: its first success across the stage's attempts. Retries and
 # speculative copies stay in `tasks`, where they show the work they wasted.
 TASKS_EFFECTIVE = 'CREATE VIEW tasks_effective AS SELECT * FROM tasks WHERE effective'
+TASKS_EFFECTIVE_DESCRIPTION = (
+    'A view of `tasks` where `effective` is true: each partition of each stage once, its first success across the stage attempts.'
+)
 
 # When the run started and ended. A run still going when its log ended ends at the last thing the log saw finish.
 RUN_SPAN_SQL = """

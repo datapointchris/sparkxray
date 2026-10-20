@@ -24,6 +24,13 @@ benchmarks/parse/ the parse benchmark, run by hand
 - **Every error is a class in `sparkxray/errors.py`, with a code callers branch on.** A code is
   never reused or renumbered, and a retired one stays registered. The code goes in with the change
   that first raises it.
+- **A JSON document a program keeps or checks has a schema in `sparkxray/schemas/`.** Findings, a
+  report, a manifest, capabilities and the error envelope each have one. A command's listing, such
+  as `stages list --json`, has none. A new document adds its file there in the change that creates
+  it, with every object closed and a description naming the command that prints it. `schemas list`
+  and `capabilities show` find it by its file name. Every number it describes ends in its unit, which
+  `library/tests/test_schemas.py` checks. The `tables` and `errors` schemas are built from the
+  registries in `sparkxray/schemas/__init__.py`, so a table or an error needs no schema edit.
 - **The CLI holds no logic.** A command parses its arguments, calls one library function and
   renders the result. Anything worth testing lives in the library. The per-resource reads live in
   `sparkxray.summaries`, and all printing in `sparkxray_cli/render.py`.

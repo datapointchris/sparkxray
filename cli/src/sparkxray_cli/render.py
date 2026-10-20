@@ -229,8 +229,11 @@ def none_found(what: str) -> None:
     note(f'no {what}')
 
 
-def report_error(error: SparkxrayError) -> None:
-    """The library's refusal, with its code, the values that would have worked, and its hint."""
+def report_error(error: SparkxrayError, *, as_json: bool = False) -> None:
+    """The library's refusal, with its code, the values that would have worked, and its hint: on one JSON line where `as_json`."""
+    if as_json:
+        sys.stderr.write(json.dumps({'error': error.to_json()}, ensure_ascii=False) + '\n')
+        return
     text = Text(str(error))
     text.stylize('bold red', 0, len(error.code))
     stderr.print(text, soft_wrap=True)

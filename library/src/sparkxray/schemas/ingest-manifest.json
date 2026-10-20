@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "sparkxray ingest manifest",
-  "description": "One Spark application's event log after ingest: where it came from, which files were read, and how far the log can be trusted.",
+  "description": "One Spark application's event log after ingest: where it came from, which files were read, and how far the log can be trusted. The tables manifest holds it under ingest.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "source", "app_id", "layout", "files", "compacted", "in_progress", "truncated_tail", "spark_version", "platform"],

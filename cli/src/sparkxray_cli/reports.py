@@ -52,11 +52,11 @@ def write(
     report diffs and commits cleanly.
 
     Exits 0 when no finding reaches `--fail-on` and 3 when one does, and the report is written in
-    both cases. Exits 2 on a usage error, and 3 when the log could not be read.
+    both cases, stating the verdict. Exits 2 on a usage error, and 3 when the log could not be read.
     """
     opened = open_log(log)
     analysis = analyze_log(opened, None, threshold, thresholds)
     with render.status(f'Writing the report of {opened.manifest.app_id}'):
-        text = render_report(build_report(opened, analysis), report_format)
+        text = render_report(build_report(opened, analysis, fail_on), report_format)
     render.emit_text(text if out is None else f'{write_report(text, out)}\n')
     exit_if_gated(analysis, fail_on)

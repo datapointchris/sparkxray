@@ -7,6 +7,7 @@ registry still lists it. `registered()` is the registry, so a code is declared i
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 from typing import ClassVar
 
 _CODES: dict[str, type[SparkxrayError]] = {}
@@ -48,6 +49,10 @@ class SparkxrayError(Exception):
         if self.hint:
             text += f'\n  hint: {self.hint}'
         return text
+
+    def to_json(self) -> dict[str, Any]:
+        """The error as the `errors` schema's envelope holds it, under `error`, with every valid value."""
+        return {'code': self.code, 'message': self.message, 'field': self.field, 'valid': list(self.valid), 'hint': self.hint}
 
 
 def registered() -> tuple[type[SparkxrayError], ...]:
@@ -159,4 +164,19 @@ class UnknownColumnError(SparkxrayError):
 class UnknownMetricError(SparkxrayError):
     code = 'E-METRIC-001'
     raised_when = 'a metric name is no column, Spark field or plan metric the glossary describes; lists the names it holds'
+    exit_code = 2
+
+
+class UnknownSchemaError(SparkxrayError):
+    code = 'E-SCHEMA-001'
+    raised_when = 'a schema name is not one sparkxray ships; lists the names it does'
+    exit_code = 2
+
+
+class CommandLineError(SparkxrayError):
+    code = 'E-USAGE-001'
+    raised_when = (
+        'the command names no such command or option, lacks a required one, or gives a value its parameter refuses; '
+        'names the parameter and, for a choice, its values. Only the command raises it'
+    )
     exit_code = 2

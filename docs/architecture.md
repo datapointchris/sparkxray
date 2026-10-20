@@ -348,3 +348,39 @@ by. So a report never states an idle share the rule did not judge.
 
 *Rejected:* drawing plans with rich in both. The library would then import it, and every consumer's
 cluster would install it.
+
+## What an agent reads is built from the registries that run sparkxray
+
+`capabilities show` walks the assembled command tree for each command's arguments, flags and exit
+codes. It reads the rule catalog, the table registry and the error registry for the rest. The
+`tables` and `errors` schemas are built from those registries whenever they are read. So none of
+the three has a hand-written copy to fall behind the code, and a command or error added without
+docs still appears.
+
+A command's exit codes are read from its parameters. One taking `--fail-on` exits 3 on a finding
+at or above it, and one taking a log exits 3 when the log cannot be read. A log parameter shows
+as `LOG`, or `LOG_<role>` where a command takes two. Every refused input exits 2, and its error
+code says which input.
+
+The root group reads whether a command asked for JSON from its words, before any parameter is
+parsed: `--json`, or `--format json`. A callback on `--json` would run only once parsing reached
+it, so `--fail-on hgih --json` would refuse in prose. The parser's refusal prints as
+`E-USAGE-001`, naming the parameter, the values a choice takes, and the command's `--help`.
+Without JSON it prints the parser's own text.
+
+The other schemas are files, because their shape is the contract a program holds the document to.
+Every object in them is closed, so a key the code adds without its schema fails the test that
+validates that document. Each file has one. The findings, the report and both manifests are
+validated over fixture logs, and capabilities and the error envelope over the live command.
+
+Every number a schema describes ends in its unit, from the suffixes the finding contract holds
+evidence keys to. The exemptions identify rather than measure: an `_id`, an attempt, a version or
+an index. A number beside a `unit` field names its unit there, as a threshold's `default` and a
+plan metric's `total` do. One test walks every schema, the built ones included.
+
+So a plan node's numbers carry the names `plan_nodes` gives them, in every JSON: `node_id`,
+`parent_id`, `child_ids` and `codegen_stage_id`. The `(3)` formatted text prints is `operator_id`,
+Spark's own name for it in `ExplainUtils.generateOperatorIDs`.
+
+*Rejected:* a capabilities document written by hand. An agent trusts it most, and nothing would
+say when it went stale.

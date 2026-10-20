@@ -149,7 +149,10 @@ def _value(raw: object, rule: Rule, name: str) -> float:
     if threshold is None:
         names = [known.name for known in rule.thresholds]
         raise UnknownThresholdError(
-            f'{rule.rule_id} has no threshold called {name!r}', field=f'threshold.{rule.rule_id}.{name}', valid=names
+            f'{rule.rule_id} has no threshold called {name!r}',
+            field=f'threshold.{rule.rule_id}.{name}',
+            valid=names,
+            hint=f'sparkxray rules show {rule.rule_id}',
         )
     return parse_threshold_value(raw, threshold, field=f'threshold.{rule.rule_id}.{name}')
 

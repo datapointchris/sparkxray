@@ -129,7 +129,7 @@ class HostedSubquery:
     root: int
 
     def to_json(self) -> dict[str, Any]:
-        return dc.asdict(self)
+        return {'subquery_id': self.subquery_id, 'root_id': self.root}
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -182,16 +182,17 @@ class AnnotatedNode:
         return labels.without_ids(' '.join(parts))
 
     def to_json(self) -> dict[str, Any]:
+        """The node with its numbers under the names `plan_nodes` gives them: `node_id`, `parent_id`, `codegen_stage_id`."""
         return {
-            'number': self.number,
-            'parent': self.parent,
-            'children': list(self.children),
+            'node_id': self.number,
+            'parent_id': self.parent,
+            'child_ids': list(self.children),
             'subqueries': [subquery.to_json() for subquery in self.subqueries],
             'operator': self.operator,
             'label': self.label,
             'headline': self.headline(),
             'details': self.details.to_json(),
-            'codegen_stage': self.codegen_stage,
+            'codegen_stage_id': self.codegen_stage,
             'runtime_size_bytes': self.runtime_size_bytes,
             'runtime_row_count': self.runtime_row_count,
             'stage_ids': list(self.stage_ids),

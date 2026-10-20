@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "sparkxray report",
-  "description": "One analyzed Spark log: the application, its log, the core time it held, what the rules found, its longest stages, every SQL execution with its last plan, every executor and the settings the rules reason about. The same log, thresholds and sparkxray version give the same bytes. A field removed or a meaning changed raises schema_version, and a field added does not.",
+  "description": "One analyzed Spark log: the application, its log, the core time it held, what the rules found, its longest stages, every SQL execution with its last plan, every executor and the settings the rules reason about, as sparkxray reports write --format json writes it. The same log, thresholds and sparkxray version give the same bytes. A field removed or a meaning changed raises schema_version, and a field added does not.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "generated_by", "app", "log", "usage", "findings", "skipped_rules", "stages", "sql", "executors", "config"],
+  "required": ["schema_version", "generated_by", "app", "log", "usage", "gate", "findings", "skipped_rules", "stages", "sql", "executors", "config"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "generated_by": {"type": "string", "description": "The sparkxray version that wrote it, as `sparkxray 0.9.0`."},
     "app": {
       "type": "object",
@@ -63,6 +63,7 @@
         "idle_dpu_hours": {"type": ["number", "null"]}
       }
     },
+    "gate": {"$ref": "findings.json#/properties/gate"},
     "findings": {"type": "array", "items": {"$ref": "findings.json#/$defs/finding"}, "description": "What the rules found, in the analysis's order."},
     "skipped_rules": {"type": "array", "items": {"$ref": "findings.json#/$defs/skipped_rule"}},
     "stages": {
@@ -244,20 +245,20 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "number", "parent", "children", "subqueries", "operator", "label", "headline", "details", "codegen_stage",
+        "node_id", "parent_id", "child_ids", "subqueries", "operator", "label", "headline", "details", "codegen_stage_id",
         "runtime_size_bytes", "runtime_row_count", "stage_ids", "metrics", "own_spill_bytes", "finding_ids"
       ],
       "properties": {
-        "number": {"type": "integer"},
-        "parent": {"type": ["integer", "null"]},
-        "children": {"type": "array", "items": {"type": "integer"}},
+        "node_id": {"type": "integer"},
+        "parent_id": {"type": ["integer", "null"], "description": "Null at the root. A subquery's root has the node running it."},
+        "child_ids": {"type": "array", "items": {"type": "integer"}},
         "subqueries": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["subquery_id", "root"],
-            "properties": {"subquery_id": {"type": ["integer", "null"]}, "root": {"type": "integer"}}
+            "required": ["subquery_id", "root_id"],
+            "properties": {"subquery_id": {"type": ["integer", "null"]}, "root_id": {"type": "integer"}}
           }
         },
         "operator": {"type": "string"},
@@ -278,7 +279,7 @@
             "shuffle_read": {"type": ["string", "null"]}
           }
         },
-        "codegen_stage": {
+        "codegen_stage_id": {
           "type": ["integer", "null"],
           "description": "The whole-stage codegen pipeline the node runs in, whose duration its top node carries."
         },

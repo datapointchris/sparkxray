@@ -125,13 +125,33 @@ findings as `findings list` orders them, the most wall time a fix could recover 
 with its evidence, thresholds and fixes folded under it. Then come the longest stages, each SQL
 execution with the settings it set, and the plan of each execution a finding names. Last come the
 launch values of the settings the rules read and the fixes name. `--format markdown` is the default, and reads on GitHub. `--format json`
-carries every plan, and `sparkxray/schemas/report.json` pins its shape.
+carries every plan, and `sparkxray schemas show report` prints its schema.
 
 A report holds no timestamp, prints its times in UTC, and names a local log by its file name. So
 the same log file, thresholds and sparkxray version write the same bytes on any machine.
 `--out FILE` creates FILE's directory, replaces the file only once the new one is whole, then
 prints its path. `reports write` gates on `--fail-on` as `findings list` does. It writes the
-report whether the gate passes or not.
+report whether the gate passes or not, and the report states the verdict, as `gate` in the JSON.
+
+## A program or an agent drives sparkxray from what it prints
+
+`sparkxray capabilities show --json` lists every command with its arguments, flags and exit codes,
+every rule with its thresholds, and the tables, schemas and error codes. It is read from the
+running command and library, so it names a command or rule no page documents yet.
+
+`sparkxray schemas list` names every JSON Schema sparkxray ships, and `sparkxray schemas show NAME`
+prints one. `tables` gives each table's columns with their DuckDB types and units. `errors` gives
+the error envelope, and every code with its exit status. Every number any schema describes ends
+in its unit, as `_ms` or `_bytes`, or sits beside a `unit` field.
+
+Given `--json`, or `--format json` on `reports write`, a refusal prints one line of JSON on
+stderr, and the command exits with the error's status. A command line the parser refuses, such as
+`--fail-on hgih`, prints as `E-USAGE-001` and exits 2. A code is never reused or renumbered, so a
+program branches on it, and `field` names what it passed that failed:
+
+```json
+{"error": {"code": "E-RULE-002", "message": "stage.shuffle-skew has no threshold called 'ratoi'", "field": "threshold.stage.shuffle-skew.ratoi", "valid": ["ratio", "min_bytes", "min_tasks"], "hint": "sparkxray rules show stage.shuffle-skew"}}
+```
 
 ## Open an event log from a path or S3
 
@@ -324,10 +344,15 @@ from sparkxray.reports import build_report
 from sparkxray.reports import render_report
 from sparkxray.reports import write_report
 
-report = build_report(log, analysis)         # without an analysis, log.analyze() at the defaults
+report = build_report(log, analysis, fail_on='critical')  # without an analysis, log.analyze() at the defaults
 write_report(render_report(report, 'markdown'), 'report.md')
+report.gate.passed                           # False when a finding is at or above fail_on
 report.to_json()                             # the shape sparkxray/schemas/report.json pins
 ```
+
+`sparkxray.schemas.schema_document(name)` returns any schema `schemas show` prints, and
+`sparkxray.errors.registered()` every error class, each with its `code`, `exit_code` and
+`raised_when`. A `SparkxrayError`'s `to_json()` is the envelope's `error`.
 
 ## Layout
 
