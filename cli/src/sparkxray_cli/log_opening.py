@@ -27,7 +27,9 @@ def open_tables(location: str) -> Tables:
 def tables_of(log: EventLog) -> Tables:
     """An opened log's tables, built the first time and read from the cache after."""
     with render.status(f'Reading the tables of {log.manifest.app_id}'):
-        return log.tables
+        tables = log.tables
+    render.tables_notes(log.manifest.app_id, tables.manifest)
+    return tables
 
 
 def analyze_log(log: EventLog, rules: list[str] | None, threshold_flags: list[str] | None, threshold_file: Path | None) -> Analysis:

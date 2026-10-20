@@ -180,12 +180,12 @@ program branches on it, and `field` names what it passed that failed:
 {"error": {"code": "E-RULE-002", "message": "stage.shuffle-skew has no threshold called 'ratoi'", "field": "threshold.stage.shuffle-skew.ratoi", "valid": ["ratio", "min_bytes", "min_tasks"], "hint": "sparkxray rules show stage.shuffle-skew"}}
 ```
 
-## Open an event log from a path or S3
+## Open an event log
 
-`EventLog.open` takes a log file, a directory, a Spark 4 rolling `eventlog_v2_*` directory, or an
-`s3://` URI to any of those. The location must hold one application's log. A log already read also
-opens by its app id, and `cached_logs()` in `sparkxray.tables.cached_logs` lists those logs, newest
-first.
+`EventLog.open` takes a log file, a directory, a Spark 4 rolling `eventlog_v2_*` directory, an
+`s3://` URI to any of those, or a Spark server's `http(s)://` address, described below. The
+location must hold one application's log. A log already read also opens by its app id, and
+`cached_logs()` in `sparkxray.tables.cached_logs` lists those logs, newest first.
 
 ```python
 from sparkxray.ingest import EventLog

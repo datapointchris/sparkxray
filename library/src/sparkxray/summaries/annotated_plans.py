@@ -387,7 +387,7 @@ def annotated_plan(tables: Tables, execution_id: int, *, version: int | None = N
     nodes = []
     for each in numbered:
         node, declared = each.node, metrics.get(each.number, {})
-        names = dict.fromkeys(ref.name for ref in node.metrics if ref.name in declared)
+        names = dict.fromkeys(ref.name for ref in node.metrics if ref.name in declared) or dict.fromkeys(declared)
         stats = node.runtime_stats
         nodes.append(
             AnnotatedNode(

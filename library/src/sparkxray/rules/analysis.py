@@ -215,6 +215,7 @@ def analyze(
     tables = log.tables
     plans: dict[int | None, Plan] = {execution_id: plan for execution_id, plan in tables.last_plans().items()}
     held = dict(zip(_COUNTED_SIGNALS, tables.query(_SIGNALS_SQL).fetchall()[0], strict=True))
+    held['whole_run'] = 'evicted_records' not in tables.manifest.lacks
     signals = frozenset(signal for signal in SIGNALS if held.get(signal) or (signal == 'plan' and plans))
     node_metrics: dict[int | None, dict[int, dict[str, float]]] = {
         execution_id: totals for execution_id, totals in tables.node_metric_totals().items()

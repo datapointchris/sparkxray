@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 # executor's peaks where the run logged no stage's. No Spark writes either.
 PLAN_METRICS_EVENT = 'sparkxray.RestPlanMetrics'
 EXECUTOR_PEAKS_EVENT = 'sparkxray.RestExecutorPeaks'
+EVICTED_EVENT = 'sparkxray.RestEvicted'
 _TASK_PAGE = 1000
 _SQL_PAGE = 100
 # A stage in any other state never started, as Spark logs no event for a skipped or pending stage.
@@ -121,6 +122,8 @@ def write_rebuilt_log(client: RestClient, app_path: str, application: Mapping[st
     if attempt.get('attemptId') is not None:
         start['App Attempt ID'] = str(attempt['attemptId'])
     events.head(start)
+    if evicted := _evicted(jobs, stages, executions, started, tasks):
+        events.head({'Event': EVICTED_EVENT, 'Evicted': evicted})
     end = _epoch(attempt, 'endTime') if attempt.get('completed') else None
     stage_peaks_logged = _pairs(environment.get('sparkProperties')).get('spark.eventLog.logStageExecutorMetrics', '').lower() == 'true'
     for executor in executors:
@@ -180,12 +183,35 @@ def _pages(client: RestClient, path: str, length: int, parameters: Mapping[str, 
             return rows
 
 
+def _task_count(stage: Mapping[str, Any]) -> int:
+    """How many task attempts the server counted for a stage attempt, whether or not it still holds them."""
+    return sum(int(stage.get(key) or 0) for key in ('numActiveTasks', 'numCompleteTasks', 'numFailedTasks', 'numKilledTasks'))
+
+
+def _evicted(
+    jobs: list[dict[str, Any]],
+    stages: list[dict[str, Any]],
+    executions: list[dict[str, Any]],
+    started: list[dict[str, Any]],
+    tasks: list[list[dict[str, Any]]],
+) -> list[str]:
+    """What the server had dropped past its `spark.ui.retained*` limits.
+
+    Spark numbers jobs, stages and SQL executions from 0, so a lowest id above 0 means the oldest
+    were dropped. A stage holding fewer tasks than the server counted had some dropped.
+    """
+    numbered = (('jobs', jobs, 'jobId'), ('stages', stages, 'stageId'), ('sql_executions', executions, 'id'))
+    evicted = [name for name, records, key in numbered if records and min(int(record[key]) for record in records) > 0]
+    if any(len(stage_tasks) < _task_count(stage) for stage, stage_tasks in zip(started, tasks, strict=True)):
+        evicted.append('tasks')
+    return evicted
+
+
 def _tasks(client: RestClient, app_path: str, stages: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     """Every task attempt of each stage attempt, a page of 1,000 a request, the pages of every stage fetched together."""
     pages: list[tuple[int, int]] = []
     for position, stage in enumerate(stages):
-        count = sum(int(stage.get(key) or 0) for key in ('numActiveTasks', 'numCompleteTasks', 'numFailedTasks', 'numKilledTasks'))
-        pages.extend((position, offset) for offset in range(0, max(count, 1), _TASK_PAGE))
+        pages.extend((position, offset) for offset in range(0, max(_task_count(stage), 1), _TASK_PAGE))
 
     def page(entry: tuple[int, int]) -> list[dict[str, Any]]:
         position, offset = entry

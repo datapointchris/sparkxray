@@ -27,6 +27,8 @@ SCHEMA_VERSION = 1
 #                           from tasks and node_stages is empty
 #   execution_configs       the settings each SQL execution changed from the application's, so a
 #                           setting changed at runtime reads as the application's
+#   evicted_records         what the server had dropped past its spark.ui.retained* limits, so
+#                           the tables hold only the part of the run it kept
 Lack = Literal[
     'stage_executor_metrics',
     'block_updates',
@@ -35,6 +37,7 @@ Lack = Literal[
     'task_executor_metrics',
     'task_accumulators',
     'execution_configs',
+    'evicted_records',
 ]
 
 

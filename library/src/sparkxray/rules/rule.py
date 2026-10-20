@@ -20,8 +20,18 @@ if TYPE_CHECKING:
     from sparkxray.rules.findings import Finding
     from sparkxray.tables.relations import Tables
 
-Signal = Literal['plan', 'plan_metrics', 'plan_stages', 'plan_estimates', 'tasks', 'executors', 'environment', 'timeline']
-SIGNALS: tuple[Signal, ...] = ('plan', 'plan_metrics', 'plan_stages', 'plan_estimates', 'tasks', 'executors', 'environment', 'timeline')
+Signal = Literal['plan', 'plan_metrics', 'plan_stages', 'plan_estimates', 'tasks', 'executors', 'environment', 'timeline', 'whole_run']
+SIGNALS: tuple[Signal, ...] = (
+    'plan',
+    'plan_metrics',
+    'plan_stages',
+    'plan_estimates',
+    'tasks',
+    'executors',
+    'environment',
+    'timeline',
+    'whole_run',
+)
 Severity = Literal['info', 'low', 'medium', 'high', 'critical']
 SEVERITIES: tuple[Severity, ...] = ('info', 'low', 'medium', 'high', 'critical')
 # What one finding of a rule is about, which decides the ids its finding_id is built from.
@@ -31,7 +41,7 @@ ThresholdUnit = Literal['x', 'bytes', 'ms', 'count', 'rows', 'fraction']
 THRESHOLD_UNITS: tuple[ThresholdUnit, ...] = ('x', 'bytes', 'ms', 'count', 'rows', 'fraction')
 
 # Only an event log's tables hold these. A SQL rule reads the tables, so it declares at least one.
-_TABLE_SIGNALS = frozenset({'plan_stages', 'tasks', 'executors', 'environment', 'timeline'})
+_TABLE_SIGNALS = frozenset({'plan_stages', 'tasks', 'executors', 'environment', 'timeline', 'whole_run'})
 _RULE_ID = re.compile(r'[a-z]+\.[a-z0-9]+(?:-[a-z0-9]+)*')
 _PARAMETER = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)')
 _BYTE_SCALES = ((1 << 40, 'TiB'), (1 << 30, 'GiB'), (1 << 20, 'MiB'), (1 << 10, 'KiB'))

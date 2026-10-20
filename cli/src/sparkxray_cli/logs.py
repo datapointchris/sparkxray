@@ -6,7 +6,6 @@ from typing import Annotated
 from typing import Any
 
 import typer
-from sparkxray.ingest.history_server import SCHEMES
 from sparkxray.rules import Severity
 from sparkxray.run_diff import RunDiff
 from sparkxray.run_diff import diff_logs
@@ -67,10 +66,6 @@ def ingest(
     as fast on the second run as the first was slow. A server's address reads the event log it
     serves, or rebuilds one from its REST JSON where it serves none, as a live driver UI does.
     """
-    if app_id is not None and not log.startswith(SCHEMES):
-        raise typer.BadParameter(
-            '--app picks an application on a server, so LOG must be an http:// or https:// address', param_hint='--app'
-        )
     cached = CachedLog.of(tables_of(open_log(log, app=app_id)))
     if as_json:
         render.emit_json(cached.to_json())
@@ -161,6 +156,8 @@ def diff(
     """
     opened_a, opened_b = open_log(log_a), open_log(log_b)
     opened_baselines = [open_log(location) for location in baseline or ()]
+    for opened in (opened_a, opened_b, *opened_baselines):
+        tables_of(opened)
     with render.status(f'Comparing {opened_b.manifest.app_id} with {opened_a.manifest.app_id}'):
         compared = diff_logs(
             opened_a,

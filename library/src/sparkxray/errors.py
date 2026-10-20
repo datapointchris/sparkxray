@@ -102,10 +102,16 @@ class CorruptLogError(SparkxrayError):
     exit_code = 3
 
 
+class AppBesideNonServerError(SparkxrayError):
+    code = 'E-INGEST-007'
+    raised_when = 'an app id is given beside a location that is no server address, where only a server holds several applications'
+    exit_code = 2
+
+
 class UnreachableServerError(SparkxrayError):
     code = 'E-REST-001'
     raised_when = (
-        'a History Server or driver UI did not answer, answered 5xx after 3 retries, answered another error status, '
+        'a History Server or driver UI did not answer, answered 5xx after its retries, answered another error status, '
         'or answered with what is not its REST API; names the URL and the last error'
     )
     exit_code = 3
@@ -115,7 +121,7 @@ class UnknownApplicationError(SparkxrayError):
     code = 'E-REST-002'
     raised_when = (
         'a History Server or driver UI holds no application with the app id, or no attempt with the attempt id; '
-        'lists the five most recent app ids it holds, or the attempts'
+        'lists the most recent app ids it holds, or the attempts'
     )
     exit_code = 2
 

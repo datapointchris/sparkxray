@@ -31,6 +31,7 @@ _HELD_WITHOUT = {
     'task_executor_metrics': "tasks' executor metrics",
     'task_accumulators': "tasks' accumulator updates",
     'execution_configs': "SQL executions' changed settings",
+    'evicted_records': 'the jobs, stages, SQL executions or tasks the server had dropped',
 }
 
 

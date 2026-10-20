@@ -17,6 +17,7 @@ from typing import Protocol
 
 from sparkxray.cache_directory import remove_superseded
 from sparkxray.cache_directory import used
+from sparkxray.errors import AppBesideNonServerError
 from sparkxray.errors import NoEventLogError
 from sparkxray.ingest.history_server import SCHEMES
 from sparkxray.ingest.history_server import HistoryServerLocation
@@ -47,12 +48,16 @@ class Location(Protocol):
 def location_for(location: str, *, profile: str | None, region: str | None, app: str | None, cache: Path) -> Location:
     """The location a string names: an `s3://` URI, a History Server or driver UI's `http(s)://` address, or else a local path.
 
-    `app` names the application on a server, and raises ValueError beside any other location.
+    `app` names the application on a server, and is refused beside any other location.
     """
     if location.startswith(SCHEMES):
         return HistoryServerLocation(location, app=app, cache=cache)
     if app is not None:
-        raise ValueError(f'{location} is no server address, and only a server address takes an app id beside it')
+        raise AppBesideNonServerError(
+            f'{location} is no server address, and only a server address takes an app id beside it',
+            field='app',
+            hint="drop the app id, or pass a server's address as LOG",
+        )
     if location.startswith(_S3_SCHEMES):
         return S3Location(location, profile=profile, region=region)
     return LocalLocation(Path(location))

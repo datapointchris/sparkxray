@@ -191,7 +191,7 @@ Stages tab › Failed Stages.
 FAILED_JOBS = Rule(
     rule_id='app.failed-jobs',
     title='{failed_job_count} of {job_count:plural job} failed',
-    signals=frozenset({'timeline'}),
+    signals=frozenset({'timeline', 'whole_run'}),
     scope='application',
     thresholds=(),
     severity_ladder={'high': 'any job failed other than by being cancelled'},

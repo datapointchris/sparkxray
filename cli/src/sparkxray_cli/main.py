@@ -146,8 +146,9 @@ def main(
     from `stages list` to `stages show` to `tasks list` changes one word at a time. Each verb
     means the same on every resource: `list` a set, `show` one, `query` with SQL, `ingest` a log.
 
-    `LOG` is a log file or directory, an `s3://` URI, or the app id of a log already read. The
-    first command on a log reads it into the cache, and every later one opens the cache.
+    `LOG` is a log file or directory, an `s3://` URI, a Spark server's `http(s)://` address, or the
+    app id of a log already read. The first command on a log reads it into the cache, and every
+    later one opens the cache.
 
     `sparkxray findings list LOG` runs the rules, the most wall time a fix could recover first,
     and exits 3 when a finding is at or above `--fail-on`. Run any partial command with no arguments or `--help` to see what

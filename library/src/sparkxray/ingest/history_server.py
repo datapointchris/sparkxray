@@ -117,7 +117,7 @@ class HistoryServerLocation:
                     f'{self.uri} holds more than one application, and ingest reads one. The {len(listed)} most recent are listed',
                     field='location',
                     valid=[f'{self._api_root}/applications/{_quoted(str(each["id"]))}' for each in listed],
-                    hint='pass one of the listed URLs, or the app id beside the address',
+                    hint='pass one of the listed addresses as LOG',
                 )
             self._app = str(listed[0]['id'])
         application = client.json(f'applications/{_quoted(self._app)}')
@@ -125,8 +125,8 @@ class HistoryServerLocation:
             raise UnknownApplicationError(
                 f'{self._api_root} holds no application {self._app}. The most recent it holds are listed',
                 field='app',
-                valid=[str(each['id']) for each in _recent(client)],
-                hint='pass one of the listed app ids',
+                valid=[f'{self._api_root}/applications/{_quoted(str(each["id"]))}' for each in _recent(client)],
+                hint='pass one of the listed addresses as LOG',
             )
         if not isinstance(application, dict) or 'id' not in application:
             raise _not_rest(client.url(f'applications/{_quoted(self._app)}'))
@@ -138,12 +138,17 @@ class HistoryServerLocation:
             return max(attempts, key=lambda attempt: attempt.get('startTimeEpoch') or 0, default={})
         chosen = next((attempt for attempt in attempts if str(attempt.get('attemptId')) == self._attempt), None)
         if chosen is None:
-            numbered = [str(attempt['attemptId']) for attempt in attempts if attempt.get('attemptId') is not None]
+            app_address = f'{self._api_root}/applications/{_quoted(str(application["id"]))}'
+            numbered = [
+                f'{app_address}/{_quoted(str(attempt["attemptId"]))}' for attempt in attempts if attempt.get('attemptId') is not None
+            ]
             raise UnknownApplicationError(
                 f'{application["id"]} has no attempt {self._attempt}',
                 field='location',
-                valid=numbered,
-                hint='pass one of the listed attempts, or none for the newest' if numbered else 'its attempt has no id, so name none',
+                valid=numbered or [app_address],
+                hint='pass one of the listed addresses as LOG, or the application address for its newest attempt'
+                if numbered
+                else 'its attempt has no id, so pass the listed address as LOG',
             )
         return chosen
 
@@ -154,10 +159,15 @@ class HistoryServerLocation:
         server = hashlib.sha256(self._api_root.encode()).hexdigest()[:32]
         directory = self._cache.joinpath('logs', 'rest', server, _safe(str(application['id'])), _safe(str(attempt.get('attemptId', '-'))))
         finished = bool(attempt.get('completed'))
-        version = f'{attempt.get("endTimeEpoch")}-{attempt.get("lastUpdatedEpoch")}' if finished else f'running-{secrets.token_hex(8)}'
+        # A History Server dates an incomplete attempt by its log's last write, so the key moves as the log grows.
+        version = (
+            f'{attempt.get("endTimeEpoch")}-{attempt.get("lastUpdatedEpoch")}'
+            if finished
+            else f'incomplete-{attempt.get("lastUpdatedEpoch")}'
+        )
         remove_superseded(directory, version)
         target = directory / version
-        if (target / _RECORD).is_file():
+        if (target / _RECORD).is_file() and (finished or not json.loads((target / _RECORD).read_text())['rest_rebuild']):
             used(target)
             return target
         partial = directory / f'{version}{PARTIAL_MARK}{os.getpid()}-{secrets.token_hex(4)}'
@@ -170,6 +180,9 @@ class HistoryServerLocation:
             if not unpacked:
                 name = _safe(str(application['id'])) + ('' if finished else '.inprogress')
                 write_rebuilt_log(client, app_path, application, attempt, files / name)
+                if not finished:
+                    # A driver UI dates a running attempt by its start, so its rebuild is never reused.
+                    target = directory / f'running-{secrets.token_hex(8)}'
             (partial / _RECORD).write_text(json.dumps({'rest_rebuild': not unpacked}))
             try:
                 partial.rename(target)
@@ -183,7 +196,7 @@ class HistoryServerLocation:
 
 
 def _recent(client: RestClient) -> list[dict[str, Any]]:
-    """The server's five most recent applications."""
+    """The server's most recent applications, as many as `_RECENT`."""
     listed = client.json('applications', {'limit': _RECENT})
     if not isinstance(listed, list):
         raise _not_rest(client.url('applications'))
