@@ -16,7 +16,8 @@ from sparkxray.rules.spark_settings import DYNAMIC_ALLOCATION
 from sparkxray.rules.spark_settings import EXECUTOR_MEMORY
 from sparkxray.rules.spark_settings import memory_setting_bytes
 from sparkxray.rules.spark_settings import spark_settings_cte
-from sparkxray.tables.registry import EXECUTOR_TIME_CTES
+from sparkxray.tables.registry import CORE_TIME_CTES
+from sparkxray.tables.registry import GLUE_DPU_CORES
 
 if TYPE_CHECKING:
     from sparkxray.tables.relations import Tables
@@ -25,33 +26,20 @@ _ALLOCATION_DOCS = 'https://spark.apache.org/docs/latest/job-scheduling.html#dyn
 _MEMORY_DOCS = 'https://spark.apache.org/docs/latest/tuning.html#memory-management-overview'
 # DataFlint MemoryAlertsReducer.ts: ask for 20% more than the heap that filled, or keep 20% over the peak.
 _HEADROOM = 1.2
-# A Glue DPU is 4 vCPUs and 16 GB.
-_GLUE_DPU_CORES = 4
 _TASK_PEAKS_REASON = (
     "peak heap comes from each task's end-of-task poll, which misses the heap between polls; "
     'set spark.eventLog.logStageExecutorMetrics=true for per-stage peaks'
 )
 
 _IDLE_CORES_SQL = f"""
-WITH {EXECUTOR_TIME_CTES}, {spark_settings_cte(DYNAMIC_ALLOCATION)}, workers AS (
-  -- The executors, or the driver alone where there are none, as in local mode, where it runs the tasks.
-  SELECT lifetimes.is_driver, lifetimes.lifetime_ms * lifetimes.core_count AS core_time_ms,
-    least(coalesce(task_totals.task_time_ms, 0) * task_cpus.cpus, lifetimes.lifetime_ms * lifetimes.core_count) AS task_core_time_ms
-  FROM lifetimes LEFT JOIN task_totals USING (executor_id), task_cpus
-  WHERE (NOT lifetimes.is_driver OR NOT EXISTS (SELECT 1 FROM executors WHERE NOT is_driver))
-    AND lifetimes.core_count > 0 AND lifetimes.lifetime_ms > 0
-), totals AS (
-  SELECT count(*) AS executor_count, bool_or(is_driver) AS driver_ran_tasks,
-    sum(core_time_ms) AS core_time_ms, sum(task_core_time_ms) AS task_core_time_ms
-  FROM workers
-)
+WITH {CORE_TIME_CTES}, {spark_settings_cte(DYNAMIC_ALLOCATION)}, totals AS (SELECT * FROM core_totals)
 SELECT 'medium' AS severity, totals.executor_count, totals.driver_ran_tasks,
   round(totals.core_time_ms / 3600000, 4) AS core_hours,
   round(totals.task_core_time_ms / 3600000, 4) AS task_core_hours,
   round((totals.core_time_ms - totals.task_core_time_ms) / 3600000, 4) AS idle_core_hours,
   round(1 - totals.task_core_time_ms / totals.core_time_ms, 4) AS idle_core_share,
   CASE WHEN application.platform = 'glue'
-    THEN round((totals.core_time_ms - totals.task_core_time_ms) / 3600000 / {_GLUE_DPU_CORES}, 4) END AS idle_dpu_hours,
+    THEN round((totals.core_time_ms - totals.task_core_time_ms) / 3600000 / {GLUE_DPU_CORES}, 4) END AS idle_dpu_hours,
   lower(coalesce(spark_settings."{DYNAMIC_ALLOCATION}", 'false')) = 'true' AS dynamic_allocation_enabled
 FROM totals, application, spark_settings
 WHERE totals.core_time_ms > 0 AND 1 - totals.task_core_time_ms / totals.core_time_ms > $min_idle_share

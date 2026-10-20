@@ -15,6 +15,7 @@ from sparkxray_cli import logs
 from sparkxray_cli import metrics
 from sparkxray_cli import plans
 from sparkxray_cli import render
+from sparkxray_cli import reports
 from sparkxray_cli import rules
 from sparkxray_cli import sql
 from sparkxray_cli import stages
@@ -47,6 +48,7 @@ app.add_typer(sql.app, name='sql', rich_help_panel=_READING)
 app.add_typer(plans.app, name='plans', rich_help_panel=_READING)
 app.add_typer(tables.app, name='tables', rich_help_panel=_READING)
 app.add_typer(findings.app, name='findings', rich_help_panel=_FINDING)
+app.add_typer(reports.app, name='reports', rich_help_panel=_FINDING)
 app.add_typer(rules.app, name='rules', rich_help_panel=_LEARNING)
 app.add_typer(metrics.app, name='metrics', rich_help_panel=_LEARNING)
 

@@ -7,7 +7,6 @@ A table shows each value in the unit its column's name ends in, as the Spark UI 
 from __future__ import annotations
 
 import contextlib
-import datetime as dt
 import json
 import sys
 from collections.abc import Iterator
@@ -21,11 +20,10 @@ from rich.console import Console
 from rich.console import JustifyMethod
 from rich.table import Table
 from rich.text import Text
+from sparkxray import spark_ui_format
 from sparkxray.errors import SparkxrayError
 from sparkxray.ingest import IngestManifest
 from sparkxray.rules import Severity
-from sparkxray.spark_ui_format import bytes_to_string
-from sparkxray.spark_ui_format import format_duration
 from sparkxray.tables.registry import column_unit
 from sparkxray.tables.rows import Rows
 
@@ -39,12 +37,16 @@ SEVERITY_STYLES: Mapping[Severity, str] = {
     'high': 'red',
     'critical': 'bold red',
 }
-_GROUPED_UNITS = frozenset({'count', 'records', 'rows'})
 
 
 def emit_json(data: Any) -> None:
     """Print data as JSON with a bare print, so no markup or color reaches a pipe."""
     print(json.dumps(data, indent=2))
+
+
+def emit_text(text: str) -> None:
+    """Write rendered text to stdout as it is, so no markup or color reaches a pipe."""
+    sys.stdout.write(text)
 
 
 def shown(name: str, value: Any) -> str:
@@ -53,34 +55,8 @@ def shown(name: str, value: Any) -> str:
 
 
 def shown_in(unit: str | None, value: Any) -> str:
-    """A value as a person reads it, in a unit `column_unit` or a threshold names."""
-    if value is None:
-        return ''
-    if isinstance(value, bool):
-        return 'yes' if value else 'no'
-    if isinstance(value, list):
-        return ', '.join(shown_in(unit, item) for item in value)
-    if isinstance(value, dict):
-        return ', '.join(f'{key}={item}' for key, item in value.items())
-    if not isinstance(value, int | float):
-        return str(value)
-    if unit == 'bytes':
-        return bytes_to_string(int(value))
-    if unit == 'ms':
-        return format_duration(int(value))
-    if unit == 'ns':
-        return format_duration(int(value) // 1_000_000)
-    if unit == 's':
-        return format_duration(round(value * 1000))
-    if unit == 'epoch_ms':
-        return dt.datetime.fromtimestamp(value / 1000).strftime('%Y-%m-%d %H:%M:%S')
-    if unit == 'fraction':
-        return f'{value * 100:.1f}%'
-    if unit == 'x':
-        return f'{value:g}x'
-    if unit in _GROUPED_UNITS:
-        return f'{int(value):,}' if float(value).is_integer() else f'{value:,}'
-    return str(value)
+    """A value as a person reads it, in a unit `column_unit` or a threshold names, an instant in local time."""
+    return spark_ui_format.shown_in(unit, value, local_time=True)
 
 
 def table(*, title: str | None = None, show_header: bool = True) -> Table:

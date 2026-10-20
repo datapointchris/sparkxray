@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from sparkxray.rules import Severity
 
 LogArgument = Annotated[
     str,
@@ -38,6 +39,7 @@ ThresholdOption = Annotated[
         show_default=False,
     ),
 ]
+FailOnOption = Annotated[Severity, typer.Option('--fail-on', help='Exit 3 when a finding is at or above this severity, listed or not.')]
 ThresholdFileOption = Annotated[
     Path | None,
     typer.Option(

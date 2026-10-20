@@ -36,7 +36,8 @@ WITH walls AS (
     sum(shuffle_write_bytes)::BIGINT AS shuffle_write_bytes,
     sum(memory_spilled_bytes)::BIGINT AS memory_spilled_bytes,
     sum(disk_spilled_bytes)::BIGINT AS disk_spilled_bytes,
-    sum(jvm_gc_time_ms)::BIGINT AS gc_time_ms
+    sum(jvm_gc_time_ms)::BIGINT AS gc_time_ms,
+    round(sum(jvm_gc_time_ms) / nullif(sum(executor_run_time_ms), 0), 4) AS gc_share
   FROM tasks_effective GROUP BY stage_id
 )
 SELECT attempts.stage_id, attempts.name, attempts.status, attempts.attempt_count,
@@ -45,7 +46,7 @@ SELECT attempts.stage_id, attempts.name, attempts.status, attempts.attempt_count
   effective.durations[len(effective.durations) // 2 + 1] AS median_task_duration_ms,
   list_max(effective.durations) AS max_task_duration_ms,
   effective.input_bytes, effective.output_bytes, effective.shuffle_read_bytes, effective.shuffle_write_bytes,
-  effective.memory_spilled_bytes, effective.disk_spilled_bytes, effective.gc_time_ms
+  effective.memory_spilled_bytes, effective.disk_spilled_bytes, effective.gc_time_ms, effective.gc_share
 FROM attempts
 LEFT JOIN task_attempts USING (stage_id)
 LEFT JOIN effective USING (stage_id)

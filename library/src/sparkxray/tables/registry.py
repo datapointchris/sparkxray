@@ -844,6 +844,23 @@ OWN_SPILLS_CTE = """spill_sizes AS (
   ) AS enclosed USING (execution_id, plan_version, node_id)
 )"""
 
+# A Glue DPU is 4 vCPUs and 16 GB.
+GLUE_DPU_CORES = 4
+
+# The core time the run held and the part its tasks used. The executors hold it, or the driver alone
+# where there are none, as in local mode, where it runs the tasks.
+CORE_TIME_CTES = f"""{EXECUTOR_TIME_CTES}, workers AS (
+  SELECT lifetimes.is_driver, lifetimes.lifetime_ms * lifetimes.core_count AS core_time_ms,
+    least(coalesce(task_totals.task_time_ms, 0) * task_cpus.cpus, lifetimes.lifetime_ms * lifetimes.core_count) AS task_core_time_ms
+  FROM lifetimes LEFT JOIN task_totals USING (executor_id), task_cpus
+  WHERE (NOT lifetimes.is_driver OR NOT EXISTS (SELECT 1 FROM executors WHERE NOT is_driver))
+    AND lifetimes.core_count > 0 AND lifetimes.lifetime_ms > 0
+), core_totals AS (
+  SELECT count(*) AS executor_count, bool_or(is_driver) AS driver_ran_tasks,
+    sum(core_time_ms) AS core_time_ms, sum(task_core_time_ms) AS task_core_time_ms
+  FROM workers
+)"""
+
 # Each stage's and SQL execution's wall time, and its share of the run's. A stage runs from its
 # first attempt's submission to its last completion, or to its last task's finish where it never
 # completed. An execution still running when the log ended runs to the run's end.

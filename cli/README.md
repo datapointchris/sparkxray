@@ -17,6 +17,7 @@ Every command is `sparkxray <resource> <verb> LOG`, where `LOG` is a log file or
 ```bash
 sparkxray findings list LOG                  # what slowed the run, worst first
 sparkxray findings list LOG --fail-on critical   # exit 3 on a critical finding, for a CI step
+sparkxray reports write LOG --out report.md      # the findings and the run behind them, as Markdown
 sparkxray stages list LOG --sort wall_ms -n 5
 sparkxray tables query LOG "select count(*) from tasks"
 ```

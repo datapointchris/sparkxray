@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sparkxray report",
+  "description": "One analyzed Spark log: the application, its log, the core time it held, what the rules found, its longest stages, every SQL execution with its last plan, every executor and the settings the rules reason about. The same log, thresholds and sparkxray version give the same bytes. A field removed or a meaning changed raises schema_version, and a field added does not.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_by", "app", "log", "usage", "findings", "skipped_rules", "stages", "sql", "executors", "config"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "generated_by": {"type": "string", "description": "The sparkxray version that wrote it, as `sparkxray 0.9.0`."},
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app_id", "app_name", "spark_version", "platform", "start_epoch_ms", "end_epoch_ms", "wall_time_ms"],
+      "properties": {
+        "app_id": {"type": "string"},
+        "app_name": {"type": ["string", "null"]},
+        "spark_version": {"type": ["string", "null"]},
+        "platform": {"type": "string", "description": "glue, emr-serverless, emr-ec2, databricks, local or other."},
+        "start_epoch_ms": {"type": ["integer", "null"]},
+        "end_epoch_ms": {"type": ["integer", "null"], "description": "Null where the log ends before the application did."},
+        "wall_time_ms": {"type": ["integer", "null"], "description": "From the start to the end, or to the last thing the log saw finish."}
+      }
+    },
+    "log": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "layout", "files", "size_bytes", "compacted", "in_progress", "truncated_tail", "lacks", "tables_key"],
+      "properties": {
+        "source": {"type": "string", "description": "The location read, as a file:// or s3:// URI."},
+        "layout": {"type": "string"},
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["uri", "size_bytes", "codec"],
+            "properties": {"uri": {"type": "string"}, "size_bytes": {"type": "integer"}, "codec": {"type": "string"}}
+          }
+        },
+        "size_bytes": {"type": "integer"},
+        "compacted": {"type": "boolean"},
+        "in_progress": {"type": "boolean"},
+        "truncated_tail": {"type": "boolean"},
+        "lacks": {"type": "array", "items": {"type": "string"}, "description": "What Spark wrote the log without, by default: stage_executor_metrics, block_updates, process_tree_metrics."},
+        "tables_key": {"type": "string", "description": "The SHA-256 naming the tables built from the log, over its files and sparkxray's version."}
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The core time the executors held, or the driver where it ran the tasks, and how much ran no task. DPU-hours are set on Glue alone, at 4 vCPUs a DPU.",
+      "required": ["core_hours", "task_core_hours", "idle_core_hours", "idle_core_share", "dpu_hours", "idle_dpu_hours"],
+      "properties": {
+        "core_hours": {"type": ["number", "null"]},
+        "task_core_hours": {"type": ["number", "null"]},
+        "idle_core_hours": {"type": ["number", "null"]},
+        "idle_core_share": {"type": ["number", "null"]},
+        "dpu_hours": {"type": ["number", "null"]},
+        "idle_dpu_hours": {"type": ["number", "null"]}
+      }
+    },
+    "findings": {"type": "array", "items": {"$ref": "findings.json#/$defs/finding"}, "description": "What the rules found, in the analysis's order."},
+    "skipped_rules": {"type": "array", "items": {"$ref": "findings.json#/$defs/skipped_rule"}},
+    "stages": {
+      "type": "array",
+      "description": "The longest stages by wall time, longest first.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage_id", "name", "status", "attempt_count", "task_count", "failed_task_count", "wall_ms", "wall_share",
+          "median_task_duration_ms", "max_task_duration_ms", "shuffle_read_bytes", "memory_spilled_bytes", "disk_spilled_bytes", "gc_share"
+        ],
+        "properties": {
+          "stage_id": {"type": "integer"},
+          "name": {"type": ["string", "null"]},
+          "status": {"enum": ["complete", "failed", "active"]},
+          "attempt_count": {"type": "integer"},
+          "task_count": {"type": "integer"},
+          "failed_task_count": {"type": "integer"},
+          "wall_ms": {"type": ["integer", "null"]},
+          "wall_share": {"type": ["number", "null"]},
+          "median_task_duration_ms": {"type": ["integer", "null"]},
+          "max_task_duration_ms": {"type": ["integer", "null"]},
+          "shuffle_read_bytes": {"type": ["integer", "null"]},
+          "memory_spilled_bytes": {"type": ["integer", "null"]},
+          "disk_spilled_bytes": {"type": ["integer", "null"]},
+          "gc_share": {"type": ["number", "null"], "description": "JVM GC time over task run time, across the stage's effective tasks."}
+        }
+      }
+    },
+    "sql": {
+      "type": "array",
+      "description": "Every SQL execution, by id.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "execution_id", "description", "status", "start_epoch_ms", "duration_ms", "wall_share", "job_count", "stage_count",
+          "plan_version_count", "node_count", "exchange_count", "join_count", "scan_count", "finding_ids", "aqe_changes", "plan"
+        ],
+        "properties": {
+          "execution_id": {"type": "integer"},
+          "description": {"type": ["string", "null"]},
+          "status": {"enum": ["complete", "failed", "running"]},
+          "start_epoch_ms": {"type": ["integer", "null"]},
+          "duration_ms": {"type": ["integer", "null"]},
+          "wall_share": {"type": ["number", "null"]},
+          "job_count": {"type": "integer"},
+          "stage_count": {"type": "integer"},
+          "plan_version_count": {"type": "integer"},
+          "node_count": {"type": "integer"},
+          "exchange_count": {"type": "integer"},
+          "join_count": {"type": "integer"},
+          "scan_count": {"type": "integer"},
+          "finding_ids": {"type": "array", "items": {"type": "string"}, "description": "The findings about the execution or a stage it ran."},
+          "aqe_changes": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/aqe_changes"}], "description": "Null where AQE never re-planned it."},
+          "plan": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/plan"}], "description": "Its last plan with each node's numbers. Null where the log holds no plan."}
+        }
+      }
+    },
+    "executors": {
+      "type": "array",
+      "description": "The driver, then each executor by id.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "executor_id", "host", "is_driver", "core_count", "executor_memory_bytes", "add_epoch_ms", "remove_epoch_ms", "lifetime_ms",
+          "task_count", "failed_task_count", "idle_share", "peak_jvm_heap_bytes", "peak_memory_source", "remove_reason"
+        ],
+        "properties": {
+          "executor_id": {"type": "string"},
+          "host": {"type": ["string", "null"]},
+          "is_driver": {"type": "boolean"},
+          "core_count": {"type": ["integer", "null"]},
+          "executor_memory_bytes": {"type": ["integer", "null"]},
+          "add_epoch_ms": {"type": ["integer", "null"]},
+          "remove_epoch_ms": {"type": ["integer", "null"]},
+          "lifetime_ms": {"type": ["integer", "null"]},
+          "task_count": {"type": "integer"},
+          "failed_task_count": {"type": "integer"},
+          "idle_share": {"type": ["number", "null"]},
+          "peak_jvm_heap_bytes": {"type": ["integer", "null"]},
+          "peak_memory_source": {"type": ["string", "null"]},
+          "remove_reason": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "config": {
+      "type": "array",
+      "description": "The settings the rules reason about, by key. A value of null is a key the run left unset, at Spark's default.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "value"],
+        "properties": {"key": {"type": "string"}, "value": {"type": ["string", "null"]}}
+      }
+    }
+  },
+  "$defs": {
+    "aqe_changes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["update_count", "operators", "shuffle_reads", "joins"],
+      "properties": {
+        "update_count": {"type": ["integer", "null"], "description": "How many times AQE re-planned the execution."},
+        "operators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operator", "initial_count", "final_count"],
+            "properties": {"operator": {"type": "string"}, "initial_count": {"type": "integer"}, "final_count": {"type": "integer"}}
+          }
+        },
+        "shuffle_reads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "node_id", "kind", "exchange_partition_count", "partition_count", "coalesced_partition_count", "skewed_partition_count",
+              "skewed_split_count", "empty_partition_count", "data_bytes"
+            ],
+            "properties": {
+              "node_id": {"type": "integer"},
+              "kind": {"type": ["string", "null"]},
+              "exchange_partition_count": {"type": ["integer", "null"]},
+              "partition_count": {"type": ["integer", "null"]},
+              "coalesced_partition_count": {"type": ["integer", "null"]},
+              "skewed_partition_count": {"type": ["integer", "null"]},
+              "skewed_split_count": {"type": ["integer", "null"]},
+              "empty_partition_count": {"type": ["integer", "null"]},
+              "data_bytes": {"type": ["integer", "null"]}
+            }
+          }
+        },
+        "joins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["initial_node_id", "final_node_id", "initial_operator", "final_operator", "join_type", "left_keys", "right_keys", "skew_split"],
+            "properties": {
+              "initial_node_id": {"type": "integer"},
+              "final_node_id": {"type": "integer"},
+              "initial_operator": {"type": "string"},
+              "final_operator": {"type": "string"},
+              "join_type": {"type": ["string", "null"]},
+              "left_keys": {"type": "array", "items": {"type": "string"}},
+              "right_keys": {"type": "array", "items": {"type": "string"}},
+              "skew_split": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "last_version", "is_final", "truncated", "source", "stage_ids", "nodes"],
+      "properties": {
+        "version": {"type": "integer"},
+        "last_version": {"type": "integer"},
+        "is_final": {"type": "boolean"},
+        "truncated": {"type": "boolean"},
+        "source": {"type": "string"},
+        "stage_ids": {"type": "array", "items": {"type": "integer"}},
+        "nodes": {"type": "array", "items": {"$ref": "#/$defs/plan_node"}, "description": "Each node in pre-order, as plan_nodes and every finding number them."}
+      }
+    },
+    "plan_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number", "parent", "children", "subqueries", "operator", "label", "headline", "details", "runtime_size_bytes",
+        "runtime_row_count", "stage_ids", "metrics", "finding_ids"
+      ],
+      "properties": {
+        "number": {"type": "integer"},
+        "parent": {"type": ["integer", "null"]},
+        "children": {"type": "array", "items": {"type": "integer"}},
+        "subqueries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["subquery_id", "root"],
+            "properties": {"subquery_id": {"type": ["integer", "null"]}, "root": {"type": "integer"}}
+          }
+        },
+        "operator": {"type": "string"},
+        "label": {"type": "string"},
+        "headline": {"type": "string", "description": "The operator and what it does, without expression ids."},
+        "details": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["join_type", "left_keys", "right_keys", "condition", "scan_format", "location", "partitioning", "shuffle_read"],
+          "properties": {
+            "join_type": {"type": ["string", "null"]},
+            "left_keys": {"type": ["array", "null"], "items": {"type": "string"}},
+            "right_keys": {"type": ["array", "null"], "items": {"type": "string"}},
+            "condition": {"type": ["string", "null"]},
+            "scan_format": {"type": ["string", "null"]},
+            "location": {"type": ["string", "null"]},
+            "partitioning": {"type": ["string", "null"]},
+            "shuffle_read": {"type": ["string", "null"]}
+          }
+        },
+        "runtime_size_bytes": {"type": ["integer", "null"]},
+        "runtime_row_count": {"type": ["integer", "null"]},
+        "stage_ids": {"type": "array", "items": {"type": "integer"}},
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "A metric the node declares, aggregated as the SQL tab aggregates it. total, min, median and max are in unit.",
+            "required": ["name", "metric_type", "unit", "value_count", "total", "min", "median", "max", "max_stage_id", "max_task_id"],
+            "properties": {
+              "name": {"type": "string"},
+              "metric_type": {"type": ["string", "null"]},
+              "unit": {"type": ["string", "null"]},
+              "value_count": {"type": "integer"},
+              "total": {"type": ["number", "null"]},
+              "min": {"type": ["number", "null"]},
+              "median": {"type": ["number", "null"]},
+              "max": {"type": ["number", "null"]},
+              "max_stage_id": {"type": ["integer", "null"]},
+              "max_task_id": {"type": ["integer", "null"]}
+            }
+          }
+        },
+        "finding_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

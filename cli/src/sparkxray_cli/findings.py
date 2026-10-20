@@ -14,6 +14,7 @@ from sparkxray.rules import Severity
 from sparkxray_cli import render
 from sparkxray_cli.log_opening import analyze_log
 from sparkxray_cli.log_opening import open_log
+from sparkxray_cli.shared_parameters import FailOnOption
 from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import LimitOption
 from sparkxray_cli.shared_parameters import LogArgument
@@ -48,9 +49,7 @@ def list_findings(
     ] = None,
     threshold: ThresholdOption = None,
     thresholds: ThresholdFileOption = None,
-    fail_on: Annotated[
-        Severity, typer.Option('--fail-on', help='Exit 3 when a finding is at or above this severity, listed or not.')
-    ] = 'high',
+    fail_on: FailOnOption = 'high',
     limit: LimitOption = None,
     as_json: JsonOption = False,
 ) -> None:
@@ -75,6 +74,12 @@ def list_findings(
             render.note(f"skipped {skipped.rule_id}: it runs on explain(mode='cost') text only")
         else:
             render.note(f'skipped {skipped.rule_id}: the log holds no {", ".join(skipped.missing_signals)}')
+    exit_if_gated(analysis, fail_on)
+
+
+def exit_if_gated(analysis: Analysis, fail_on: Severity) -> None:
+    """Exit 3, naming the findings, when one is at or above `fail_on`."""
+    gate = analysis.gate(fail_on)
     if not gate.passed:
         render.note(f'{len(gate.blocking)} at or above {fail_on}: {", ".join(gate.blocking)}')
         raise typer.Exit(3)
