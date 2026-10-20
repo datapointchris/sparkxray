@@ -79,7 +79,7 @@ def shown_in(unit: str | None, value: Any) -> str:
     if unit == 'x':
         return f'{value:g}x'
     if unit in _GROUPED_UNITS:
-        return f'{value:,}'
+        return f'{int(value):,}' if float(value).is_integer() else f'{value:,}'
     return str(value)
 
 
@@ -194,6 +194,28 @@ def print_record(record: Mapping[str, Any], keys: Sequence[str] | None = None, *
     for key in keys or list(record):
         if key in record:
             printed.add_row(Text(key), Text(shown(key, record[key]), style=_style(key, record[key])))
+    print_table(printed)
+
+
+def print_described(
+    title: str, records: Sequence[Mapping[str, Any]], columns: Sequence[str], *, summary: str = '', location: str | None = None
+) -> None:
+    """Print a titled table whose last column is prose that wraps, every other column kept whole on its line.
+
+    `summary` and then `location` print between the title and the table. A location is never
+    wrapped, so a path pastes whole.
+    """
+    stdout.print(Text(title, style='bold'))
+    if summary:
+        stdout.print(Text(summary))
+    if location:
+        stdout.print(Text(location, style='dim'), soft_wrap=True)
+    printed = table()
+    for column in columns[:-1]:
+        printed.add_column(header(column), no_wrap=True)
+    printed.add_column(header(columns[-1]))
+    for record in records:
+        printed.add_row(*(Text(shown(column, record.get(column))) for column in columns))
     print_table(printed)
 
 

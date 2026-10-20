@@ -1,0 +1,792 @@
+{
+  "app.driver-gaps": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "the whole run",
+    "finding_id": "app.driver-gaps:app",
+    "severity": "medium",
+    "title": "No job ran for 1.3 min in 1 gap between jobs",
+    "scope": "the application",
+    "evidence": {
+      "gap_count": 1,
+      "total_gap_ms": 75033,
+      "longest_gap_ms": 75033,
+      "gap_lengths_ms": [
+        75033
+      ],
+      "next_job_ids": [
+        13
+      ],
+      "driver_time_share": 0.4838
+    }
+  },
+  "app.failed-jobs": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "the whole run",
+    "finding_id": "app.failed-jobs:app",
+    "severity": "high",
+    "title": "1 of 74 jobs failed",
+    "scope": "the application",
+    "evidence": {
+      "failed_job_count": 1,
+      "cancelled_job_count": 0,
+      "job_count": 74,
+      "failed_job_ids": [
+        2
+      ],
+      "first_failure_reason": "Job aborted due to stage failure: Task 0 in stage 2.0 failed 4 times, most recent failure: Lost task 0.3 in stage 2.0 (TID 31) (172.17.0.2 executor 1): org.apache.spark.api.python.PythonException: RuntimeError: seeded failure on every attempt"
+    }
+  },
+  "app.many-small-jobs": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "the whole run",
+    "finding_id": "app.many-small-jobs:app",
+    "severity": "low",
+    "title": "69 of 74 jobs ran for 9 s in all",
+    "scope": "the application",
+    "evidence": {
+      "short_job_count": 69,
+      "job_count": 74,
+      "short_job_time_ms": 9495,
+      "most_common_job_name": "fires=; silent=stage.tiny-tasks; 60 one-task jobs of under a second each",
+      "most_common_job_count": 60
+    }
+  },
+  "config.aqe-off": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "the whole run",
+    "finding_id": "config.aqe-off:app",
+    "severity": "medium",
+    "title": "AQE was off for 1 of 5 SQL executions",
+    "scope": "the application",
+    "evidence": {
+      "spark_version": "3.5.9",
+      "adaptive_setting": null,
+      "aqe_off_execution_count": 1,
+      "sql_execution_count": 5,
+      "aqe_off_execution_ids": [
+        4
+      ]
+    }
+  },
+  "config.event-log-incomplete": {
+    "source": "logs/spark-3.5.9/local-1792406949080.zstd",
+    "description": null,
+    "finding_id": "config.event-log-incomplete:app",
+    "severity": "info",
+    "title": "The log holds no stage executor metrics, so peak memory comes from task-end polls",
+    "scope": "the application",
+    "evidence": {
+      "log_stage_executor_metrics_setting": null,
+      "executor_count": 1,
+      "task_peak_executor_count": 1,
+      "unmeasured_executor_count": 0
+    }
+  },
+  "config.shuffle-partitions-too-few": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "the whole run; the edit raises executor 0's heap peak, and the driver's, to 97% of 1 GiB",
+    "finding_id": "config.shuffle-partitions-too-few:app",
+    "severity": "medium",
+    "title": "Shuffle partitions stayed at the default 200 while a stage read 1120.8 MiB per task",
+    "scope": "the application",
+    "evidence": {
+      "shuffle_partitions_setting": null,
+      "stage_count": 1,
+      "stage_ids": [
+        9
+      ],
+      "max_average_shuffle_read_bytes": 1175210426,
+      "max_stage_shuffle_read_bytes": 235042085194,
+      "suggested_shuffle_partition_count": 3503
+    }
+  },
+  "config.skew-join-off-with-skew": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "shuffled hash join with skew joins off for the session: 1.5M of 1.66M left rows share key 0",
+    "finding_id": "config.skew-join-off-with-skew:s8",
+    "severity": "low",
+    "title": "AQE's skew join was off for stage 8, whose largest join partition read 408.4 MiB",
+    "scope": "SQL 1 \u203a ShuffledHashJoin [k#9L], [k#21L], Inner, BuildRight \u203a stage 8",
+    "evidence": {
+      "aqe_enabled": true,
+      "skew_join_setting": "false",
+      "max_shuffle_read_bytes": 428273428,
+      "median_shuffle_read_bytes": 2909952,
+      "shuffle_read_bytes_ratio": 147.18,
+      "skew_finding_id": "stage.shuffle-skew:s8",
+      "stage_wall_share": 0.0051
+    }
+  },
+  "executor.driver-memory-under": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "the whole run; the edit raises executor 0's heap peak, and the driver's, to 97% of 1 GiB",
+    "finding_id": "executor.driver-memory-under:xdriver",
+    "severity": "high",
+    "title": "The driver's heap peaked at 97% of its 1024.0 MiB",
+    "scope": "executor driver",
+    "evidence": {
+      "peak_jvm_heap_bytes": 1041529569,
+      "driver_memory_bytes": 1073741824,
+      "peak_memory_share": 0.97,
+      "peak_memory_source": "stage_executor_metrics",
+      "driver_memory_source": "default",
+      "suggested_driver_memory_bytes": 1288490189
+    }
+  },
+  "executor.idle-cores": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "the whole run",
+    "finding_id": "executor.idle-cores:app",
+    "severity": "medium",
+    "title": "Cores sat idle for 65% of the time executors held them",
+    "scope": "the application",
+    "evidence": {
+      "executor_count": 3,
+      "driver_ran_tasks": false,
+      "core_hours": 0.1843,
+      "task_core_hours": 0.0646,
+      "idle_core_hours": 0.1197,
+      "idle_core_share": 0.6497,
+      "idle_dpu_hours": null,
+      "dynamic_allocation_enabled": false
+    }
+  },
+  "executor.lost": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "the whole run",
+    "finding_id": "executor.lost:x1",
+    "severity": "high",
+    "title": "Executor 1 was lost: Command exited with code 52",
+    "scope": "executor 1",
+    "evidence": {
+      "host": "172.17.0.2",
+      "removal_summary": "Command exited with code 52",
+      "remove_reason": "Command exited with code 52",
+      "exit_code": "52",
+      "lost_task_count": 2,
+      "oom_task_count": 1
+    }
+  },
+  "executor.memory-over": {
+    "source": "logs/apache-spark-events/application_1553914137147_0018.zstd",
+    "description": null,
+    "finding_id": "executor.memory-over:app",
+    "severity": "low",
+    "title": "No executor used more than 13% of its 7.0 GiB heap",
+    "scope": "the application",
+    "evidence": {
+      "peak_executor_id": "1",
+      "peak_jvm_heap_bytes": 984736560,
+      "executor_memory_bytes": 7516192768,
+      "peak_memory_share": 0.131,
+      "peak_memory_source": "stage_executor_metrics",
+      "executor_memory_source": "spark.executor.memory",
+      "measured_executor_count": 3,
+      "suggested_executor_memory_bytes": 1181683872,
+      "gc_share": 0.0039
+    }
+  },
+  "executor.memory-under": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "the whole run; the edit raises executor 0's heap peak, and the driver's, to 97% of 1 GiB",
+    "finding_id": "executor.memory-under:app",
+    "severity": "high",
+    "title": "Executor 0 peaked at 97% of its 1024.0 MiB heap",
+    "scope": "the application",
+    "evidence": {
+      "peak_executor_id": "0",
+      "peak_jvm_heap_bytes": 1041529569,
+      "executor_memory_bytes": 1073741824,
+      "peak_memory_share": 0.97,
+      "peak_memory_source": "stage_executor_metrics",
+      "executor_memory_source": "resource_profile",
+      "measured_executor_count": 2,
+      "suggested_executor_memory_bytes": 1288490189
+    }
+  },
+  "plan.broadcast-too-large": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "broadcast join whose build side is over 1 GiB",
+    "finding_id": "plan.broadcast-too-large:e8n7",
+    "severity": "high",
+    "title": "BroadcastExchange copies 2.0 GiB to every executor",
+    "scope": "SQL 8 \u203a BroadcastExchange HashedRelationBroadcastMode(List(input[0, bigint, false]),false), [plan_id=447]",
+    "evidence": {
+      "broadcast_bytes": 2157083648,
+      "broadcast_rows": 1200000,
+      "collect_time_ms": 380,
+      "build_time_ms": 2538,
+      "broadcast_time_ms": 465,
+      "sql_execution_wall_share": 0.1687
+    }
+  },
+  "plan.cartesian": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "cross join of two tables",
+    "finding_id": "plan.cartesian:e6n1",
+    "severity": "info",
+    "title": "CartesianProduct compares every row of one input with every row of the other",
+    "scope": "SQL 6 \u203a CartesianProduct",
+    "evidence": {
+      "join_operator": "CartesianProduct",
+      "left_input_rows": 4000,
+      "right_input_rows": 4000,
+      "cross_join_scanned_rows": 16000000,
+      "output_rows": 1000000,
+      "sql_execution_wall_share": 0.0156
+    }
+  },
+  "plan.estimate-unreliable": {
+    "source": "explain/spark-3.5.9-plan-rules/cost-mode.json",
+    "description": "join of two tables with no statistics",
+    "finding_id": "plan.estimate-unreliable:plan",
+    "severity": "info",
+    "title": "The optimizer estimates Join at 2.8 GiB, over 403.6 KiB of input",
+    "scope": "the application",
+    "evidence": {
+      "logical_operator": "Join",
+      "logical_label": "Join Inner, (id#426L = id#430L)",
+      "estimated_bytes": 3006477107,
+      "relation_bytes": 413286,
+      "estimate_ratio": 7274.567991657109
+    }
+  },
+  "plan.exploding-join": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "join on two keys, each matching thousands of rows on both sides",
+    "finding_id": "plan.exploding-join:e5n3",
+    "severity": "high",
+    "title": "SortMergeJoin emits 110,000,000 rows, 5,500\u00d7 its largest input",
+    "scope": "SQL 5 \u203a SortMergeJoin [k#48L], [k#54L], Inner",
+    "evidence": {
+      "node_operator": "SortMergeJoin",
+      "output_rows": 110000000,
+      "input_rows": [
+        20000,
+        11000
+      ],
+      "largest_input_rows": 20000,
+      "output_to_input_ratio": 5500,
+      "sql_execution_wall_share": 0.1991
+    }
+  },
+  "plan.filter-not-pushed": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "filter on a column cast to a string, which Parquet cannot take",
+    "finding_id": "plan.filter-not-pushed:e17n1",
+    "severity": "info",
+    "title": "A filter over InMemoryFileIndex [file:/data/plan-rules/t] checks every row read, because the scan could not take it",
+    "scope": "SQL 17 \u203a Filter (isnotnull(id#254L) AND StartsWith(cast(id#254L as string), 9))",
+    "evidence": {
+      "unpushed_conditions": [
+        "StartsWith(cast(id#254L as string), 9)"
+      ],
+      "pushed_filters": "[IsNotNull(id)]",
+      "scan_location": "InMemoryFileIndex [file:/data/plan-rules/t]",
+      "read_bytes": 406062,
+      "scan_output_rows": 100000,
+      "filter_output_rows": 11111,
+      "sql_execution_wall_share": 0.002
+    }
+  },
+  "plan.long-filter": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "filter whose condition compares one column with 200 values",
+    "finding_id": "plan.long-filter:e21n1",
+    "severity": "low",
+    "title": "A filter condition runs 4,313 characters",
+    "scope": "SQL 21 \u203a Filter (((((((((id#290L = 0) OR (id#290L = 14)) OR ((id#290L = 28) OR (id#290L = 42))) OR (((id#2...",
+    "evidence": {
+      "condition_character_count": 4313,
+      "sql_execution_wall_share": 0.0182
+    }
+  },
+  "plan.many-exchanges": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "repartition, two aggregations on different keys, then a sort: four exchanges",
+    "finding_id": "plan.many-exchanges:e16",
+    "severity": "info",
+    "title": "The query shuffles 4 times",
+    "scope": "SQL 16",
+    "evidence": {
+      "exchange_count": 4,
+      "exchange_node_ids": [
+        5,
+        9,
+        14,
+        18
+      ],
+      "sql_execution_wall_share": 0.0197
+    }
+  },
+  "plan.missed-exchange-reuse": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "union of one aggregate with itself, with exchange reuse off",
+    "finding_id": "plan.missed-exchange-reuse:e14n6",
+    "severity": "info",
+    "title": "2 identical Exchange subtrees each shuffle the same input, and Spark reused none",
+    "scope": "SQL 14 \u203a Exchange hashpartitioning(g#175L, 8), ENSURE_REQUIREMENTS, [plan_id=728]",
+    "evidence": {
+      "exchange_operator": "Exchange",
+      "occurrence_count": 2,
+      "repeated_node_ids": [
+        6,
+        13
+      ],
+      "subtree_node_count": 4,
+      "scan_locations": [
+        "InMemoryFileIndex [file:/data/plan-rules/t]"
+      ],
+      "repeated_shuffle_bytes": 672,
+      "exchange_reuse_setting": "false",
+      "sql_execution_wall_share": 0.0108
+    }
+  },
+  "plan.partition-not-pruned": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "aggregate over every partition of a partitioned table",
+    "finding_id": "plan.partition-not-pruned:e19n8",
+    "severity": "info",
+    "title": "A scan of InMemoryFileIndex [file:/data/plan-rules/fact] read all 5 partitions, pruning none",
+    "scope": "SQL 19 \u203a FileScan parquet [part#269] Batched: true, DataFilters: [], Format: Parquet, Location: InMemoryFi...",
+    "evidence": {
+      "scan_location": "InMemoryFileIndex [file:/data/plan-rules/fact]",
+      "partition_filters": "[]",
+      "partitions_read_count": 5,
+      "files_read_count": 20,
+      "read_bytes": 49944,
+      "sql_execution_wall_share": 0.0057
+    }
+  },
+  "plan.python-udf-arrow": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "pandas UDF, run over Arrow batches",
+    "finding_id": "plan.python-udf-arrow:e9n2",
+    "severity": "info",
+    "title": "ArrowEvalPython runs Python over Arrow batches, outside every JVM metric",
+    "scope": "SQL 9 \u203a ArrowEvalPython [doubled(id#116L)#120L], [pythonUDF0#125L], 200",
+    "evidence": {
+      "python_operator": "ArrowEvalPython",
+      "output_rows": 100000,
+      "sent_to_python_bytes": 814304,
+      "returned_from_python_bytes": 801728,
+      "stage_ids": [
+        24
+      ],
+      "stage_run_time_share": 0.1737972435951636,
+      "peak_python_rss_bytes": null,
+      "sql_execution_wall_share": 0.0531
+    }
+  },
+  "plan.python-udf-row-at-a-time": {
+    "source": "logs/spark-3.5.9/local-1792406949080.zstd",
+    "description": "row-at-a-time Python UDF",
+    "finding_id": "plan.python-udf-row-at-a-time:e2n2",
+    "severity": "info",
+    "title": "BatchEvalPython calls a Python function once for every row",
+    "scope": "SQL 2 \u203a BatchEvalPython [<lambda>(sha2(cast(cast(id#52L as string) as binary), 256))#58], [pythonUDF0#62]",
+    "evidence": {
+      "python_operator": "BatchEvalPython",
+      "output_rows": 100000,
+      "sent_to_python_bytes": 7009016,
+      "returned_from_python_bytes": 6716000,
+      "stage_ids": [
+        12
+      ],
+      "stage_run_time_share": 0.020995668830584256,
+      "peak_python_rss_bytes": null,
+      "sql_execution_wall_share": 0.0117
+    }
+  },
+  "plan.repeated-scan": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "union of one table with itself, filtered the same way",
+    "finding_id": "plan.repeated-scan:e12n4",
+    "severity": "info",
+    "title": "2 scans read InMemoryFileIndex [file:/data/plan-rules/t]",
+    "scope": "SQL 12 \u203a FileScan parquet [id#148L,g#149L] Batched: true, DataFilters: [isnotnull(id#148L), (id#148L > 10)...",
+    "evidence": {
+      "scan_location": "InMemoryFileIndex [file:/data/plan-rules/t]",
+      "scan_count": 2,
+      "scan_node_ids": [
+        4,
+        7
+      ],
+      "repeated_read_bytes": 406062,
+      "sql_execution_wall_share": 0.0041
+    }
+  },
+  "plan.repeated-subtree": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "union of one table with itself, filtered the same way",
+    "finding_id": "plan.repeated-subtree:e12n2",
+    "severity": "info",
+    "title": "2 identical Filter subtrees compute the same thing",
+    "scope": "SQL 12 \u203a Filter (isnotnull(id#148L) AND (id#148L > 10))",
+    "evidence": {
+      "root_operator": "Filter",
+      "occurrence_count": 2,
+      "repeated_node_ids": [
+        2,
+        5
+      ],
+      "subtree_node_count": 3,
+      "scan_locations": [
+        "InMemoryFileIndex [file:/data/plan-rules/t]"
+      ],
+      "repeated_read_bytes": 406062,
+      "sql_execution_wall_share": 0.0041
+    }
+  },
+  "plan.small-files-read": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "read of 200 files of about 1 KiB each",
+    "finding_id": "plan.small-files-read:e23n2",
+    "severity": "low",
+    "title": "A scan read 200 files averaging 944.0 B",
+    "scope": "SQL 23 \u203a FileScan parquet [id#302L] Batched: true, DataFilters: [], Format: Parquet, Location: InMemoryFil...",
+    "evidence": {
+      "scan_location": "InMemoryFileIndex [file:/data/plan-rules/small-files]",
+      "files_read_count": 200,
+      "read_bytes": 188792,
+      "average_file_bytes": 943.96,
+      "sql_execution_wall_share": 0.004
+    }
+  },
+  "plan.small-files-written": {
+    "source": "logs/spark-3.5.9/local-1792406949080.zstd",
+    "description": "many small output files",
+    "finding_id": "plan.small-files-written:e4n1",
+    "severity": "low",
+    "title": "A write made 200 files averaging 944.0 B",
+    "scope": "SQL 4 \u203a Execute InsertIntoHadoopFsRelationCommand file:/data/small-files, false, Parquet, [path=/data/sma...",
+    "evidence": {
+      "written_files_count": 200,
+      "written_bytes": 188792,
+      "average_file_bytes": 943.96,
+      "dynamic_partitions_count": 0,
+      "suggested_file_count": 1,
+      "sql_execution_wall_share": 0.0363
+    }
+  },
+  "plan.smj-small-side": {
+    "source": "logs/spark-3.5.9/local-1792406949080.zstd",
+    "description": "skewed sort-merge join: 80% of fact rows share key 0",
+    "finding_id": "plan.smj-small-side:e0n9",
+    "severity": "high",
+    "title": "SortMergeJoin shuffles a 1831.1 MiB side to join a 8.4 MiB side small enough to broadcast",
+    "scope": "SQL 0 \u203a SortMergeJoin [k#2L], [k#10L], Inner",
+    "evidence": {
+      "join_type": "Inner",
+      "small_side_bytes": 8808038,
+      "large_side_bytes": 1920047514,
+      "small_side": "right",
+      "sql_execution_wall_share": 0.7478
+    }
+  },
+  "plan.window-single-partition": {
+    "source": "logs/spark-3.5.9-plan-rules/local-1792441743480.zstd",
+    "description": "window with no partitionBy, so one task ranks every row",
+    "finding_id": "plan.window-single-partition:e10n2",
+    "severity": "info",
+    "title": "Window moves every row into one partition, because the window has no partitionBy",
+    "scope": "SQL 10 \u203a Window [row_number() windowspecdefinition(id#126L ASC NULLS FIRST, specifiedwindowframe(RowFrame,...",
+    "evidence": {
+      "window_operator": "Window",
+      "exchange_node_id": 5,
+      "single_partition_bytes": 1600000,
+      "single_partition_rows": 100000,
+      "sql_execution_wall_share": 0.0108
+    }
+  },
+  "stage.deserialization": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "200 tasks of 100 ms; the edit adds 700 ms of deserialization to each",
+    "finding_id": "stage.deserialization:s2",
+    "severity": "medium",
+    "title": "Tasks of stage 2 spent 80% of their time deserializing",
+    "scope": "stage 2",
+    "evidence": {
+      "task_count": 200,
+      "deserialize_time_ms": 140182,
+      "median_deserialize_time_ms": 701,
+      "task_duration_ms": 174830,
+      "deserialize_share": 0.8018,
+      "stage_wall_share": 0.0562
+    }
+  },
+  "stage.executor-imbalance": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "40 tasks of 1 s; the edit runs 32 of them on executor 0, and puts executor 1 on a host of its own",
+    "finding_id": "stage.executor-imbalance:s6",
+    "severity": "medium",
+    "title": "Executor 0 ran 80% of the task time of stage 6",
+    "scope": "stage 6 \u203a executor 0",
+    "evidence": {
+      "task_count": 40,
+      "worker_count": 2,
+      "worker_task_count": 32,
+      "worker_duration_ms": 34287,
+      "worker_task_share": 0.8,
+      "worker_duration_share": 0.7992,
+      "stage_wall_share": 0.0693
+    }
+  },
+  "stage.failed": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "one task that throws on every attempt, failing its job",
+    "finding_id": "stage.failed:s2",
+    "severity": "medium",
+    "title": "Stage 2 failed: Job aborted due to stage failure: Task 0 in stage 2.0 failed 4 times, most recent failure: Lost task 0.3 in stage 2.0 (TID 31) (172.17.0.2 executor 1): org.apache.spark.api.python.PythonException: RuntimeError: seeded failure on every attempt",
+    "scope": "stage 2",
+    "evidence": {
+      "stage_name": "count at /job/stage_rules_job.py:106",
+      "failure_reason": "Job aborted due to stage failure: Task 0 in stage 2.0 failed 4 times, most recent failure: Lost task 0.3 in stage 2.0 (TID 31) (172.17.0.2 executor 1): org.apache.spark.api.python.PythonException: RuntimeError: seeded failure on every attempt",
+      "stage_attempt_count": 1,
+      "failed_attempt_count": 4,
+      "failed_attempt_ms": 293,
+      "stage_wall_share": 0.0018
+    }
+  },
+  "stage.fetch-wait": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "a shuffle read by 200 tasks of 600 ms; the edit sets each one's fetch wait to 40% of its run time",
+    "finding_id": "stage.fetch-wait:s4",
+    "severity": "medium",
+    "title": "Tasks of stage 4 waited 54 s on shuffle fetches",
+    "scope": "stage 4",
+    "evidence": {
+      "task_count": 200,
+      "shuffle_fetch_wait_time_ms": 54017,
+      "executor_run_time_ms": 135041,
+      "shuffle_read_bytes": 13996,
+      "fetch_wait_share": 0.4,
+      "stage_wall_share": 0.2204
+    }
+  },
+  "stage.gc-pressure": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "200 tasks of 1 s; the edit sets each one's JVM GC time to a quarter of its run time",
+    "finding_id": "stage.gc-pressure:s0",
+    "severity": "critical",
+    "title": "Stage 0 spent 25% of its run time in garbage collection",
+    "scope": "stage 0",
+    "evidence": {
+      "task_count": 200,
+      "jvm_gc_time_ms": 53692,
+      "executor_run_time_ms": 215076,
+      "gc_share": 0.2496,
+      "stage_wall_share": 0.3537
+    }
+  },
+  "stage.host-imbalance": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "40 tasks of 1 s; the edit runs 32 of them on executor 0, and puts executor 1 on a host of its own",
+    "finding_id": "stage.host-imbalance:s6",
+    "severity": "medium",
+    "title": "Host 172.17.0.2 ran 80% of the task time of stage 6",
+    "scope": "stage 6",
+    "evidence": {
+      "host": "172.17.0.2",
+      "task_count": 40,
+      "worker_count": 2,
+      "worker_task_count": 32,
+      "worker_duration_ms": 34287,
+      "worker_task_share": 0.8,
+      "worker_duration_share": 0.7992,
+      "stage_wall_share": 0.0693
+    }
+  },
+  "stage.low-shuffle-parallelism": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "repartition of about 1.2 GiB into six partitions, on a shuffle of over 1 GiB",
+    "finding_id": "stage.low-shuffle-parallelism:s14",
+    "severity": "low",
+    "title": "Stage 14 read 1245.9 MiB of shuffle in 6 tasks",
+    "scope": "SQL 3 \u203a stage 14",
+    "evidence": {
+      "task_count": 6,
+      "total_shuffle_read_bytes": 1306400000,
+      "average_shuffle_read_bytes": 217733333,
+      "executor_core_count": 4,
+      "suggested_partition_count": 20,
+      "stage_wall_share": 0.0024
+    }
+  },
+  "stage.oversized-partitions": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "repartition of about 1.2 GiB into four partitions of over 256 MiB each",
+    "finding_id": "stage.oversized-partitions:s11",
+    "severity": "low",
+    "title": "The largest partition of stage 11 holds 311.8 MiB",
+    "scope": "SQL 2 \u203a stage 11",
+    "evidence": {
+      "task_count": 4,
+      "max_partition_bytes": 326895928,
+      "p95_shuffle_read_bytes": 326895928,
+      "max_shuffle_read_bytes": 326895928,
+      "total_shuffle_read_bytes": 1306400000,
+      "max_input_bytes": 0,
+      "max_output_bytes": 0,
+      "max_shuffle_write_bytes": 0,
+      "suggested_partition_count": 20,
+      "stage_wall_share": 0.0028
+    }
+  },
+  "stage.retry-waste": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "four tasks of twelve run 12 s and throw on their first attempt",
+    "finding_id": "stage.retry-waste:s1",
+    "severity": "medium",
+    "title": "Stage 1 threw away 4 task attempts, 48 s of task time",
+    "scope": "stage 1",
+    "evidence": {
+      "failed_attempt_count": 4,
+      "failed_attempt_ms": 48493,
+      "fetch_failed_count": 0,
+      "executor_lost_count": 0,
+      "task_killed_count": 0,
+      "exception_count": 4,
+      "other_failure_count": 0,
+      "most_common_failure": "org.apache.spark.api.python.PythonException: RuntimeError: seeded failure on the first attempt",
+      "stage_wall_share": 0.1265
+    }
+  },
+  "stage.scheduler-delay": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "200 tasks of 100 ms; the edit adds 700 ms to each one's duration, outside its run time",
+    "finding_id": "stage.scheduler-delay:s1",
+    "severity": "medium",
+    "title": "The median task of stage 1 waited 0.7 s to be scheduled",
+    "scope": "stage 1",
+    "evidence": {
+      "task_count": 200,
+      "median_scheduler_delay_ms": 706,
+      "median_duration_ms": 875,
+      "scheduler_delay_ms": 141220,
+      "scheduler_delay_share": 0.8069,
+      "stage_wall_share": 0.0568
+    }
+  },
+  "stage.shuffle-skew": {
+    "source": "logs/spark-3.5.9/local-1792406949080.zstd",
+    "description": "skewed sort-merge join: 80% of fact rows share key 0",
+    "finding_id": "stage.shuffle-skew:s4",
+    "severity": "high",
+    "title": "One shuffle partition of stage 4 read 702.5 MiB, against a median of 13.0 MiB",
+    "scope": "SQL 0 \u203a SortMergeJoin [k#2L], [k#10L], Inner \u203a stage 4",
+    "evidence": {
+      "task_count": 16,
+      "max_shuffle_read_bytes": 736577381,
+      "median_shuffle_read_bytes": 13629506,
+      "shuffle_read_bytes_ratio": 54.04,
+      "max_shuffle_records": 32536313,
+      "median_shuffle_records": 507027,
+      "shuffle_records_ratio": 64.17,
+      "max_task_duration_ms": 25618,
+      "median_task_duration_ms": 682,
+      "aqe_skew_join_enabled": false,
+      "stage_wall_share": 0.5599
+    }
+  },
+  "stage.speculation": {
+    "source": "logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd",
+    "description": "ten of 40 tasks run 8 s and the rest 1 s; the edit gives each slow task a speculative copy that wins",
+    "finding_id": "stage.speculation:s5",
+    "severity": "medium",
+    "title": "Speculative copies won 10 of the 40 tasks of stage 5",
+    "scope": "stage 5",
+    "evidence": {
+      "task_count": 40,
+      "speculative_attempt_count": 10,
+      "speculative_success_count": 10,
+      "speculative_attempt_ms": 10750,
+      "speculative_success_share": 0.25,
+      "stage_wall_share": 0.1842
+    }
+  },
+  "stage.spill": {
+    "source": "logs/spark-3.5.9/local-1792406949080.zstd",
+    "description": "wide sort forced to spill",
+    "finding_id": "stage.spill:s11",
+    "severity": "low",
+    "title": "Stage 11 spilled 669.9 MiB to disk and 760.0 MiB from memory",
+    "scope": "SQL 1 \u203a Sort [a#44 ASC NULLS FIRST], false, 0 \u203a stage 11",
+    "evidence": {
+      "task_count": 4,
+      "spilling_task_count": 4,
+      "memory_spilled_bytes": 796911680,
+      "disk_spilled_bytes": 702452017,
+      "max_task_disk_spilled_bytes": 175615427,
+      "read_bytes": 757016469,
+      "disk_spill_to_read_ratio": 0.9279,
+      "stage_wall_share": 0.0331
+    }
+  },
+  "stage.spill-skew": {
+    "source": "logs/spark-3.5.9-warmup/local-1792454673559.zstd",
+    "description": "skewed sort-merge join, split by skew-join handling: 80% of fact rows share key 0",
+    "finding_id": "stage.spill-skew:s10",
+    "severity": "high",
+    "title": "One task of stage 10 spilled 1316.2 MiB from memory, against a median of 72.2 MiB",
+    "scope": "SQL 1 \u203a Sort [name#21 ASC NULLS FIRST], false, 0 \u203a stage 10",
+    "evidence": {
+      "task_count": 19,
+      "max_memory_spilled_bytes": 1380177760,
+      "median_memory_spilled_bytes": 75759168,
+      "memory_spill_ratio": 18.22,
+      "max_disk_spilled_bytes": 383244084,
+      "median_disk_spilled_bytes": 20478573,
+      "disk_spill_ratio": 18.71,
+      "stage_wall_share": 0.3414
+    }
+  },
+  "stage.task-oom": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "a Python UDF returns a 1.1 GB string on its first attempt, which the executor's 1 GiB heap cannot hold",
+    "finding_id": "stage.task-oom:s3",
+    "severity": "medium",
+    "title": "1 task attempt of stage 3 ran out of memory",
+    "scope": "SQL 0 \u203a stage 3",
+    "evidence": {
+      "oom_attempt_count": 1,
+      "executor_count": 1,
+      "first_oom_reason": "java.lang.OutOfMemoryError: Java heap space",
+      "stage_wall_share": 0.041
+    }
+  },
+  "stage.task-skew": {
+    "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
+    "description": "one task of twelve sleeps 45 s, the others 4 s",
+    "finding_id": "stage.task-skew:s0",
+    "severity": "medium",
+    "title": "The slowest task of stage 0 ran 45 s, against a median of 4 s",
+    "scope": "stage 0",
+    "evidence": {
+      "task_count": 12,
+      "max_run_time_ms": 45392,
+      "median_run_time_ms": 4077,
+      "run_time_gap_ms": 41315,
+      "run_time_ratio": 11.13,
+      "glue_skewness_ratio": 1.23,
+      "stage_wall_share": 0.2704
+    }
+  },
+  "stage.tiny-tasks": {
+    "source": "logs/spark-3.5.9/local-1792406949080.zstd",
+    "description": "many small output files",
+    "finding_id": "stage.tiny-tasks:s20",
+    "severity": "low",
+    "title": "Stage 20 ran 200 tasks averaging 32 ms",
+    "scope": "SQL 4 \u203a stage 20",
+    "evidence": {
+      "task_count": 200,
+      "mean_duration_ms": 32,
+      "p95_duration_ms": 37,
+      "mean_shuffle_read_bytes": 1041,
+      "task_overhead_ms": 1902,
+      "suggested_partition_count": 20,
+      "stage_wall_share": 0.0318
+    }
+  }
+}

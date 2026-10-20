@@ -264,10 +264,31 @@ executor's `peak_jvm_heap_bytes` is the larger of its stage and task peaks, and
 process-tree metrics, `peak_python_rss_bytes` is null. Spark writes 0 for a metric it never
 measured, and the table does not pass that off as a measurement.
 
+## A column's description sits beside its SQL, so the glossary and `tables list` never disagree
+
+Each registry column carries one line saying what it holds. `tables list` prints that line, and
+the metric glossary reads the same one. So no second copy exists to drift from it. The views take
+theirs from their sources: `tasks_effective` from `tasks`, and `findings` from the descriptions in
+`schemas/findings.json`.
+
+`sparkxray.metric_glossary` adds what the registry cannot say about a number. It covers every
+column whose name ends in a unit, and every metric a plan node declares. For each it gives the
+unit Spark records beside the unit sparkxray shows, the event fields read, and how a derived
+column is computed. Spark-side facts sit in that module, keyed by `table.column`, and a unit
+column it lacks raises a `KeyError` whenever the glossary is read.
+
+No meaning is written from a metric's name. Each is quoted from the Spark 4.2 documentation's
+tables, or read from the Apache Spark v4.2.0 source, and cites that page or that file and line.
+Six metrics only AWS Glue 5.0's Spark build declares have no published source, so they carry no
+description. The glossary's metric types match those every fixture log declares.
+
+A name the glossary does not hold is `E-METRIC-001`, listing every column and plan metric it does.
+
 ## Rules read the tables, and a plan alone needs neither DuckDB nor pyarrow
 
 `analyze` reads everything from the tables, plans included. `sql_executions.final_plan_json` holds
-each execution's last `sparkPlanInfo`, which `Tables.last_plans()` reads back into a `Plan`. So
+each execution's last `sparkPlanInfo`, which `Tables.last_plans()` reads back into a `Plan`.
+`plan_versions` holds every version's, and `Tables.plan(execution_id, version)` reads one back. So
 analyzing a cached log parses no event line. The findings go into the table directory as
 `findings.parquet`, through a `.part-` file renamed into place.
 

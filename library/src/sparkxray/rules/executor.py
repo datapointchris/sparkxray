@@ -71,9 +71,9 @@ DPUs of 4 vCPUs.
 
 A core held and running no task is paid for and does nothing. Cores sit idle while the driver
 works alone between jobs, while a stage runs fewer tasks than there are cores, and while every
-core waits on the one slow task a stage ends with. More than half the core time idle means the
-application holds more than it uses. A short run is mostly start-up and shutdown, so the rule
-also needs `min_idle_core_ms` of idle core time before the share is worth acting on.
+core waits on the one slow task a stage ends with. More than {min_idle_share} of the core time
+idle means the application holds more than it uses. A short run is mostly start-up and shutdown,
+so the rule also needs {min_idle_core_ms} of idle core time before the share is worth acting on.
 
 ## Where the Spark UI shows it
 

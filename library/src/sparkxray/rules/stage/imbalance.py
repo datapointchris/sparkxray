@@ -55,8 +55,8 @@ _EXECUTOR_IMBALANCE_LESSON = """\
 ## What it measures
 
 Each executor's share of a stage's successful tasks, and of their summed duration. The rule
-reports the executor with the largest share of duration, where it also ran at least half the
-tasks.
+reports the executor with the largest share of duration, where it also ran at least
+{min_task_share} of the tasks.
 
 ## Why it costs time
 
@@ -101,7 +101,7 @@ _HOST_IMBALANCE_LESSON = """\
 
 Each host's share of a stage's successful tasks, and of their summed duration, counting every
 executor on the host together. The rule reports the host with the largest share of duration,
-where it also ran at least half the tasks.
+where it also ran at least {min_task_share} of the tasks.
 
 ## Why it costs time
 

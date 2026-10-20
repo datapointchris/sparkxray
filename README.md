@@ -69,12 +69,38 @@ sparkxray findings show spark-application-1729 stage.shuffle-skew:s4
 sparkxray stages list spark-application-1729 --sort wall_ms -n 5
 sparkxray tasks list spark-application-1729 --stage 4 --sort duration_ms -n 5
 sparkxray tables query spark-application-1729 "select stage_id, max(duration_ms) from tasks_effective group by all"
+sparkxray plans show spark-application-1729 --sql 0
 sparkxray rules show stage.shuffle-skew
+sparkxray metrics show "Executor CPU Time"
 ```
 
 A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and `26 s`. `--json`
 prints the raw numbers instead, each under a name ending in its unit, and an empty list as `[]`.
 Progress and notes go to stderr, so stdout holds only the data.
+
+`plans show` draws one SQL execution's plan as a tree, with the numbers the Spark UI's SQL tab
+shows on its graph. Each node opens with its number, as `n9`, which finding ids and `sql show`
+use too. Then it gives what it does, such as a join's type and keys or a scan's location, then the
+stages it ran in and its metrics' totals. A node Spark compiled into a codegen pipeline carries the
+pipeline's `*(N)`, and the pipeline's `duration` names the nodes it covers. A sort's `spill size`
+counts the spills of the nodes it reads from, so the tree states its own part beside it. A node a
+finding names carries a mark, as `◀ stage.shuffle-skew (stage 4, high)`. `--initial` shows the
+plan the execution started from, before adaptive query execution re-planned it, and
+`--plan-version N` any plan between.
+
+`rules show` teaches one rule: what it measures, why it costs time, where the Spark UI shows it
+and how to fix it. It takes the same `--threshold` and `--thresholds` overrides `findings list`
+does. Its Thresholds table, and any threshold the lesson states, read at the value the rule would
+apply. It ends with what the rule found on one of sparkxray's own fixture logs, at the default
+thresholds.
+
+`metrics show` says what one number means before anything is read into it. It takes a column, a
+plan metric as `plans show` prints it, such as `spill size`, or a Spark field such as
+`Executor CPU Time`. Each entry gives the unit sparkxray shows and the unit Spark records, which
+differ: Spark writes CPU time and shuffle write time in nanoseconds beside run time in
+milliseconds. It also names the event fields read, how a derived column such as
+`scheduler_delay_ms` is computed, and where the meaning comes from.
+`metrics list` prints every entry, and `tables list` prints every column with what it holds.
 
 A list keeps each row on one line. On a narrow terminal its longest text ends in `…`, and
 narrower still each row prints as a block of field and value. A `show` command and `--json`
@@ -164,8 +190,9 @@ print(skew.fetchall())
 tables.tasks.filter('failed').to_arrow_table()   # each table is a DuckDB relation
 print(tables.path)                               # the Parquet directory, for any Parquet reader
 plans = tables.last_plans()                      # each execution's last Plan, without the log
+initial = tables.plan(0, version=0)              # one version of one execution's plan
 rows = tables.rows('select * from stages')       # plain Python values, with columns and types
-tables.listing()                                 # every table and view, with rows and column units
+tables.listing()                                 # every table and view: rows, and each column's unit and meaning
 ```
 
 | Table | One row per |
@@ -177,6 +204,7 @@ tables.listing()                                 # every table and view, with ro
 | `stages` | stage attempt |
 | `tasks` | task attempt, failed, killed and still running included |
 | `sql_executions` | SQL execution |
+| `plan_versions` | version of an execution's plan, as the event that logged it |
 | `plan_nodes` | node of every plan version of every SQL execution |
 | `plan_node_metrics` | metric a plan node declares, aggregated as the History Server's SQL tab does |
 | `node_stages` | stage a node of an execution's last plan ran in |
@@ -192,6 +220,10 @@ An instant ends in `_epoch_ms`, milliseconds since the epoch. So `launch_epoch_m
 started, and `duration_ms` is how long it ran. `plan_node_metrics` holds every kind of metric in
 the same columns, so its `unit` column names each row's unit.
 
+`sparkxray.metric_glossary` describes every column with a unit and every plan metric.
+`metric_entries('Executor CPU Time')` returns each entry a name matches. Each `MetricEntry` holds
+its unit here and in Spark, the event fields it reads, any derivation, and its meaning's source.
+
 `tables.manifest.lacks` names what the log was written without, because Spark leaves it out by
 default: `stage_executor_metrics`, `block_updates` or `process_tree_metrics`. A column only
 those settings fill, such as `peak_python_rss_bytes`, is null in a log written without them.
@@ -205,7 +237,8 @@ those settings fill, such as `peak_python_rss_bytes`, is null in a log written w
 | `stage_tasks` | one stage's task attempts |
 | `executor_summaries` | one row per executor and the driver: lifetime, cores, memory, task time, idle share |
 | `sql_summaries` | one row per SQL execution: duration, jobs, stages, the operators of its last plan |
-| `sql_detail` | one SQL execution, its jobs, and how many of each operator its last plan holds |
+| `sql_detail` | one SQL execution, its jobs, how many of each operator its last plan holds, and what AQE changed: joins it switched or split for skew, operators it added or removed, and how it read each shuffle |
+| `annotated_plan` | one version of one SQL execution's plan, each node with what it does, its metrics and the stages it ran in; `with_findings` adds an analysis's findings on the nodes they name |
 | `application_detail` | the application, its duration and its manifest |
 
 A stage's quantiles are taken as the Stages tab takes its summary metrics, so they print the
@@ -266,6 +299,9 @@ for finding in analyze_plan(parse_plan_text(printed.getvalue())).findings:
 `log.tables.stored_analysis()` says which rules that analysis ran, under which thresholds, and
 which it skipped.
 
+`sparkxray.rules.rule_lesson('stage.shuffle-skew', thresholds=...)` returns a rule's lesson as
+Markdown, at the thresholds it would apply, beside the finding it reported on a fixture log.
+
 ## Layout
 
 | Directory | Holds |
@@ -283,5 +319,6 @@ release.
 
 MIT. The Apache Spark test logs under `fixtures/logs/apache-spark-events/` are copied from Apache
 Spark and stay under the Apache License 2.0, as `fixtures/NOTICE` records. Some of the rule
-catalog's wording is adapted from DataFlint, SparkDoctor and Dr. Elephant, all under the Apache
+catalog's wording is adapted from DataFlint, SparkDoctor and Dr. Elephant, and some metric and
+column descriptions quote Apache Spark's documentation and source. All four are under the Apache
 License 2.0, as `library/NOTICE` records.

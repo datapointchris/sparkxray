@@ -45,8 +45,8 @@ task ran, summed over the stage, against the stage's summed `Executor Run Time`.
 
 A collection pauses the threads that run tasks, so GC time is run time spent on no row. A heap
 near its limit collects again and again for little, and the share climbs before an executor runs
-out of memory. Dr. Elephant grades the share from 8%, and the rule needs 30 s of GC in all, so a
-short stage's few collections stay quiet.
+out of memory. The rule grades the share from {min_share}, as Dr. Elephant does, and needs
+{min_gc_ms} of GC in all, so a short stage's few collections stay quiet.
 
 ## Where the Spark UI shows it
 
@@ -173,7 +173,7 @@ A task is shipped serialized, and every task of a stage carries the same closure
 captured a large object, such as a lookup table or a model, is deserialized again for every task.
 That time is spent before the first row is read. The first stage on fresh executors pays for
 loading classes here too, once per core, and a later stage on the same executors does not. So
-the rule needs `min_impact_ms` at stake, which that one-time cost rarely reaches.
+the rule needs {min_impact_ms} at stake, which that one-time cost rarely reaches.
 
 ## Where the Spark UI shows it
 

@@ -119,6 +119,34 @@ come from completed shuffles, not cost-model guesses, so plan rules can size a j
 task metrics. Spark 4 prints `8.0 EiB` on `ResultQueryStage`. That is `Long.MaxValue` used as a
 placeholder, and the parser reads it as unknown.
 
+## What AQE changed is the first plan against the last, less what every re-plan adds
+
+`aqe_changes` compares the plan `SQLExecutionStart` carries, version 0, with the last version.
+How many times AQE re-planned is the last version's number, which only an event log records, so
+`sql_detail` passes it in. Three parts make up the rest.
+
+- **Operator counts that changed.** AQE adds a query stage around each stage it creates, and an
+  `AQEShuffleRead` over each shuffle. Its `postStageCreationRules` insert `ColumnarToRow` and
+  `RowToColumnar` as each stage is created. So the first plan never holds any of them, and the
+  counts leave them out.
+- **Every `AQEShuffleRead` of the last plan.** Each comes with the kind Spark printed beside it:
+  `coalesced`, `skewed`, `coalesced and skewed` or `local`. Each also carries its partition
+  metrics, which the driver sets once, and the partition count of the `Exchange` it reads. A
+  `ReusedExchange` prints the exchange it reads again after its output, so the count is read from
+  there.
+- **Every join AQE switched or split for skew.** A join keeps its keys across one execution's plans,
+  because expression ids do. So each join of the last plan is paired, in pre-order, with the first
+  plan's join on the same keys and type. A pair is reported where the operator changed, or where the
+  last plan prints `(skew=true)` after it. Its keys keep their ids, which `sql show` leaves out of
+  its table as a headline does.
+
+Reuse shows in the counts as nodes the last plan lacks. AQE reuses a subquery as it optimizes each
+stage, so the first plan holds one copy per node that uses it. A shuffle stage AQE reuses prints as
+a `ReusedExchange` in place of its second copy.
+
+A join on a condition alone prints no keys, so it is never paired. A switch between a Cartesian
+product and a nested-loop join shows only in the operator counts.
+
 ## Cost-mode text adds the optimizer's estimates, kept beside the tree
 
 `explain(mode='cost')` prints the optimized logical plan, each node ending in
@@ -173,12 +201,14 @@ reads the minimum, median and maximum, and the stage and task that held the maxi
 Each node in `sparkPlanInfo` lists its metrics with an accumulator id. Tasks report updates to
 those ids, and each stage lists the ids it touched. Joining the two maps nodes to stages.
 
-AQE allocates fresh accumulators every time it re-plans a node, and even the first update
-re-allocates every node. A query stage that finished before a re-plan then keeps its node and ids.
-So the last plan lists the ids of everything that actually ran.
+AQE gives most nodes fresh accumulators each time it re-plans. A node it carries over keeps its
+node and ids into each later plan: a query stage that finished before the re-plan, and a scan or
+filter below the first exchanges. So the last plan lists the ids of everything that actually ran.
 
-That is why rules read metrics through the last plan's nodes. A node of the version 0 plan
-`SQLExecutionStart` logs has no updates, which is expected, not missing data.
+That is why rules read metrics through the last plan's nodes. A node of an earlier version has
+values only where a later plan kept its ids. So every valued metric of the version 0 plan
+`SQLExecutionStart` logs shares its accumulator with the last plan, and the rest have no updates.
+That is expected, not missing data.
 
 Driver-side values, such as broadcast build time and file listing, arrive in
 `SparkListenerDriverAccumUpdates`. Metric definitions for a subquery AQE re-planned arrive in
@@ -220,3 +250,45 @@ where the SQL tab prints `(driver)`.
 `fixtures/history-server-sql/` holds what the SQL tab serves for the plan-shapes logs, metric
 strings included. The tables test prints each execution's `plan_node_metrics` the way the SQL tab
 prints them, and requires the two to match.
+
+## An annotated plan places a finding only on the node its scope names
+
+`sparkxray.summaries.annotated_plan` reads one version of an execution's plan with the numbers the
+SQL tab shows on its graph: each node's metrics from `plan_node_metrics`, the stages it ran in
+from `node_stages`, and the size and rows AQE measured on each finished query stage.
+`with_findings` then places an analysis's findings. `plans show` reads the plan first, so an
+execution or version the run lacks is refused before the rules run.
+
+A finding's `plan_node_id` numbers the last plan's nodes, as `node_stages` does. So only the last
+version places findings on nodes, and only `node_stages` gives a node its stages there. An earlier
+version lists its execution's findings below the tree, beside those about the whole execution or
+one of its stages. Its nodes still show the metrics of the nodes the last plan kept, because those
+keep their accumulators.
+
+A finding naming no node stays off every node. `stage.shuffle-skew` names its stage's join only
+where exactly one sort-merge or shuffled hash join ran there. Marking the stage's other nodes would
+guess at what the rule declined to say.
+
+A subquery's plan is drawn under the node that runs it, numbered on from the main plan as
+`Plan.numbered()` numbers it. That node lists the subquery's root in `subqueries`, never in
+`children`, so a walk over children stays inside one plan.
+
+## A pipeline's duration and a sort's spill size cover more than the node they sit on
+
+`duration` is a whole-stage codegen pipeline's. The plan model moves it from the
+`WholeStageCodegen` wrapper onto the pipeline's top node. `BufferedRowIterator` measures it from
+the pipeline's start to its last row, so it includes the time spent reading the pipeline's inputs.
+`plans show` marks every node of a pipeline `*(N)`, as Spark's own explain text does. On the top
+node it names the nodes the duration covers, which `AnnotatedPlan.codegen_members` lists.
+
+A sort's `spill size` is the task's spill while the sort read its input (`SortExec.scala`). So it
+also counts the spills of the sorts and joins below it in the task. `own_spill_bytes` takes theirs
+off, through the `own_spills` SQL that `stage.spill` ranks nodes by. `plans show` prints both
+figures where they differ.
+
+*Rejected:* subtracting the whole subtree's spills from every node. A join, an aggregate and a
+window each record only their own buffer's spills, so only a sort's figure overlaps.
+
+A node's headline leaves out expression and exchange ids, so `SortMergeJoin [k#2L], [k#10L],
+Inner` reads `SortMergeJoin Inner k = k`. A subquery reference keeps its id, which names the
+subquery drawn below. `details` keeps each field as Spark printed it, ids included.

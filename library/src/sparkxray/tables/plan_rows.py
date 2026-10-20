@@ -14,7 +14,7 @@ import duckdb
 import pyarrow as pa
 
 from sparkxray.plan.last_plans import plan_for_event
-from sparkxray.plan.tree import PlanNode
+from sparkxray.plan.tree import NumberedNode
 
 _NODE_SCHEMA = pa.schema(
     [
@@ -28,6 +28,7 @@ _NODE_SCHEMA = pa.schema(
         ('label', pa.string()),
         ('normalized_label', pa.string()),
         ('codegen_stage', pa.int64()),
+        ('enclosing_sort_id', pa.int64()),
         ('subtree_hash', pa.string()),
         ('details', pa.map_(pa.string(), pa.string())),
         ('runtime_size_bytes', pa.int64()),
@@ -89,8 +90,10 @@ def plan_rows(connection: duckdb.DuckDBPyConnection) -> PlanRows:
             if plan is None:
                 continue
             versions.append({'execution_id': execution_id, 'plan_version': version, 'is_final': plan.is_final, 'truncated': plan.truncated})
-            for numbered in plan.numbered():
-                nodes.append(_node_row(execution_id, version, plan.is_final, numbered.number, numbered.parent, numbered.node))
+            numbered_nodes = plan.numbered()
+            enclosing = _enclosing_sorts(numbered_nodes)
+            for numbered in numbered_nodes:
+                nodes.append(_node_row(execution_id, version, plan.is_final, numbered, enclosing.get(numbered.number)))
                 metrics.extend(
                     _metric_row(execution_id, version, numbered.number, metric.name, metric.metric_type, metric.accumulator_id)
                     for metric in numbered.node.metrics
@@ -103,19 +106,41 @@ def plan_rows(connection: duckdb.DuckDBPyConnection) -> PlanRows:
     )
 
 
-def _node_row(execution_id: int, version: int, is_final: bool, node_id: int, parent_id: int | None, node: PlanNode) -> dict[str, Any]:
+def _enclosing_sorts(numbered: tuple[NumberedNode, ...]) -> dict[int, int]:
+    """Each node's nearest `Sort` above it in the same task, by number.
+
+    A `Sort` records as its `spill size` all the task spilled while it read its input, so that
+    figure counts the spills of every node below it in the task. An exchange or query stage ends
+    the task, because its input ran in another stage. So does a subquery's root.
+    """
+    enclosing: dict[int, int] = {}
+    children = {child for each in numbered for child in each.children}
+    pending: list[tuple[int, int | None]] = [(each.number, None) for each in numbered if each.number not in children]
+    while pending:
+        number, sort = pending.pop()
+        if sort is not None:
+            enclosing[number] = sort
+        operator = numbered[number].node.operator
+        inner = None if operator.endswith(('Exchange', 'QueryStage')) else number if operator == 'Sort' else sort
+        pending += [(child, inner) for child in numbered[number].children]
+    return enclosing
+
+
+def _node_row(execution_id: int, version: int, is_final: bool, numbered: NumberedNode, enclosing_sort_id: int | None) -> dict[str, Any]:
+    node = numbered.node
     stats = node.runtime_stats
     return {
         'execution_id': execution_id,
         'plan_version': version,
         'is_final': is_final,
-        'node_id': node_id,
-        'parent_id': parent_id,
+        'node_id': numbered.number,
+        'parent_id': numbered.parent,
         'formatted_number': node.formatted_number,
         'operator': node.operator,
         'label': node.label,
         'normalized_label': node.normalized_label,
         'codegen_stage': node.codegen_stage,
+        'enclosing_sort_id': enclosing_sort_id,
         'subtree_hash': node.subtree_hash,
         'details': list(node.details.items()),
         'runtime_size_bytes': stats.size_bytes if stats else None,

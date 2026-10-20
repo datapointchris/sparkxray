@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from sparkxray.plan.node_fields import partitioning
 from sparkxray.rules.plan.node_reading import copies_counted_elsewhere
 from sparkxray.rules.plan.node_reading import counted_nodes
-from sparkxray.rules.plan.node_reading import field
 from sparkxray.rules.plan.node_reading import metric
 from sparkxray.rules.plan.node_reading import rows_produced
 from sparkxray.rules.rule import Rule
@@ -40,7 +40,7 @@ def _many_exchanges(context: RuleContext) -> Iterator[dict[str, Any]]:
 _MANY_EXCHANGES_LESSON = """\
 ## What it measures
 
-How many `Exchange` nodes one query runs, reported at 4 or more, sparkDoctor's threshold. Each is
+How many `Exchange` nodes one query runs, reported at {min_exchanges} or more. Each is
 a shuffle: a stage boundary where every row is written out by key and read back.
 
 ## Why it costs time
@@ -95,8 +95,7 @@ def _window_single_partition(context: RuleContext) -> Iterator[dict[str, Any]]:
             below = nodes[below.children[0]]
         if below.node.operator != 'Exchange':
             continue
-        partitioning = field(below.node, 'Arguments') or below.node.label.removeprefix('Exchange').strip()
-        if not partitioning.startswith('SinglePartition'):
+        if not (partitioning(below.node) or '').startswith('SinglePartition'):
             continue
         size = metric(context.metrics(execution_id, below.number), 'data size')
         size = stage_bytes if size is None else size
@@ -119,8 +118,9 @@ A `Window` whose input is shuffled to `SinglePartition`, which is what a window 
 and no `partitionBy` asks for. Spark logs `No Partition Defined for Window operation! Moving all
 data to a single partition, this can cause serious performance degradation.`
 
-The finding is `high` where that partition holds at least 256 MiB, the size at which AQE's default
-`spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes` calls one partition skewed. Below it,
+The finding is `high` where that partition holds at least {min_bytes}, by default the size at
+which AQE's `spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes` calls one partition
+skewed. Below it,
 or where nothing measured the exchange, the finding is `info`. A window over a few thousand
 aggregated rows runs in one task in moments.
 

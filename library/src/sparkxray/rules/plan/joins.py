@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from sparkxray.plan.node_fields import join_type
 from sparkxray.rules.plan.node_reading import OUTPUT_ROWS
 from sparkxray.rules.plan.node_reading import broadcastable_sides
 from sparkxray.rules.plan.node_reading import bytes_produced
 from sparkxray.rules.plan.node_reading import counted_nodes
-from sparkxray.rules.plan.node_reading import join_type
 from sparkxray.rules.plan.node_reading import metric
 from sparkxray.rules.plan.node_reading import rows_produced
 from sparkxray.rules.rule import Rule
@@ -78,8 +78,9 @@ of an inner, cross, left outer, left semi, left anti or existence join. So the r
 side Spark could broadcast, and only where the other side passes an `Exchange`. A join of bucketed
 tables shuffles neither side, and a broadcast would save it nothing.
 
-The rule fires on DataFlint's bands: the small side under 10 MiB; under 100 MiB beside a side over
-10 GiB; under 1000 MiB beside one over 300 GiB; or under 5 GiB beside one over 1 TiB.
+The rule fires on DataFlint's bands: the small side under {small_bytes}; under
+{small_bytes_beside_large} beside a side over {large_bytes}; under {small_bytes_beside_very_large}
+beside one over {very_large_bytes}; or under {small_bytes_beside_huge} beside one over {huge_bytes}.
 
 ## Why it costs time
 
@@ -163,7 +164,7 @@ _BROADCAST_TOO_LARGE_LESSON = """\
 
 A `BroadcastExchange` collects its input on the driver, builds a hash table from it, and sends a
 copy to every executor. The rule reads the exchange's `data size`, the relation broadcast, and
-fires above 1 GiB, DataFlint's threshold.
+fires above {max_bytes}.
 
 ## Why it costs time
 
@@ -304,9 +305,9 @@ def _exploding_join(context: RuleContext) -> Iterator[dict[str, Any]]:
 _EXPLODING_JOIN_LESSON = """\
 ## What it measures
 
-A join, or a `Generate` running `explode`, whose output rows are at least 10 times its largest
-input's, with at least 100,000,000 rows out. Both thresholds are proposed here, because no tool
-publishes one. A join key matching thousands of rows on both sides multiplies them.
+A join, or a `Generate` running `explode`, whose output is at least {ratio} the rows of its
+largest input, with at least {min_output_rows} rows out. Both thresholds are proposed here, because no
+tool publishes one. A join key matching thousands of rows on both sides multiplies them.
 
 ## Why it costs time
 

@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import dataclasses as dc
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
 from sparkxray.errors import NotAnalyzedError
+from sparkxray.errors import NotInRunError
 from sparkxray.errors import QueryError
 from sparkxray.plan.last_plans import plan_for_event
 from sparkxray.plan.tree import Plan
 from sparkxray.rules.findings import ANALYSIS_METADATA_KEY
+from sparkxray.rules.findings import findings_column_descriptions
 from sparkxray.tables.manifest import TablesManifest
 from sparkxray.tables.registry import TABLES
 from sparkxray.tables.registry import TASKS_EFFECTIVE
@@ -26,18 +29,30 @@ _TASKS_EFFECTIVE_DESCRIPTION = (
     'A view of `tasks` where `effective` is true: each partition of each stage once, its first success across the stage attempts.'
 )
 _FINDINGS_DESCRIPTION = "The last analysis's findings, one row each, with their evidence and thresholds as JSON text."
+_NODE_METRIC_TOTALS_SQL = """
+SELECT metrics.execution_id, metrics.node_id, metrics.metric_name, arg_min(metrics.total, metrics.accumulator_id) AS total
+FROM plan_node_metrics AS metrics JOIN sql_executions USING (execution_id)
+WHERE metrics.total IS NOT NULL
+  AND (CAST($execution_id AS BIGINT) IS NULL OR metrics.execution_id = $execution_id)
+  AND metrics.plan_version = coalesce(CAST($version AS BIGINT), sql_executions.plan_version_count - 1)
+GROUP BY ALL
+"""
 
 
 @dc.dataclass(frozen=True, slots=True)
 class ListedColumn:
-    """One column of a table: its name, its DuckDB type, and the unit its name ends in, where it names one."""
+    """One column of a table: its name, its DuckDB type, the unit its name ends in, and what it holds.
+
+    `description` is None only for a `findings.parquet` column another sparkxray version wrote that this one does not describe.
+    """
 
     name: str
     type: str
     unit: str | None
+    description: str | None
 
     def to_json(self) -> dict[str, Any]:
-        return {'name': self.name, 'type': self.type, 'unit': self.unit}
+        return {'name': self.name, 'type': self.type, 'unit': self.unit, 'description': self.description}
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -103,20 +118,25 @@ class Tables:
                 table.description,
                 self.manifest.row_counts[table.name],
                 str(self.path / f'{table.name}.parquet'),
-                tuple(ListedColumn(column.name, column.type, column_unit(column.name)) for column in table.columns),
+                tuple(ListedColumn(column.name, column.type, column_unit(column.name), column.description) for column in table.columns),
             )
             for table in TABLES
         ]
         tasks = next(table for table in listed if table.name == 'tasks')
-        listed.insert(listed.index(tasks) + 1, self._view_listing('tasks_effective', _TASKS_EFFECTIVE_DESCRIPTION, tasks.path))
+        task_columns = {column.name: column.description for column in tasks.columns}
+        listed.insert(
+            listed.index(tasks) + 1, self._view_listing('tasks_effective', _TASKS_EFFECTIVE_DESCRIPTION, tasks.path, task_columns)
+        )
         if (self.path / FINDINGS_FILE).is_file():
-            listed.append(self._view_listing('findings', _FINDINGS_DESCRIPTION, str(self.path / FINDINGS_FILE)))
+            listed.append(
+                self._view_listing('findings', _FINDINGS_DESCRIPTION, str(self.path / FINDINGS_FILE), findings_column_descriptions())
+            )
         return tuple(listed)
 
-    def _view_listing(self, name: str, description: str, path: str) -> ListedTable:
+    def _view_listing(self, name: str, description: str, path: str, column_descriptions: Mapping[str, str | None]) -> ListedTable:
         described = self.connection.execute(f'DESCRIBE {name}').fetchall()
         count = self.connection.execute(f'SELECT count(*) FROM {name}').fetchone()
-        columns = tuple(ListedColumn(column, kind, column_unit(column)) for column, kind, *_ in described)
+        columns = tuple(ListedColumn(column, kind, column_unit(column), column_descriptions.get(column)) for column, kind, *_ in described)
         return ListedTable(name, description, int(count[0]) if count else 0, path, columns)
 
     def last_plans(self) -> dict[int, Plan]:
@@ -132,6 +152,45 @@ class Tables:
             if plan is not None:
                 plans[execution_id] = plan
         return plans
+
+    def plan(self, execution_id: int, version: int | None = None) -> Plan:
+        """One version of an execution's plan, read from the event that logged it: the last version where `version` is None.
+
+        An execution, or a version of it, that the run holds no plan for raises `NotInRunError`.
+        """
+        held = self.connection.execute(
+            'SELECT plan_version, plan_json, plan_text FROM plan_versions WHERE execution_id = ? ORDER BY plan_version', [execution_id]
+        ).fetchall()
+        if not held:
+            executions = self.connection.execute('SELECT DISTINCT execution_id FROM plan_versions ORDER BY execution_id').fetchall()
+            raise NotInRunError(
+                f'the run holds no plan for SQL execution {execution_id}', field='execution_id', valid=[str(row[0]) for row in executions]
+            )
+        chosen = held[-1] if version is None else next((row for row in held if row[0] == version), None)
+        plan = None
+        if chosen is not None:
+            plan_version, info, text = chosen
+            event = {'sparkPlanInfo': json.loads(info) if info is not None else None, 'physicalPlanDescription': text}
+            plan = plan_for_event(event, execution_id, plan_version)
+        if plan is None:
+            missing = held[-1][0] if version is None else version
+            raise NotInRunError(
+                f'SQL execution {execution_id} has no plan version {missing}', field='version', valid=[str(row[0]) for row in held]
+            )
+        return plan
+
+    def node_metric_totals(self, execution_id: int | None = None, version: int | None = None) -> dict[int, dict[int, dict[str, float]]]:
+        """Each node's metric totals by name, keyed by execution id, then by the node's number in `Plan.numbered()`.
+
+        It covers one execution, or every one where `execution_id` is None, in one plan version, or
+        each execution's last where `version` is None. A name a node lists twice keeps its first
+        accumulator, and a node nothing measured is absent.
+        """
+        rows = self.connection.execute(_NODE_METRIC_TOTALS_SQL, {'execution_id': execution_id, 'version': version}).fetchall()
+        totals: dict[int, dict[int, dict[str, float]]] = {}
+        for held_id, node_id, name, total in rows:
+            totals.setdefault(held_id, {}).setdefault(node_id, {})[name] = total
+        return totals
 
     @property
     def application(self) -> duckdb.DuckDBPyRelation:

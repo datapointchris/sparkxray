@@ -62,14 +62,6 @@ SELECT
   (SELECT count(*) FROM stages WHERE submit_epoch_ms IS NOT NULL) > 0 AS timeline
 """
 
-# Each node's metric totals in its execution's last plan. A name a node lists twice keeps its first accumulator.
-_NODE_METRICS_SQL = """
-SELECT metrics.execution_id, metrics.node_id, metrics.metric_name, arg_min(metrics.total, metrics.accumulator_id) AS total
-FROM plan_node_metrics AS metrics JOIN sql_executions USING (execution_id)
-WHERE metrics.plan_version = sql_executions.plan_version_count - 1 AND metrics.total IS NOT NULL
-GROUP BY ALL
-"""
-
 
 @dc.dataclass(frozen=True, slots=True)
 class RuleRun:
@@ -217,9 +209,9 @@ def analyze(
     plans: dict[int | None, Plan] = {execution_id: plan for execution_id, plan in tables.last_plans().items()}
     held = dict(zip(_COUNTED_SIGNALS, tables.query(_SIGNALS_SQL).fetchall()[0], strict=True))
     signals = frozenset(signal for signal in SIGNALS if held.get(signal) or (signal == 'plan' and plans))
-    node_metrics: dict[int | None, dict[int, dict[str, float]]] = {}
-    for execution_id, node_id, name, total in tables.query(_NODE_METRICS_SQL).fetchall():
-        node_metrics.setdefault(execution_id, {}).setdefault(node_id, {})[name] = total
+    node_metrics: dict[int | None, dict[int, dict[str, float]]] = {
+        execution_id: totals for execution_id, totals in tables.node_metric_totals().items()
+    }
     application = tables.query('SELECT app_id FROM application').fetchone()
     from sparkxray.tables.registry import WALL_SHARES_SQL
 

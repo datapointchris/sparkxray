@@ -58,7 +58,7 @@ task duration: 0 below a ratio of 5, and 1 at a ratio of 10.
 A stage ends when its last task does. While the slowest task runs on, the cores that finished the
 other tasks wait for it, and so does every stage after it. A ratio alone fires on stages of tiny
 tasks, where a 400 ms task is 20 times a 20 ms median and nothing is worth fixing. So the rule
-also needs the slowest task to run at least 30 s past the median.
+also needs the slowest task to run at least {min_gap_ms} past the median.
 
 ## Where the Spark UI shows it
 

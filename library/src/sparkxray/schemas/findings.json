@@ -57,17 +57,17 @@
         "evidence", "thresholds", "impact_seconds", "confidence", "confidence_reason", "remediation", "docs"
       ],
       "properties": {
-        "schema_version": {"const": 1},
+        "schema_version": {"const": 1, "description": "The version of this shape. A field removed or a meaning changed raises it, and a field added does not."},
         "finding_id": {
           "type": "string",
           "pattern": "^[a-z]+\\.[a-z0-9]+(-[a-z0-9]+)*:(app|plan|e[0-9]+|(e[0-9]+)?n[0-9]+|s[0-9]+|x.+)$",
           "description": "The rule id and a key naming the scope: app for the application, e0 for execution 0, e0n9 for its plan node 9, s4 for stage 4, x3 for executor 3. A plan analyzed alone with no execution id is plan, and its node 9 is n9. Analyzing the same log again gives the same ids."
         },
-        "rule_id": {"type": "string", "pattern": "^[a-z]+\\.[a-z0-9]+(-[a-z0-9]+)*$"},
+        "rule_id": {"type": "string", "pattern": "^[a-z]+\\.[a-z0-9]+(-[a-z0-9]+)*$", "description": "The rule that found it, as rules list names it."},
         "rule_version": {"type": "integer", "minimum": 1, "description": "Rises whenever what the rule reports changes."},
         "severity": {"$ref": "#/$defs/severity", "description": "base_severity moved one step by the scope's share of the application's wall time: down below 5%, up above 50%. info never moves, and nothing drops below low."},
         "base_severity": {"$ref": "#/$defs/severity", "description": "The rule's own grade."},
-        "title": {"type": "string"},
+        "title": {"type": "string", "description": "One line saying what was found, with its numbers."},
         "scope": {"$ref": "#/$defs/scope"},
         "evidence": {
           "type": "object",
@@ -88,10 +88,10 @@
           "additionalProperties": {"$ref": "#/$defs/applied_threshold"}
         },
         "impact_seconds": {"type": ["number", "null"], "minimum": 0, "description": "The wall time a fix could recover. Null where no one can say, as for a rule reading only the plan."},
-        "confidence": {"enum": ["high", "medium", "low"]},
+        "confidence": {"enum": ["high", "medium", "low"], "description": "How sure the rule is that the measurement shows the problem it names."},
         "confidence_reason": {"type": ["string", "null"], "description": "Why confidence is below high."},
-        "remediation": {"type": "array", "items": {"type": "string"}},
-        "docs": {"type": "array", "items": {"type": "string"}}
+        "remediation": {"type": "array", "items": {"type": "string"}, "description": "What to try, in the order to try it."},
+        "docs": {"type": "array", "items": {"type": "string"}, "description": "Pages that explain the problem and its fixes."}
       }
     },
     "scope": {
@@ -100,14 +100,14 @@
       "description": "The ids of what the finding is about. An id that does not apply is null.",
       "required": ["app_id", "sql_execution_id", "plan_node_id", "plan_node_label", "stage_id", "stage_attempt", "job_id", "executor_id", "worst_task_ids"],
       "properties": {
-        "app_id": {"type": ["string", "null"]},
-        "sql_execution_id": {"type": ["integer", "null"]},
+        "app_id": {"type": ["string", "null"], "description": "The application the finding is about. Null for a plan analyzed alone."},
+        "sql_execution_id": {"type": ["integer", "null"], "description": "The SQL execution it is about."},
         "plan_node_id": {"type": ["integer", "null"], "description": "The node's number in the execution's last plan, as plan_nodes numbers it."},
-        "plan_node_label": {"type": ["string", "null"]},
-        "stage_id": {"type": ["integer", "null"]},
-        "stage_attempt": {"type": ["integer", "null"]},
-        "job_id": {"type": ["integer", "null"]},
-        "executor_id": {"type": ["string", "null"]},
+        "plan_node_label": {"type": ["string", "null"], "description": "The line Spark printed for that node."},
+        "stage_id": {"type": ["integer", "null"], "description": "The stage it is about."},
+        "stage_attempt": {"type": ["integer", "null"], "description": "The attempt of that stage it measured."},
+        "job_id": {"type": ["integer", "null"], "description": "The job it is about."},
+        "executor_id": {"type": ["string", "null"], "description": "The executor it is about."},
         "worst_task_ids": {"type": "array", "items": {"type": "integer"}, "description": "The tasks that show the finding most, worst first."}
       }
     },

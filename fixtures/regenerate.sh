@@ -32,6 +32,7 @@ readonly VARIANTS=(
   spark-4.2.0-plan-rules
   spark-3.5.9-stage-rules
   spark-4.2.0-stage-rules
+  spark-3.5.9-edited-events
   glue-5.0
   apache-spark-events
 )
@@ -103,6 +104,16 @@ readonly STAGE_RULES_CONF=(
   --conf spark.sql.adaptive.coalescePartitions.enabled=false
   --conf spark.sql.shuffle.partitions=16
   --conf spark.shuffle.compress=false
+)
+
+# Settings the edited-events job runs under: the stage-rules cluster, with
+# spark.sql.shuffle.partitions left unset. edit_events.py then edits the plain log Spark writes.
+readonly EDITED_EVENTS_CONF=(
+  --master 'local-cluster[2,2,1024]'
+  --conf spark.executor.memory=1g
+  --conf spark.eventLog.enabled=true
+  --conf spark.eventLog.dir=file:///out
+  --conf spark.eventLog.logStageExecutorMetrics=true
 )
 
 # A pandas UDF needs pyarrow and pandas, and neither Spark image ships them. Spark 4.2 refuses a
@@ -282,6 +293,15 @@ run_variant() {
       ;;
     spark-4.2.0-stage-rules)
       submit "$SPARK_4" "$out" /opt/spark/bin/spark-submit "${STAGE_RULES_CONF[@]}" /job/stage_rules_job.py
+      ;;
+    spark-3.5.9-edited-events)
+      submit "$SPARK_3" "$out" /opt/spark/bin/spark-submit "${EDITED_EVENTS_CONF[@]}" /job/edited_events_job.py
+      local log
+      for log in "$out"/app-*; do
+        python3 "$fixtures/edit_events.py" <"$log" >"$log.edited"
+        mv "$log.edited" "$log"
+      done
+      zstd_plain "$out"/app-*
       ;;
     glue-5.0)
       # Glue's own spark-defaults.conf stays in force, apart from where the log goes.

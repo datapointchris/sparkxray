@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Annotated
 
 import typer
-from rich.text import Text
 
 from sparkxray_cli import render
 from sparkxray_cli.log_opening import open_tables
@@ -14,22 +13,25 @@ from sparkxray_cli.shared_parameters import LogArgument
 
 app = typer.Typer(no_args_is_help=True, help='Ask the run anything with SQL over its tables, which any Parquet reader also opens.')
 
+_COLUMN_KEYS = ('name', 'type', 'unit', 'description')
+
 
 @app.command('list')
 def list_tables(log: LogArgument, as_json: JsonOption = False) -> None:
-    """List the tables and views a query reads: rows, columns with their types and units, and each Parquet file."""
+    """List the tables and views a query reads: rows, each Parquet file, and every column's type, unit and what it holds."""
     listed = open_tables(log).listing()
     if as_json:
         render.emit_json([table.to_json() for table in listed])
         return
-    table = render.table()
-    table.add_column('name', style='bold')
-    table.add_column(render.header('row_count'), justify='right')
-    table.add_column('description and columns', overflow='fold')
     for entry in listed:
-        columns = ', '.join(f'{column.name} ({column.unit})' if column.unit else column.name for column in entry.columns)
-        table.add_row(entry.name, f'{entry.row_count:,}', Text.assemble(entry.description, '\n', (columns, 'dim')))
-    render.print_table(table)
+        render.print_described(
+            f'{entry.name}  {entry.row_count:,} {"row" if entry.row_count == 1 else "rows"}',
+            [column.to_json() for column in entry.columns],
+            _COLUMN_KEYS,
+            summary=entry.description,
+            location=entry.path,
+        )
+    render.note('what a metric column means in Spark, and its unit there: sparkxray metrics show NAME')
 
 
 @app.command('query')

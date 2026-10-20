@@ -1,5 +1,11 @@
 """What a run did, read from a log's tables: per stage, task, executor and SQL execution, ready to print or emit as JSON."""
 
+from sparkxray.summaries.annotated_plans import AnnotatedNode
+from sparkxray.summaries.annotated_plans import AnnotatedPlan
+from sparkxray.summaries.annotated_plans import HostedSubquery
+from sparkxray.summaries.annotated_plans import NodeDetails
+from sparkxray.summaries.annotated_plans import NodeMetric
+from sparkxray.summaries.annotated_plans import annotated_plan
 from sparkxray.summaries.application import ApplicationDetail
 from sparkxray.summaries.application import application_detail
 from sparkxray.summaries.executors import executor_summaries
@@ -12,9 +18,15 @@ from sparkxray.summaries.stages import stage_summaries
 from sparkxray.summaries.stages import stage_tasks
 
 __all__ = [
+    'AnnotatedNode',
+    'AnnotatedPlan',
     'ApplicationDetail',
+    'HostedSubquery',
+    'NodeDetails',
+    'NodeMetric',
     'SqlExecutionDetail',
     'StageDetail',
+    'annotated_plan',
     'application_detail',
     'executor_summaries',
     'sql_detail',

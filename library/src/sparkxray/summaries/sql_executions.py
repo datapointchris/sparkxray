@@ -6,6 +6,8 @@ import dataclasses as dc
 from typing import Any
 
 from sparkxray.errors import NotInRunError
+from sparkxray.plan.aqe_changes import AqeChanges
+from sparkxray.plan.aqe_changes import aqe_changes
 from sparkxray.summaries.ordering import ordered_rows
 from sparkxray.tables.registry import WALL_SHARES_SQL
 from sparkxray.tables.relations import Tables
@@ -71,14 +73,23 @@ GROUP BY plan_nodes.operator ORDER BY node_count DESC, plan_nodes.operator
 
 @dc.dataclass(frozen=True, slots=True)
 class SqlExecutionDetail:
-    """One SQL execution's summary, the jobs it ran, and how many of each operator its last plan holds."""
+    """One SQL execution's summary, the jobs it ran, how many of each operator its last plan holds, and what AQE changed.
+
+    `aqe_changes` is None for an execution AQE never re-planned.
+    """
 
     execution: dict[str, Any]
     jobs: Rows
     operator_counts: Rows
+    aqe_changes: AqeChanges | None
 
     def to_json(self) -> dict[str, Any]:
-        return {'execution': self.execution, 'jobs': self.jobs.to_json(), 'operator_counts': self.operator_counts.to_json()}
+        return {
+            'execution': self.execution,
+            'jobs': self.jobs.to_json(),
+            'operator_counts': self.operator_counts.to_json(),
+            'aqe_changes': None if self.aqe_changes is None else self.aqe_changes.to_json(),
+        }
 
 
 def sql_summaries(tables: Tables, *, limit: int | None = None) -> Rows:
@@ -87,10 +98,16 @@ def sql_summaries(tables: Tables, *, limit: int | None = None) -> Rows:
 
 
 def sql_detail(tables: Tables, execution_id: int) -> SqlExecutionDetail:
-    """One SQL execution with its jobs and operators. An execution the run does not hold raises `NotInRunError`."""
+    """One SQL execution with its jobs, operators and AQE changes. An execution the run does not hold raises `NotInRunError`."""
     held = [row[0] for row in tables.query('SELECT execution_id FROM sql_executions ORDER BY execution_id').fetchall()]
     if execution_id not in held:
         raise NotInRunError(f'the run has no SQL execution {execution_id}', field='execution_id', valid=[str(held_id) for held_id in held])
     parameters = {'execution_id': execution_id}
     execution = rows_of(tables.query(_EXECUTION_SQL, parameters)).to_json()[0]
-    return SqlExecutionDetail(execution, rows_of(tables.query(_JOBS_SQL, parameters)), rows_of(tables.query(_OPERATORS_SQL, parameters)))
+    changes = None
+    if execution['plan_version_count'] > 1:
+        final = tables.plan(execution_id)
+        metrics = tables.node_metric_totals(execution_id, final.version).get(execution_id, {})
+        changes = aqe_changes(tables.plan(execution_id, 0), final, metrics, update_count=final.version)
+    jobs, operators = rows_of(tables.query(_JOBS_SQL, parameters)), rows_of(tables.query(_OPERATORS_SQL, parameters))
+    return SqlExecutionDetail(execution, jobs, operators, changes)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import importlib.resources
 import json
 import math
 import os
@@ -159,6 +160,13 @@ class Finding:
 
 def evidence_json(evidence: Mapping[str, Evidence]) -> dict[str, Any]:
     return {key: [_number(item) for item in value] if isinstance(value, tuple) else _number(value) for key, value in evidence.items()}
+
+
+def findings_column_descriptions() -> dict[str, str]:
+    """What each `findings.parquet` column holds, read from `schemas/findings.json`: a finding's fields, and its scope's ids."""
+    schema = json.loads(importlib.resources.files('sparkxray').joinpath('schemas', 'findings.json').read_text())
+    fields = {**schema['$defs']['finding']['properties'], **schema['$defs']['scope']['properties']}
+    return {name: field['description'] for name, field in fields.items() if 'description' in field}
 
 
 def write_findings_parquet(findings: Sequence[Finding], analysis: Mapping[str, Any], path: Path) -> None:

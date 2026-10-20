@@ -163,6 +163,26 @@ and a node key would claim it is about one operator.
 The id is stable within one log only. Stage numbers shift between runs, so comparing two runs
 matches findings by rule and aligned scope, never by this string.
 
+## A stage finding names the plan node behind it where one stands out
+
+A stage runs several operators of one execution's plan. `stage.shuffle-skew` names the join that
+read the skewed shuffle, where exactly one sort-merge or shuffled hash join ran in the stage.
+`stage.spill` and `stage.spill-skew` name the node that spilled most in the execution's last
+plan: a sort, an aggregate or a join. A spill no plan node counts names none. A shuffle write's
+sorter spills that way.
+
+A node is ranked by its own part of `spill size`. `SortExec` records all the task spilled while
+it read its input, so a sort's figure also counts the spills of every node below it in the task.
+`plan_nodes.enclosing_sort_id` names that sort for each node, up to the first exchange or query
+stage. The shared `own_spills` SQL takes those nodes' figures off the sort's. Ranked by the raw
+figure, the outermost sort of a pipeline would always win.
+
+In the base fixture's stage 4, the outer sort records 6.1 GiB, the stage's whole spill. Its own
+part is 4.1 GiB, and the two sorts under its join hold the rest.
+
+The node joins the finding's scope, and its id stays the stage's. The finding is about the stage,
+and the node says where in the plan to look.
+
 ## Each threshold names where it came from
 
 A `Threshold` carries a `source` beside its default. Most defaults come from published prior art:
@@ -199,6 +219,34 @@ bytes. Spark's own default for `skewedPartitionThresholdInBytes` is written `256
 An override naming a rule or threshold the catalog does not hold is refused, even when the
 analysis does not run that rule. So one file serves every subset of rules, and a misspelling never
 passes silently.
+
+## A lesson names a threshold as `{name}`, so it prints at the value the rule applies
+
+Every rule's lesson answers four questions, under four headings: what it measures, why it costs
+time, where the Spark UI shows it, and how to fix it. A lesson that states a threshold names it as
+`{min_bytes}`, never as a number. `Rule.lesson_text(values)` prints each at the value given, or at
+its default, as a sentence would: `256 MiB`, `5 min`, `8%`, `5x` or `100,000,000`. So
+`sparkxray rules show stage.task-skew --threshold stage.task-skew.min_gap_ms=1000` says "at least
+1 s past the median". Many lessons state no threshold in their prose. Every `rules show` lists
+each threshold at its applied value in its Thresholds table, with the layer that set it.
+
+A placeholder must name one of the rule's thresholds, and takes no format or conversion. A brace
+that opens no placeholder is refused too. Each fails when the rule is built, as `E-RULE-004`.
+
+*Rejected:* writing the number into the prose. An override would leave the lesson stating a floor
+the rule no longer judges by.
+
+*Rejected:* `$name`. A SQL rule already reads its thresholds as `$name` parameters.
+
+## Each lesson ends with what the rule found on a fixture log
+
+`sparkxray rules show` follows the lesson with one finding the rule reported on a committed
+fixture: its title, scope, severity and evidence, and the log it came from. The library ships one
+per rule in `sparkxray/rules/lesson_examples.json`, and `rule_lesson(rule_id)` returns it beside
+the lesson. `fixtures/write_lesson_examples.py` writes the file. The rules test fails on an
+example its log no longer reports, so a lesson never shows output the rule has stopped giving.
+
+*Rejected:* evidence written by hand. Nothing would hold it to what the rule reports.
 
 ## Findings are written beside the tables they came from
 

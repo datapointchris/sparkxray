@@ -39,12 +39,21 @@ def dim(spark: SparkSession) -> DataFrame:
 
 
 def skewed_join(spark: SparkSession, output: str) -> None:
-    describe(
-        spark,
-        ('stage.shuffle-skew', 'plan.smj-small-side'),
-        (),
-        'skewed sort-merge join: 80% of fact rows share key 0',
-    )
+    if spark.conf.get('spark.sql.adaptive.skewJoin.enabled') == 'true':
+        # Skew-join handling splits key 0's partition under the skew floor, and each split still spills far more than the rest.
+        describe(
+            spark,
+            ('stage.spill-skew', 'plan.smj-small-side'),
+            ('stage.shuffle-skew',),
+            'skewed sort-merge join, split by skew-join handling: 80% of fact rows share key 0',
+        )
+    else:
+        describe(
+            spark,
+            ('stage.shuffle-skew', 'plan.smj-small-side'),
+            (),
+            'skewed sort-merge join: 80% of fact rows share key 0',
+        )
     joined = fact(spark).join(dim(spark), 'k')
     # Reading the padding keeps it in the shuffle. Spark prunes a column nothing downstream reads.
     totals = joined.groupBy('name').agg(sf.sum('v').alias('total'), sf.max('pad').alias('pad'))

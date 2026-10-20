@@ -58,7 +58,8 @@ _ESTIMATE_UNRELIABLE_LESSON = """\
 ## What it measures
 
 The optimizer's size estimate for a node of the optimized logical plan, against the summed sizes
-of the relations under it, reported for the node estimated furthest over them, at over 100 times.
+of the relations under it. The rule reports the node estimated furthest over them, once its
+estimate is more than {ratio} their sum.
 The threshold is proposed here, because no tool publishes one. Only `explain(mode='cost')` prints
 the estimates, and no event log carries them, so this rule runs through `analyze_plan` alone.
 

@@ -55,7 +55,7 @@ _OVERSIZED_LESSON = """\
 
 The bytes each task of a stage read from the shuffle, at the 95th percentile and at the maximum,
 taken as the Stages tab takes them. It also reads each task's input, output and shuffle write, for
-one partition past 5 GiB in any of the four.
+one partition past {critical_bytes} in any of the four.
 
 ## Why it costs time
 

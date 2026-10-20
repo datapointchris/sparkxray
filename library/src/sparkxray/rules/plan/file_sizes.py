@@ -6,10 +6,10 @@ import math
 from collections.abc import Iterator
 from typing import Any
 
-from sparkxray.rules.plan.node_reading import FILE_SCAN_OPERATORS
+from sparkxray.plan.node_fields import FILE_SCAN_OPERATORS
+from sparkxray.plan.node_fields import scan_location
 from sparkxray.rules.plan.node_reading import counted_nodes
 from sparkxray.rules.plan.node_reading import metric
-from sparkxray.rules.plan.node_reading import scan_location
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Threshold
@@ -42,7 +42,7 @@ def _small_files_read(context: RuleContext) -> Iterator[dict[str, Any]]:
 _SMALL_FILES_READ_LESSON = """\
 ## What it measures
 
-A file scan reading more than 100 files that average under 3 MiB each, DataFlint's thresholds. The
+A file scan reading more than {many_files} files that average under {small_file_bytes} each. The
 average is the scan's `size of files read` over its `number of files read`.
 
 ## Why it costs time
@@ -108,9 +108,9 @@ def _small_files_written(context: RuleContext) -> Iterator[dict[str, Any]]:
 _SMALL_FILES_WRITTEN_LESSON = """\
 ## What it measures
 
-A write of more than 100 files that average under 3 MiB each, DataFlint's thresholds, from the
-write node's `written output` over its `number of written files`. `suggested_file_count` is how
-many files the same bytes make at 128 MiB each, DataFlint's ideal file size.
+A write of more than {many_files} files that average under {small_file_bytes} each, from the write
+node's `written output` over its `number of written files`. `suggested_file_count` is how many
+files the same bytes make at {target_file_bytes} each.
 
 ## Why it costs time
 

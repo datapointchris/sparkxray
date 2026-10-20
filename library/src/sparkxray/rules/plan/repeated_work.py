@@ -11,16 +11,16 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 from typing import Any
 
+from sparkxray.plan.node_fields import CUT_MARK
+from sparkxray.plan.node_fields import FILE_SCAN_OPERATORS
+from sparkxray.plan.node_fields import field
+from sparkxray.plan.node_fields import is_cut
+from sparkxray.plan.node_fields import scan_location
+from sparkxray.plan.node_fields import split_top_level
 from sparkxray.plan.tree import NumberedNode
 from sparkxray.plan.tree import Plan
-from sparkxray.rules.plan.node_reading import CUT_MARK
-from sparkxray.rules.plan.node_reading import FILE_SCAN_OPERATORS
 from sparkxray.rules.plan.node_reading import copies_counted_elsewhere
-from sparkxray.rules.plan.node_reading import field
-from sparkxray.rules.plan.node_reading import is_cut
 from sparkxray.rules.plan.node_reading import metric
-from sparkxray.rules.plan.node_reading import scan_location
-from sparkxray.rules.plan.node_reading import split_top_level
 from sparkxray.rules.plan.node_reading import subtree
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import RuleContext
@@ -148,8 +148,8 @@ _MISSED_EXCHANGE_REUSE_LESSON = """\
 ## What it measures
 
 Two or more `Exchange` subtrees of one plan with the same partitioning over the same input, none
-of them replaced by a `ReusedExchange`. Each needs at least 3 nodes, and the set at least 2
-occurrences, sparkDoctor's thresholds. While `spark.sql.exchange.reuse` is on, Spark replaces a
+of them replaced by a `ReusedExchange`. Each needs at least {min_nodes} nodes, and the set at least
+{min_occurrences} occurrences. While `spark.sql.exchange.reuse` is on, Spark replaces a
 second identical exchange with a `ReusedExchange` reading the first. So a repeat means reuse was
 off, or the two differ in something the printed plan does not show.
 
@@ -157,7 +157,7 @@ An event log holds the physical plan without the optimizer's reasons, so the fin
 confidence. Where the execution turned `spark.sql.exchange.reuse` off, the reason is known, and
 confidence is high.
 
-The finding is `medium` where the copies after the first shuffle at least 128 MiB between them, by
+The finding is `medium` where the copies after the first shuffle at least {min_repeated_bytes} between them, by
 their `data size`, and `info` below it or where a copy went unmeasured. The floor is proposed here,
 because no tool publishes one.
 
@@ -237,16 +237,16 @@ _REPEATED_SUBTREE_LESSON = """\
 ## What it measures
 
 Two or more subtrees of one plan with the same operators, the same expressions once their ids are
-normalized, and the same input locations: one computation planned twice. Each has at least 3
-nodes, including an exchange, join, aggregate, sort or scan, and the set at least 2 occurrences,
-sparkDoctor's thresholds. A repeat rooted at an exchange is `plan.missed-exchange-reuse`'s
+normalized, and the same input locations: one computation planned twice. Each has at least
+{min_nodes} nodes, including an exchange, join, aggregate, sort or scan, and the set at least
+{min_occurrences} occurrences. A repeat rooted at an exchange is `plan.missed-exchange-reuse`'s
 instead.
 
 An event log holds the physical plan without the optimizer's reasons, so the finding is low
 confidence.
 
-The finding is `medium` where the file scans in the copies after the first read at least 128 MiB
-between them, and `info` below it, where a scan went unmeasured, or where the copies scan no file.
+The finding is `medium` where the file scans in the copies after the first read at least
+{min_repeated_bytes} between them, and `info` below it, where a scan went unmeasured, or where the copies scan no file.
 The floor is proposed here, because no tool publishes one.
 
 ## Why it costs time
@@ -354,7 +354,7 @@ Two or more scans in one query reading the same location, with columns in common
 a reuse of the other or of a cached relation. Spark reuses an identical exchange or a cached
 relation, but it never merges two scans that differ in filter or projection.
 
-The finding is `medium` where the scans after the first read at least 128 MiB between them, and
+The finding is `medium` where the scans after the first read at least {min_repeated_bytes} between them, and
 `info` below it or where a scan went unmeasured. The floor is proposed here, because no tool
 publishes one.
 

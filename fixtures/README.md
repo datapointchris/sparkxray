@@ -5,7 +5,8 @@ run over the fixture job in `job/eventlog_job.py`. The plan-shapes variants run
 `job/plan_shapes_job.py` instead, one small query per physical plan shape. The plan-rules variants
 run `job/plan_rules_job.py`, with one query that fires each `plan.*` rule and one that keeps it
 silent. The stage-rules variants run `job/stage_rules_job.py`, with one job seeding each stage,
-executor, application and config rule a small cluster can reach.
+executor, application and config rule a small cluster can reach. The edited-events variant runs
+`job/edited_events_job.py`, then `edit_events.py` edits its log to seed the rules one host cannot.
 
 ## Each variant exercises one way Spark writes a log
 
@@ -20,9 +21,10 @@ executor, application and config rule a small cluster can reach.
 | `spark-3.5.9-killed` | Spark 3.5.9, killed mid-run, then zstd'd | an `.inprogress` name and a truncated final line |
 | `spark-4.2.0-killed` | Spark 4.2.0, killed mid-run | an unfinished rolling directory: `appstatus_*.inprogress`, no `ApplicationEnd`, and whole zstd frames ending on a whole line |
 | `spark-3.5.9-warmup` | Spark 3.5.9, `--warmup` and skew-join handling on | the second run of a run diff: every stage id shifted, one config change |
-| `spark-3.5.9-plan-shapes`, `spark-4.2.0-plan-shapes` | each Spark version, one plain file, then zstd'd | subqueries, reused exchanges, dynamic pruning, a cached relation, a Cartesian product and a Python UDF; plan text cut by `spark.sql.maxPlanStringLength` of 400 and 0, and labels cut past `spark.sql.debug.maxToStringFields` |
+| `spark-3.5.9-plan-shapes`, `spark-4.2.0-plan-shapes` | each Spark version, one plain file, then zstd'd | subqueries, reused exchanges, dynamic pruning, a cached relation, a Cartesian product, a Python UDF, and a join AQE switches from sort-merge to broadcast; plan text cut by `spark.sql.maxPlanStringLength` of 400 and 0, and labels cut past `spark.sql.debug.maxToStringFields` |
 | `spark-3.5.9-plan-rules`, `spark-4.2.0-plan-rules` | each Spark version, broadcast joins off, a 6 GiB driver, one plain file, then zstd'd | every `plan.*` rule firing and kept silent, a pandas UDF, and a broadcast over 1 GiB |
 | `spark-3.5.9-stage-rules`, `spark-4.2.0-stage-rules` | each Spark version on `local-cluster[2,2,1024]`, two executors of two cores and a 1 GiB heap, with stage executor metrics on and shuffle compression off | an executor lost to an `OutOfMemoryError` and replaced, failed and retried tasks, a failed job, a driver gap, AQE and its skew join turned off for one query, and a standalone `app-*` id |
+| `spark-3.5.9-edited-events` | Spark 3.5.9 on `local-cluster[2,2,1024]` with stage executor metrics on, then edited by `edit_events.py` and zstd'd | GC pressure, scheduler delay, deserialization, fetch wait, speculation, executor and host imbalance, oversized shuffle partitions, too few shuffle partitions, and executor and driver heaps used to 97% |
 | `glue-5.0` | AWS's Glue 5.0 image (Spark 3.5.4), under Glue's own Spark defaults | a log as Glue's runtime configures it |
 | `apache-spark-events` | Apache Spark's own test logs at v4.2.0, zstd'd | a YARN application id, multi-attempt logs ending with no final newline, a standalone app id and older event shapes, and Spark's own rolling directory |
 
@@ -69,17 +71,22 @@ stay silent. The cost-mode queries in `write_estimates` do the same, beside thei
 `glue-5.0` runs the base job under Glue's own defaults, which broadcast the 1,000-row side. Its
 description still names `plan.smj-small-side`, so no test reads a plan firing from that log.
 
-`job/stage_rules_job.py` also names the rules whose findings belong to the whole run, rather than
-to one job. They go in the `spark.sparkxray.fixture.application` property, in the same form, and
-Spark writes that property into the log's environment.
+`job/stage_rules_job.py` and `job/edited_events_job.py` also name the rules whose findings belong
+to the whole run, rather than to one job. They go in the `spark.sparkxray.fixture.application`
+property, in the same form, and Spark writes that property into the log's environment.
 
 The rules test holds each source to its descriptions. A finding scoped to a job counts under the
 job's description, one scoped to a SQL execution under the execution's, and any other under the
 run's property. Every rule under `fires=` must fire there, and none under `silent=` may. Each
-source also claims rule families: `plan.` for the base logs, the plan-rules logs and the captures,
-and `stage.` and `config.` for the stage-rules logs. A rule of a claimed family fires on exactly
-the jobs naming it. The run's property is held only to the rules it names, because an executor's
-memory peak depends on when Spark polled it.
+source also claims rule families:
+
+- `plan.` for the base logs, the warmup log, the plan-rules logs and the captures;
+- `stage.` and `config.` for the stage-rules logs and the edited-events log;
+- none for Apache's `application_1553914137147_0018`, which carries no descriptions and is read
+  for the lesson example taken from it.
+
+A rule of a claimed family fires on exactly the jobs naming it. The run's property is held only to
+the rules it names, because an executor's memory peak depends on when Spark polled it.
 
 ## The base log crosses each seeded floor, and the warmup log splits the skew
 
@@ -104,7 +111,52 @@ to ignore.
 
 `spark-3.5.9-warmup` runs one extra job first, so every stage id is 6 higher. Its skewed join is
 stage 10. Skew-join handling splits it into 19 tasks with a maximum read of 184,510,075 B, under
-the 256 MiB floor.
+the 256 MiB floor. Each split still spills far more than the median task. So under skew-join
+handling the job describes that query with `stage.spill-skew` firing and `stage.shuffle-skew`
+silent.
+
+## The edited-events log changes only the fields each rule reads
+
+Two executors on one host cannot seed some rules. A shuffle block on the same host is fetched
+without waiting, and an idle driver schedules a task at once. Spark never places a speculative copy
+on a host already running the task. A sleeping task collects no GC time. So `job/edited_events_job.py`
+runs one stage shaped for each such problem, and `edit_events.py` edits the plain log Spark wrote:
+
+```bash
+python3 edit_events.py < plain-log > edited-log
+```
+
+It moves executor 1 to a host of its own, for every event naming its host. Then it edits each job
+by the rules its description lists under `fires=`:
+
+| Rule | The edit, on each successful task of the job |
+| --- | --- |
+| `stage.gc-pressure` | `JVM GC Time` becomes a quarter of `Executor Run Time` |
+| `stage.scheduler-delay` | `Finish Time` moves 700 ms later, outside the run time |
+| `stage.deserialization` | `Executor Deserialize Time` and `Finish Time` each grow by 700 ms |
+| `stage.fetch-wait` | `Fetch Wait Time` becomes 40% of the run time, where the task read a shuffle |
+| `stage.speculation` | a task that ran 5 s or more gets a speculative copy on the other executor, launched 1.5 s after it, which succeeds as the original is killed |
+| `stage.executor-imbalance` | the first 80% of tasks to launch run on executor 0, the rest on executor 1; with executor 1 on its own host, this also seeds `stage.host-imbalance` |
+| `stage.oversized-partitions` | `Remote Bytes Read` grows so the task read 1.1 GiB, where it read a shuffle |
+
+The run's property names `executor.memory-under` and `executor.driver-memory-under`. For each,
+the first stage peak of `JVMHeapMemory` becomes 97% of the 1 GiB heap. Accumulator updates stay
+as Spark wrote them, because no rule reads them. The editor refuses a log that leaves any of its
+edits unnamed, so it never edits another job's log by mistake.
+
+## Each rule's lesson ends with a finding from these logs
+
+`write_lesson_examples.py` writes the library's `sparkxray/rules/lesson_examples.json`, which
+`sparkxray rules show` prints after each lesson:
+
+```bash
+uv run python fixtures/write_lesson_examples.py
+```
+
+For each rule it keeps the first finding on a job or query whose description names it, and
+otherwise the first finding at all. It reads its sources in the order it lists them, so a log
+beats a captured explain. It prints each rule with no finding on any source. The rules test fails
+on any example its source no longer reports, so rerun the script after a rule or a fixture changes.
 
 ## Regenerating
 
