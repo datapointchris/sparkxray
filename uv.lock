@@ -886,7 +886,7 @@ dependencies = [
 requires-dist = [
     { name = "rich", specifier = ">=13.0.0" },
     { name = "sparkxray", editable = "library" },
-    { name = "typer", specifier = ">=0.15.0" },
+    { name = "typer", specifier = ">=0.26.0" },
 ]
 
 [[package]]
