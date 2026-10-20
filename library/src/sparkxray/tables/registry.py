@@ -869,6 +869,32 @@ CORE_TIME_CTES = f"""{EXECUTOR_TIME_CTES}, workers AS (
   FROM workers
 )"""
 
+# The executors the tasks ran on, as `pool`: those with cores, or the driver alone where there are
+# none, as in local mode. `executor_count` is the most alive at once, one added at the instant
+# another is removed counting both, as Sparklens's `AppContext.scala` counts them. Their cores are
+# the resource profile's most of them ran under, the lowest id on a tie. It follows
+# `EXECUTOR_TIME_CTES`, whose `run` and `lifetimes` it reads.
+EXECUTOR_POOL_CTE = """pool_members AS (
+  SELECT * FROM lifetimes
+  WHERE core_count > 0 AND add_epoch_ms IS NOT NULL
+    AND (NOT is_driver OR NOT EXISTS (SELECT 1 FROM lifetimes AS others WHERE NOT others.is_driver AND others.core_count > 0))
+), pool_profiles AS (
+  SELECT coalesce(resource_profile_id, 0) AS resource_profile_id, core_count, count(*) AS member_count FROM pool_members GROUP BY ALL
+), pool AS (
+  SELECT coalesce((
+      SELECT max(alive_count) FROM (
+        SELECT count(*) FILTER (WHERE other.add_epoch_ms <= member.add_epoch_ms
+          AND coalesce(other.remove_epoch_ms, run.end_epoch_ms) >= member.add_epoch_ms) AS alive_count
+        FROM pool_members AS member, pool_members AS other, run
+        GROUP BY member.executor_id
+      )
+    ), 0) AS executor_count,
+    (SELECT core_count FROM pool_profiles ORDER BY member_count DESC, resource_profile_id, core_count DESC LIMIT 1) AS executor_core_count,
+    (SELECT resource_profile_id FROM pool_profiles ORDER BY member_count DESC, resource_profile_id, core_count DESC LIMIT 1)
+      AS resource_profile_id,
+    (SELECT count(DISTINCT resource_profile_id) FROM pool_profiles) AS resource_profile_count
+)"""
+
 # Each stage's and SQL execution's wall time, and its share of the run's. A stage runs from its
 # first attempt's submission to its last completion, or to its last task's finish where it never
 # completed. An execution still running when the log ended runs to the run's end.

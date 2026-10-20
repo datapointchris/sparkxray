@@ -167,6 +167,12 @@ class UnknownMetricError(SparkxrayError):
     exit_code = 2
 
 
+class SimulationStalledError(SparkxrayError):
+    code = 'E-SIM-001'
+    raised_when = 'the executor simulation could not finish a job group, because its stages read each other in a cycle; names the stages'
+    exit_code = 3
+
+
 class UnknownSchemaError(SparkxrayError):
     code = 'E-SCHEMA-001'
     raised_when = 'a schema name is not one sparkxray ships; lists the names it does'

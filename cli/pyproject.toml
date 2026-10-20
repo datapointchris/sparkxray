@@ -30,7 +30,7 @@ Changelog = "https://github.com/datapointchris/sparkxray/releases"
 dependencies = [
     "sparkxray=={{ version }}",
     "rich>=13.0.0",
-    "typer>=0.15.0",
+    "typer>=0.26.0",
 ]
 
 [tool.uv.sources]

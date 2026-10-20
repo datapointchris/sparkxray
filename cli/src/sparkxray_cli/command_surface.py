@@ -6,21 +6,10 @@ import re
 from typing import Any
 
 import typer
+from typer._click import types as click_types  # Typer vendors click, and exports none of its types
 
 # A command with one of these verbs can write a file the caller names. Every command may write sparkxray's cache.
 _WRITING_VERBS = ('write',)
-_TYPES = {
-    'str': 'string',
-    'text': 'string',
-    'int': 'integer',
-    'int range': 'integer',
-    'float': 'number',
-    'float range': 'number',
-    'boolean': 'boolean',
-    'choice': 'choice',
-    'path': 'path',
-    'file': 'path',
-}
 _USAGE = 'a usage error, or an input sparkxray refused; the error code names which'
 
 
@@ -82,13 +71,34 @@ def _flag(option: Any) -> dict[str, Any]:
     return {
         'name': names[0],
         'aliases': names[1:],
-        'type': _TYPES.get(option.type.name, option.type.name),
+        'type': _flag_type(option.type),
         'choices': list(choices) if choices is not None else None,
         'multiple': option.multiple,
         'required': option.required,
         'default': _plain(option.default),
         'help': _first_paragraph(option.help),
     }
+
+
+def _flag_type(option_type: Any) -> str:
+    """A flag's type as capabilities name it, read from its class, because the names click gives types differ between releases.
+
+    A range subclasses its number type. A flag whose value a function parses, as `--executors 2..64` is, takes text.
+    """
+    if isinstance(option_type, click_types.FuncParamType):
+        return 'string'
+    if isinstance(option_type, click_types.BoolParamType):
+        return 'boolean'
+    if isinstance(option_type, click_types.IntParamType):
+        return 'integer'
+    if isinstance(option_type, click_types.FloatParamType):
+        return 'number'
+    if getattr(option_type, 'choices', None) is not None:
+        return 'choice'
+    # A path type names itself for what it accepts: a file, a directory, or either.
+    if isinstance(option_type, click_types.File) or option_type.name in ('path', 'file', 'directory'):
+        return 'path'
+    return 'string'
 
 
 def _plain(value: Any) -> Any:
