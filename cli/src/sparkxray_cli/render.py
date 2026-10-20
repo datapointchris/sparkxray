@@ -22,6 +22,7 @@ from rich.console import JustifyMethod
 from rich.table import Table
 from rich.text import Text
 from sparkxray import spark_ui_format
+from sparkxray.enrichment import Enrichment
 from sparkxray.errors import SparkxrayError
 from sparkxray.ingest import IngestManifest
 from sparkxray.rules import Severity
@@ -289,6 +290,14 @@ def ingest_notes(manifest: IngestManifest) -> None:
             "That holds no stage's parents, no task's accumulator updates or executor metrics, and no setting a SQL "
             'execution changed at runtime'
         )
+
+
+def enrichment_notes(app_id: str, enrichment: Enrichment) -> None:
+    """Notes on stderr about each table an enrichment joined, and each warning it carried on past."""
+    for name, count in enrichment.row_counts.items():
+        note(f'{app_id}: joined {name}, {count:,} row{"" if count == 1 else "s"}')
+    for warning in enrichment.warnings:
+        note(f'{app_id}: {warning}')
 
 
 def tables_notes(app_id: str, manifest: TablesManifest) -> None:

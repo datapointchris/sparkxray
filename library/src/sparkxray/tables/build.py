@@ -259,7 +259,7 @@ def _build(manifest: IngestManifest, key: str, out: Path) -> None:
         connection.register('plan_version_rows', rows.versions)
         for statement in _WORKING_TABLES:
             connection.execute(statement)
-        row_counts = {table.name: _write(connection, table, out / f'{table.name}.parquet') for table in TABLES}
+        row_counts = {table.name: write_table(connection, table, out / f'{table.name}.parquet') for table in TABLES}
         found = connection.execute(_LACKS).fetchone()
         lacks = tuple(lack for lack, missing in zip(_LACK_ORDER, found or (), strict=True) if missing)
     finally:
@@ -326,8 +326,8 @@ def _unparsable_line(file: IngestedFile, reported: int) -> int | None:
     return None
 
 
-def _write(connection: duckdb.DuckDBPyConnection, table: Table, path: Path) -> int:
-    """Write one table's Parquet file and return its row count."""
+def write_table(connection: duckdb.DuckDBPyConnection, table: Table, path: Path) -> int:
+    """Write one table's Parquet file from its source on `connection`, and return its row count."""
     select = ', '.join(f'CAST({column.expression} AS {column.type}) AS "{column.name}"' for column in table.columns)
     written = connection.execute(
         f'COPY (SELECT {select} FROM ({table.source}) AS source ORDER BY {table.order_by}) '

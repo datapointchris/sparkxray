@@ -126,6 +126,36 @@ class UnknownApplicationError(SparkxrayError):
     exit_code = 2
 
 
+class EnrichmentDeniedError(SparkxrayError):
+    code = 'E-ENRICH-001'
+    raised_when = 'AWS denied a CloudWatch or CloudWatch Logs read, or found no credentials or region; names the action and the resource'
+    exit_code = 3
+
+
+class UnstructuredDriverLogError(SparkxrayError):
+    code = 'E-ENRICH-002'
+    raised_when = (
+        "a driver log's first 64 KiB hold no record of Spark's structured logging, as a plain-text log4j layout writes; "
+        'names the file and its first line'
+    )
+    exit_code = 3
+
+
+class NoGlueMetricsError(SparkxrayError):
+    code = 'E-ENRICH-003'
+    raised_when = (
+        'returned as a warning beside the enrichment, never raised: CloudWatch lists no Glue observability metric for the job run, '
+        'as where it ran without --enable-observability-metrics, or over two weeks ago'
+    )
+    exit_code = 3
+
+
+class NoDriverLogError(SparkxrayError):
+    code = 'E-ENRICH-004'
+    raised_when = 'a driver log names no file, S3 object or CloudWatch Logs stream that exists'
+    exit_code = 3
+
+
 class UnknownRuleError(SparkxrayError):
     code = 'E-RULE-001'
     raised_when = 'a rule id is not in the catalog; lists the rule ids it holds'

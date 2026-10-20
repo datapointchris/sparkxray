@@ -8,6 +8,7 @@ import pathlib
 import jsonschema
 import pytest
 from fixture_logs import FIXTURES
+from fixture_logs import driver_logs
 from fixture_logs import plain_lines
 from sparkxray.ingest import EventLog
 from sparkxray.plan import parse_plan_text
@@ -50,6 +51,8 @@ def _firings(path: pathlib.Path, cache_dir: pathlib.Path) -> tuple[dict[str, set
             every.extend(plan_only.findings)
         return captured, '', set(), every
     log = EventLog.open(path, cache_dir=cache_dir)
+    if captured_driver_logs := driver_logs(path):
+        log.enrich(driver_logs=captured_driver_logs)
     analysis = log.analyze()
     FINDINGS_SCHEMA.validate(analysis.to_json())
     jobs = dict(log.tables.query("SELECT job_id, coalesce(description, '') FROM jobs").fetchall())
@@ -94,6 +97,7 @@ def _misfired(description: str, fired: set[str], families: tuple[str, ...]) -> t
         ('logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd', ('stage.', 'config.')),
         ('logs/spark-4.2.0-stage-rules/eventlog_v2_app-20261019215829-0000', ('stage.', 'config.')),
         ('logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd', ('stage.', 'config.')),
+        ('logs/spark-4.2.0-driver-oom/eventlog_v2_local-1792509790683', ()),
         ('logs/apache-spark-events/application_1553914137147_0018.zstd', ()),
     ],
 )

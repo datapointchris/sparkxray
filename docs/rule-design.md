@@ -78,10 +78,17 @@ Findings sort by `impact_seconds`, largest first and nulls last, then by severit
 
 ## A rule declares the signals it reads, so it runs wherever they exist
 
-The signals are `plan`, `plan_metrics`, `plan_estimates`, `tasks`, `executors`, `environment` and
-`timeline`. A rule whose signals are missing is skipped, and the skip names the missing signal. So
-`plan.*` rules run on a bare `explain()` plan with no event log, and a skipped rule says what it
-would have needed.
+The signals are:
+
+- `plan`, `plan_metrics` and `plan_estimates`, from a plan;
+- `plan_stages`, which stages ran each node, which a log rebuilt from REST JSON lacks;
+- `tasks`, `executors`, `environment` and `timeline`, from the log;
+- `whole_run`, which a server past its `spark.ui.retained*` limits has dropped part of;
+- `glue_metrics`, `glue_insights` and `driver_log`, from the tables `enrich` joins.
+
+A rule whose signals are missing is skipped, and the skip names the missing signal. So `plan.*`
+rules run on a bare `explain()` plan with no event log, and a skipped rule says what it would have
+needed.
 
 `plan_estimates` is the optimizer's size estimates. Only `explain(mode='cost')` text prints them,
 and no event log carries them. So `plan.estimate-unreliable` runs through `analyze_plan` alone.
@@ -96,7 +103,7 @@ Rule ids are dotted by the evidence they read:
 | `plan.` | plan nodes, and their metrics where present |
 | `stage.` | effective tasks and stages |
 | `executor.` | executors, their memory peaks and their memory settings |
-| `app.` | jobs, stages and executors as a timeline |
+| `app.` | jobs, stages and executors as a timeline, or the driver's log and Glue's metrics |
 | `config.` | the environment, against other findings |
 
 ## A rule may read another rule's findings, and that rule runs first
@@ -392,6 +399,31 @@ evidence adds the idle DPU-hours, at four cores to a DPU. DataFlint pairs its 50
 amount, so a run of seconds fires on its start-up alone. The rule also needs `min_idle_core_ms`,
 five minutes of one core by default, before the share counts. A short local run idles a core
 minute or two starting and stopping, so the floor sits above that.
+
+## Glue's figures sit beside a log rule's evidence, and decide only the rules built on them
+
+Where a Glue run is joined, two rules add Glue's figure beside the one the log gives:
+
+- `stage.task-skew` adds `glue_metrics_skewness_ratio`, the highest `glue.driver.skewness.stage`
+  over any period the stage ran in.
+- `executor.idle-cores` adds `glue_worker_utilization_share`, the run's mean
+  `glue.driver.workerUtilization`.
+
+Neither figure changes whether its rule fires. Glue's stage skewness carries no stage dimension.
+So stages that ran at once share one value, while the log's ratio comes from the stage's own
+tasks.
+
+`app.driver-memory-pressure` reads Glue's heap metric alone, and fires on a span, never a peak.
+The heap fills between collections, so one full sample can be a collection about to run. It
+reports each run of consecutive periods at or over `min_heap_used_fraction` that lasted at least
+`min_sustained_ms`. Glue publishes every 30 seconds, but sparkxray reads one-minute averages, the
+shortest period it asks CloudWatch for. So the default is two of those minutes. No prior art
+gives either threshold, so both are proposed.
+
+`app.driver-oom` reads the driver's log alone, because the event log holds no trace of a driver
+OOM. In the fixture run, a `collect` larger than the driver's heap ended its job as succeeded. Its
+log closed with the application's end event, as a clean run's does. A record carrying
+`java.lang.OutOfMemoryError` is the only sign, so one is enough to fire, at high.
 
 ## An executor's loss is reported unless it was ended on purpose
 

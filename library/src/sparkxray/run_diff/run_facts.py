@@ -92,7 +92,7 @@ SELECT DISTINCT host FROM executors WHERE host IS NOT NULL
 UNION SELECT value FROM environment WHERE section = 'spark' AND key = 'spark.driver.host'
 """
 # Every exception the run logged: each task attempt that did not succeed, each stage attempt that
-# failed and each job that did, by the one line naming the error.
+# failed, each job that did, and each a joined driver log or Glue insight holds, by the line naming it.
 _EXCEPTIONS_SQL = f"""
 SELECT 'task' AS source, end_reason AS reason, {failure_line('end_reason_detail')} AS line, task_id, stage_id,
   finish_epoch_ms AS epoch_ms
@@ -102,13 +102,23 @@ SELECT 'stage', NULL, {failure_line('failure_reason')}, NULL, stage_id, complete
 UNION ALL
 SELECT 'job', NULL, {failure_line('failure_reason')}, NULL, {blamed_stage('failure_reason')}, end_epoch_ms
 FROM jobs WHERE result = 'JobFailed'
+UNION ALL
+SELECT 'driver_log', NULL, concat_ws(': ', exception.class, nullif(split_part(exception.msg, chr(10), 1), '')), NULL, NULL,
+  logged_epoch_ms
+FROM driver_log WHERE exception.class IS NOT NULL
+UNION ALL
+SELECT 'glue_insights', event, {failure_line('failure_reason')}, NULL, NULL, logged_epoch_ms
+FROM glue_insights WHERE failure_reason IS NOT NULL
 ORDER BY epoch_ms NULLS LAST, source, task_id NULLS LAST
 """
 
 
 @dc.dataclass(frozen=True, slots=True)
 class LoggedException:
-    """One exception a run logged: by a task attempt, a stage attempt or a job, with the one line naming it."""
+    """One exception a run logged, with the one line naming it.
+
+    A task attempt, a stage attempt or a job logged it, or the driver's structured log or Glue's job run insights held it.
+    """
 
     source: str
     reason: str | None

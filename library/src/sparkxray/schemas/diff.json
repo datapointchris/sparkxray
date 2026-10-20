@@ -219,10 +219,10 @@
           "description": "new: only run B logged it. recurring: run B and a run A that failed. routine: run B and a run that succeeded, A or a baseline, so a healthy run throws it too. resolved: only run A.",
           "enum": ["new", "recurring", "routine", "resolved"]
         },
-        "source": {"description": "What logged it: a task attempt that did not succeed, a stage attempt that failed, or a job that failed.", "enum": ["task", "stage", "job"]},
+        "source": {"description": "What logged it: a task attempt that did not succeed, a stage attempt that failed, a job that failed, a record of a driver log joined with --driver-log that carries a throwable, or an event of Glue's job run insights joined with --glue-run.", "enum": ["task", "stage", "job", "driver_log", "glue_insights"]},
         "key": {
           "type": "string",
-          "description": "The one line naming the error, with the run's hosts, paths, UUIDs, hex ids and numbers replaced by <host>, <path>, <uuid>, <hex> and <n>. A task's line leads with its end reason, but for an ExceptionFailure, whose line leads with the exception's class."
+          "description": "The one line naming the error, with the run's hosts, paths, UUIDs, hex ids and numbers replaced by <host>, <path>, <uuid>, <hex> and <n>. A task's line leads with its end reason, but for an ExceptionFailure, whose line leads with the exception's class. A Glue insight's line leads with its event."
         },
         "example": {"type": "string", "description": "The first line logged under the key, as logged."},
         "a_count": {"type": "integer"},

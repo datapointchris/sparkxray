@@ -97,10 +97,10 @@ A test pins a fixture number from `stage_totals.py`, never from sparkxray's own 
 Everything goes under `$XDG_CACHE_HOME/sparkxray/`, or the `cache_dir` a caller passes. Downloaded
 objects go under `logs/s3/`, what a History Server or driver UI served, or the log rebuilt from
 it, under `logs/rest/`, decoded copies under `logs/decoded/`, and Parquet tables under
-`tables/<source hash>/<key>/`. `analyze` writes `findings.parquet` into the tables' directory.
-Nothing is ever written beside a user's log. An entry for an older version of a
-file is removed by a later open once it has gone a day unused, because an `EventLog` opened
-earlier still reads it.
+`tables/<source hash>/<key>/`. `analyze` writes `findings.parquet` into the tables' directory, and
+`enrich` writes each table it joins there. Nothing is ever written beside a user's log. An entry
+for an older version of a file is removed by a later open once it has gone a day unused, because
+an `EventLog` opened earlier still reads it.
 
 Decoded copies and tables are keyed on the installed sparkxray version, so no constant is bumped
 when a decoder or the build changes. A working tree's installed version moves only when `uv sync`
@@ -108,8 +108,10 @@ reinstalls it. So after editing either, pass a fresh `cache_dir` or clear the ca
 
 DuckDB never reads a URL. Ingest copies S3 objects into the cache with boto3 first, because
 DuckDB's `httpfs` extension downloads itself at first use and locked-down networks block that.
-boto3 is imported only in `sparkxray/ingest/aws.py`, and every AWS call goes through it. S3 is
-verified against a stand-in server, such as moto's, named by `AWS_ENDPOINT_URL_S3`. httpx2 is
+boto3 is imported only in `sparkxray/ingest/aws.py`, and every AWS call goes through it: S3,
+CloudWatch and CloudWatch Logs. Each is verified against a stand-in server, such as moto's, named
+by `AWS_ENDPOINT_URL_S3`, `AWS_ENDPOINT_URL_CLOUDWATCH` or `AWS_ENDPOINT_URL_CLOUDWATCH_LOGS`.
+Nothing is ever written to AWS. httpx2 is
 imported only in `sparkxray/ingest/rest_client.py`, and every request to a Spark server goes
 through it. A server is verified against a History Server started in the `apache/spark` image, or
 against the answers `fixtures/record_history_server_rest.py` saved from one.

@@ -39,6 +39,8 @@ from sparkxray.ingest.manifest import ReadCodec
 from sparkxray.ingest.platforms import infer_platform
 
 if TYPE_CHECKING:
+    from sparkxray.enrichment import Enrichment
+    from sparkxray.enrichment import GlueRun
     from sparkxray.rules.analysis import Analysis
     from sparkxray.tables.relations import Tables
 
@@ -95,6 +97,22 @@ class EventLog:
         from sparkxray.rules.analysis import analyze
 
         return analyze(self, rules=rules, thresholds=thresholds, threshold_file=threshold_file, threshold_flags=threshold_flags)
+
+    def enrich(
+        self,
+        *,
+        glue_run: GlueRun | None = None,
+        driver_logs: Sequence[str] = (),
+        profile: str | None = None,
+        region: str | None = None,
+    ) -> Enrichment:
+        """Join a Glue job run's metrics and insights, and Spark's structured logs, to this log's tables.
+
+        `sparkxray.enrichment.enrich` describes the sources, and a later `analyze` reads them.
+        """
+        from sparkxray.enrichment import enrich
+
+        return enrich(self.tables, cache=self.cache_directory, glue_run=glue_run, driver_logs=driver_logs, profile=profile, region=region)
 
     @classmethod
     def open(

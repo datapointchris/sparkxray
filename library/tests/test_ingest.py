@@ -1,4 +1,4 @@
-"""Every codec Spark writes a log in decodes to the lines Spark wrote, and a server's log reads as the file does."""
+"""Every codec Spark writes a log in decodes to the lines Spark wrote, a server's log reads as the file does, a plain driver log fails."""
 
 import contextlib
 import http.server
@@ -14,6 +14,8 @@ from fixture_logs import FIXTURES
 from fixture_logs import plain_bytes
 from fixture_logs import plain_lines
 from fixture_logs import rolled_files
+from sparkxray.enrichment.driver_logs import driver_log_files
+from sparkxray.errors import UnstructuredDriverLogError
 from sparkxray.ingest import EventLog
 from sparkxray.tables import TABLES
 
@@ -150,3 +152,13 @@ def _history_server(recording: pathlib.Path, log: pathlib.Path, *, serves_logs: 
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_a_driver_log_without_structured_logging_is_refused_naming_its_first_line(tmp_path: pathlib.Path) -> None:
+    plain = tmp_path / 'stderr.log'
+    plain.write_text('26/10/20 10:00:00 INFO SparkContext: Running Spark version 4.2.0\n26/10/20 10:00:01 INFO Utils: started\n')
+
+    with pytest.raises(UnstructuredDriverLogError, match='Running Spark version 4.2.0') as refused:
+        driver_log_files([str(plain)], cache=tmp_path, scratch=tmp_path, profile=None, region=None)
+
+    assert (refused.value.code, refused.value.exit_code) == ('E-ENRICH-002', 3)

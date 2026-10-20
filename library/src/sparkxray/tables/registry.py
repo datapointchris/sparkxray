@@ -832,6 +832,122 @@ TABLES: tuple[Table, ...] = (
     _NODE_STAGES,
 )
 
+# The enrichment tables read sources beside the log rather than the log, and `sparkxray.enrichment`
+# writes them. Each source reads one working relation the enrichment registers:
+#
+# - `glue_metric_samples`, one CloudWatch datapoint per row;
+# - `glue_insight_events`, one CloudWatch Logs event per row from the job run insights streams;
+# - `driver_log_records`, one JSON object per row from each structured log, beside the line it was on.
+_GLUE_METRICS = Table(
+    name='glue_metrics',
+    description="Glue's observability metrics for the job run, one row per CloudWatch datapoint: a metric's statistic over one period.",
+    source='SELECT * FROM glue_metric_samples',
+    columns=_columns(
+        ('metric', 'VARCHAR', 'metric', "The metric's name in CloudWatch's Glue namespace, as glue.driver.memory.heap.used.percentage."),
+        (
+            'observability_group',
+            'VARCHAR',
+            'observability_group',
+            "Its ObservabilityGroup dimension: job_performance, resource_utilization, throughput or error. AWS's reference gives "
+            'throughput metrics resource_utilization, and its Grafana dashboard throughput.',
+        ),
+        ('metric_type', 'VARCHAR', 'metric_type', 'Its Type dimension: gauge or count.'),
+        (
+            'source',
+            'VARCHAR',
+            'source',
+            "A throughput metric's Source dimension: the S3 path or table read, cut to 500 characters, or ALL. Null on other metrics.",
+        ),
+        (
+            'sink',
+            'VARCHAR',
+            'sink',
+            "A throughput metric's Sink dimension: the S3 path or table written, cut to 500 characters, or ALL. Null on other metrics.",
+        ),
+        (
+            'statistic',
+            'VARCHAR',
+            'statistic',
+            'The statistic read from CloudWatch: Sum for a count, Maximum for a throughput gauge, which is a running total, '
+            'and Average for any other gauge.',
+        ),
+        (
+            'unit',
+            'VARCHAR',
+            'unit',
+            "The unit AWS's metric reference gives the metric: Percentage, Bytes, Gigabytes or Count. Null for a metric it does not list.",
+        ),
+        ('period_ms', 'BIGINT', 'period_ms', 'The length of the period the value aggregates.'),
+        ('period_start_epoch_ms', 'BIGINT', 'period_start_epoch_ms', 'When the period the value aggregates began.'),
+        ('value', 'DOUBLE', 'value', 'The statistic over the period, as CloudWatch returned it.'),
+    ),
+    order_by='metric, source NULLS FIRST, sink NULLS FIRST, period_start_epoch_ms',
+)
+
+# A rule-based insight is a log4j line ending in a JSON document, and an exception analysis is text.
+_INSIGHT_JSON = "regexp_extract(message, '(?s)(\\{.*\\})', 1)"
+_GLUE_INSIGHTS = Table(
+    name='glue_insights',
+    description="Glue's job run insights for a failed run: each event of its exception analysis and its rule-based root cause.",
+    source=f'SELECT *, CASE WHEN json_valid({_INSIGHT_JSON}) THEN {_INSIGHT_JSON} END AS insight_json FROM glue_insight_events',
+    columns=_columns(
+        (
+            'log_stream',
+            'VARCHAR',
+            'log_stream',
+            'The CloudWatch Logs stream: <run id>-job-insights-rca-driver or <run id>-job-insights-rule-driver.',
+        ),
+        ('logged_epoch_ms', 'BIGINT', 'logged_epoch_ms', 'When CloudWatch Logs recorded the event.'),
+        ('message', 'VARCHAR', 'message', 'The event as logged.'),
+        (
+            'event',
+            'VARCHAR',
+            "nullif(regexp_extract(message, 'Event: (\\w+)', 1), '')",
+            "The exception analysis's event name, as GlueExceptionAnalysisTaskFailed or GlueETLJobExceptionEvent.",
+        ),
+        (
+            'failure_reason',
+            'VARCHAR',
+            "nullif(regexp_extract(message, '(?s)Failure Reason: (.*)$', 1), '')",
+            "The exception analysis's failure reason: the exception or traceback the event carried.",
+        ),
+        (
+            'root_cause',
+            'VARCHAR',
+            "coalesce(nullif(regexp_extract(message, 'Root Cause Analysis Result: (.*)$', 1), ''), "
+            "insight_json->>'$.details.rootCauseAnalysis')",
+            "The root cause: the script line the exception analysis names, or the rule-based insight's rootCauseAnalysis.",
+        ),
+        ('cause_issue', 'VARCHAR', "insight_json->>'$.cause.issue'", "The rule-based insight's cause.issue: the exception it matched."),
+        ('recommended_action', 'VARCHAR', "insight_json->>'$.details.action'", "The rule-based insight's recommended action."),
+    ),
+    order_by='logged_epoch_ms, log_stream',
+)
+
+_DRIVER_LOG = Table(
+    name='driver_log',
+    description='Each record of the structured logs Spark wrote with spark.log.structuredLogging.enabled, from every file given.',
+    source='SELECT * FROM driver_log_records WHERE ts IS NOT NULL',
+    columns=_columns(
+        ('log_file', 'VARCHAR', 'log_file', 'The log the record came from, as a file:// or s3:// URI, or cloudwatch:<group>:<stream>.'),
+        ('line_number', 'BIGINT', 'line_number', "The record's line in its log, counted from 1 as rg -n counts."),
+        ('logged_epoch_ms', 'BIGINT', "epoch_ms(try_strptime(ts, '%Y-%m-%dT%H:%M:%S.%gZ'))", 'When the record was logged, from its ts.'),
+        ('level', 'VARCHAR', 'level', "The record's log4j level, as INFO or ERROR."),
+        ('logger', 'VARCHAR', 'logger', 'The logging class, by its simple name.'),
+        ('message', 'VARCHAR', 'msg', "The record's msg."),
+        ('context', 'MAP(VARCHAR, VARCHAR)', 'context', 'The MDC Spark set, as executor_id, task_name or thread_name.'),
+        (
+            'exception',
+            'STRUCT(class VARCHAR, msg VARCHAR, stacktrace STRUCT(class VARCHAR, method VARCHAR, file VARCHAR, line VARCHAR)[])',
+            'exception',
+            'The throwable logged with the record: its class, its message and its stack frames. Null where none was.',
+        ),
+    ),
+    order_by='logged_epoch_ms, log_file, line_number',
+)
+
+ENRICHMENT_TABLES: tuple[Table, ...] = (_GLUE_METRICS, _GLUE_INSIGHTS, _DRIVER_LOG)
+
 # Each partition of each stage once: its first success across the stage's attempts. Retries and
 # speculative copies stay in `tasks`, where they show the work they wasted.
 TASKS_EFFECTIVE = 'CREATE VIEW tasks_effective AS SELECT * FROM tasks WHERE effective'
@@ -886,6 +1002,19 @@ OWN_SPILLS_CTE = """spill_sizes AS (
 
 # A Glue DPU is 4 vCPUs and 16 GB.
 GLUE_DPU_CORES = 4
+
+
+def glue_shares_cte(metric: str) -> str:
+    """Each datapoint of one Glue percentage metric as a fraction, as the common table expression `glue_shares`.
+
+    AWS gives these metrics only as "Unit: Percentage", and the values it publishes run from 0 to 1.
+    So a run's series reads as 0 to 100 only where one of its values passes 1.
+    """
+    return f"""glue_shares AS (
+  SELECT period_start_epoch_ms, period_ms, value / CASE WHEN max(value) OVER () > 1 THEN 100 ELSE 1 END AS share
+  FROM glue_metrics WHERE metric = '{metric}' AND value IS NOT NULL
+)"""
+
 
 # The core time the run held and the part its tasks used. The executors hold it, or the driver alone
 # where there are none, as in local mode, where it runs the tasks.

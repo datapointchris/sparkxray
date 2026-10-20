@@ -4,7 +4,8 @@
 
 Each rule gets the first finding it reports on a job or query whose description seeds it, as
 `fires=<rule ids>; silent=<rule ids>; <what it shows>`, and otherwise the first finding it reports
-at all. Sources are read in the order below, so a log beats a captured explain. The result goes
+at all. Sources are read in the order below, so a log beats a captured explain, and a log is
+analyzed with the driver logs its run wrote joined. The result goes
 to the library's `sparkxray/rules/lesson_examples.json`. The firing test checks each example
 against the finding its source still produces.
 """
@@ -32,6 +33,7 @@ SOURCES = (
     'logs/spark-4.2.0-stage-rules/eventlog_v2_app-20261019215829-0000',
     'logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd',
     'logs/spark-3.5.9-warmup/local-1792454673559.zstd',
+    'logs/spark-4.2.0-driver-oom/eventlog_v2_local-1792509790683',
     'logs/apache-spark-events/application_1553914137147_0018.zstd',
     'explain/spark-3.5.9-plan-rules/cost-mode.json',
     'explain/spark-4.2.0-plan-rules/cost-mode.json',
@@ -57,6 +59,8 @@ def findings_of(source: str, cache_dir: pathlib.Path) -> list[tuple[Finding, str
             for finding in analyze_plan(parse_plan_text(capture['text'])).findings
         ]
     log = EventLog.open(path, cache_dir=cache_dir)
+    if captured := sorted(str(driver_log) for driver_log in (FIXTURES / 'driver-logs' / pathlib.Path(source).parts[1]).glob('*')):
+        log.enrich(driver_logs=captured)
     jobs = dict(log.tables.query("SELECT job_id, coalesce(description, '') FROM jobs").fetchall())
     executions = dict(log.tables.query("SELECT execution_id, coalesce(description, '') FROM sql_executions").fetchall())
     declared = log.tables.query(

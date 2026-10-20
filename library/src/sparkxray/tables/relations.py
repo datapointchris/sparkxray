@@ -19,9 +19,11 @@ from sparkxray.rules.findings import ANALYSIS_METADATA_KEY
 from sparkxray.rules.findings import FINDINGS_TABLE_DESCRIPTION
 from sparkxray.rules.findings import findings_column_descriptions
 from sparkxray.tables.manifest import TablesManifest
+from sparkxray.tables.registry import ENRICHMENT_TABLES
 from sparkxray.tables.registry import TABLES
 from sparkxray.tables.registry import TASKS_EFFECTIVE
 from sparkxray.tables.registry import TASKS_EFFECTIVE_DESCRIPTION
+from sparkxray.tables.registry import Table
 from sparkxray.tables.registry import column_unit
 from sparkxray.tables.rows import Rows
 from sparkxray.tables.rows import rows_of
@@ -79,7 +81,9 @@ class Tables:
     `path` is the directory holding `<table>.parquet` and `manifest.json`, which DuckDB or any
     Parquet reader can open without sparkxray. `tasks_effective` is `tasks` where `effective` is
     true, and every rule reads it rather than `tasks`. `findings` exists once the log has been
-    analyzed, and holds the last analysis's findings.
+    analyzed, and holds the last analysis's findings. Each enrichment table, as `glue_metrics`,
+    is a view over its file once `sparkxray.enrichment` wrote one, and an empty view of its
+    columns until then, so SQL reading it runs either way.
     """
 
     def __init__(self, path: Path) -> None:
@@ -89,12 +93,29 @@ class Tables:
         for table in TABLES:
             self.connection.execute(f'CREATE VIEW {table.name} AS SELECT * FROM read_parquet({_literal(path / f"{table.name}.parquet")})')
         self.connection.execute(TASKS_EFFECTIVE)
+        self.register_enrichment()
         if (path / FINDINGS_FILE).is_file():
             self.register_findings()
 
     def register_findings(self) -> None:
         """Point the `findings` view at `findings.parquet`, which `analyze` calls after writing it."""
         self.connection.execute(f'CREATE OR REPLACE VIEW findings AS SELECT * FROM read_parquet({_literal(self.path / FINDINGS_FILE)})')
+
+    def register_enrichment(self) -> None:
+        """Point each enrichment table's view at its file, or at no rows where none was written."""
+        for table in ENRICHMENT_TABLES:
+            path = self.path / f'{table.name}.parquet'
+            if path.is_file():
+                select = f'SELECT * FROM read_parquet({_literal(path)})'
+            else:
+                select = (
+                    'SELECT ' + ', '.join(f'CAST(NULL AS {column.type}) AS "{column.name}"' for column in table.columns) + ' WHERE false'
+                )
+            self.connection.execute(f'CREATE OR REPLACE VIEW {table.name} AS {select}')
+
+    def enriched(self) -> tuple[Table, ...]:
+        """The enrichment tables written beside this log's, in registry order."""
+        return tuple(table for table in ENRICHMENT_TABLES if (self.path / f'{table.name}.parquet').is_file())
 
     def query(self, sql: str, parameters: object = None) -> duckdb.DuckDBPyRelation:
         """A relation over any SQL that reads the tables, by their names, with `$name` or `?` parameters."""
@@ -105,11 +126,15 @@ class Tables:
         try:
             return rows_of(self.connection.sql(sql, params=parameters))
         except duckdb.Error as error:
-            names = [table.name for table in TABLES] + ['tasks_effective'] + (['findings'] if (self.path / FINDINGS_FILE).is_file() else [])
+            names = [table.name for table in (*TABLES, *self.enriched())] + ['tasks_effective']
+            names += ['findings'] if (self.path / FINDINGS_FILE).is_file() else []
             raise QueryError(str(error), field='sql', valid=names) from None
 
     def listing(self) -> tuple[ListedTable, ...]:
-        """Every table and view a query can read, in the order the build writes them, with `findings` last once it exists."""
+        """Every table and view a query can read, in the order the build writes them.
+
+        The enrichment tables written beside the log follow, then `findings` once it exists.
+        """
         listed = [
             ListedTable(
                 table.name,
@@ -123,6 +148,9 @@ class Tables:
         tasks = next(table for table in listed if table.name == 'tasks')
         task_columns = {column.name: column.description for column in tasks.columns}
         listed.insert(listed.index(tasks) + 1, self._view_listing('tasks_effective', TASKS_EFFECTIVE_DESCRIPTION, tasks.path, task_columns))
+        for table in self.enriched():
+            described = {column.name: column.description for column in table.columns}
+            listed.append(self._view_listing(table.name, table.description, str(self.path / f'{table.name}.parquet'), described))
         if (self.path / FINDINGS_FILE).is_file():
             listed.append(
                 self._view_listing('findings', FINDINGS_TABLE_DESCRIPTION, str(self.path / FINDINGS_FILE), findings_column_descriptions())
@@ -231,6 +259,18 @@ class Tables:
     @property
     def node_stages(self) -> duckdb.DuckDBPyRelation:
         return self.connection.view('node_stages')
+
+    @property
+    def glue_metrics(self) -> duckdb.DuckDBPyRelation:
+        return self.connection.view('glue_metrics')
+
+    @property
+    def glue_insights(self) -> duckdb.DuckDBPyRelation:
+        return self.connection.view('glue_insights')
+
+    @property
+    def driver_log(self) -> duckdb.DuckDBPyRelation:
+        return self.connection.view('driver_log')
 
     @property
     def findings(self) -> duckdb.DuckDBPyRelation:

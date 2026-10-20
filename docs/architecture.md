@@ -322,6 +322,64 @@ executor's `peak_jvm_heap_bytes` is the larger of its stage and task peaks, and
 process-tree metrics, `peak_python_rss_bytes` is null. Spark writes 0 for a metric it never
 measured, and the table does not pass that off as a measurement.
 
+## A Glue run and a driver's log join as tables beside the log's, after the build
+
+The build reads only the log, so its key is a function of the log's files alone. A Glue run's
+metrics need AWS credentials, and a driver log is a file the event log never names. So `enrich`
+writes them as tables of their own, into the tables' directory:
+
+```text
+tables/<source hash>/<key>/
+├── tasks.parquet, stages.parquet, ...   the build, from the log
+├── glue_metrics.parquet    ← enrich(glue_run=), from CloudWatch
+├── glue_insights.parquet   ← enrich(glue_run=), from CloudWatch Logs
+├── driver_log.parquet      ← enrich(driver_logs=), local, S3 or Logs
+└── findings.parquet        the last analysis, which reads all of them
+```
+
+Each joined table is a signal. A rule reading one runs where it is present and is skipped by name
+where not. Giving a source again replaces its table and leaves the others. Every source is read
+before any table is written, so a refusal leaves the tables as they were. A later sparkxray
+version keys a new directory, whose tables start without them.
+
+Nothing is imported from boto3 unless an AWS source is named. So a local driver log joins with
+no AWS libraries loaded.
+
+**Metrics are found by ListMetrics, not by a fixed list of names.** AWS's metric reference spells
+`glue.driver.throughput.bytesWrittten` with three t's, and its own Limitations section spells it
+with two. ListMetrics filtered on `JobName` and `JobRunId` returns what the run published,
+whichever spelling that was. ListMetrics omits a metric with no data in the last two weeks. So an
+older run joins with an empty `glue_metrics` and the `E-ENRICH-003` warning. The analysis still
+runs, without the rules that needed it.
+
+Each metric is read at the shortest period CloudWatch still keeps for a run that old: 60 seconds
+within 15 days, 300 within 63, and 3600 after. Counts are read as their Sum, as AWS's reference
+lists. Throughput gauges, those with a `Source` or `Sink`, are running totals, so they are read as
+their Maximum, as AWS's Grafana dashboard reads them. Any other gauge is read as its Average.
+CloudWatch stamps a period with its start, so a datapoint covers `period_start_epoch_ms` to
+`period_start_epoch_ms + period_ms`. A rule matches a datapoint to a stage where the two overlap.
+
+AWS gives every percentage metric the unit Percentage and no scale. Its published
+`glue.driver.workerUtilization` values run from 0 to 1. Nothing published shows
+`glue.driver.memory.heap.used.percentage`'s scale. So `glue_shares_cte` in `tables/registry.py`
+reads a run's series as 0 to 100 where any value passes 1, and a finding names the scale it read.
+
+**Insights are read from `/aws-glue/jobs/logs-v2` only.** That is the continuous-logging group a
+job writes to unless it names its own. Each insights stream is named for the run id, so it is read
+by name, and a stream that does not exist reads as no events. A run that succeeded writes none.
+
+**A driver log is structured when a record appears in its first 64 KiB.** Spark's structured
+logging writes one JSON record a line. A driver's stderr holds more: the JVM's warnings before
+log4j starts, and the plain-text trace of an error no logger caught. So the first line is no
+test, and a log whose first 64 KiB hold no record is refused as `E-ENRICH-002`. sparkxray numbers
+each line as it decodes the log, blank lines included, so `line_number` is the line `rg -n` shows.
+DuckDB parses each line that is a JSON object with Spark's record schema, and the table keeps
+those with a `ts`.
+
+*Rejected:* DuckDB's `read_json` with `ignore_errors=true`, numbering its rows. It reads a line
+that is no JSON as a row of nulls, but a blank line as no row at all. A chained Python traceback
+prints blank lines, so every row number after one falls short of its line.
+
 ## A column's description sits beside its SQL, so the glossary and `tables list` never disagree
 
 Each registry column carries one line saying what it holds. `tables list` prints that line, and
@@ -488,6 +546,11 @@ ids and numbers. A key B shares with a run that succeeded is routine. A fetch fa
 recovered is one, and so is a speculative copy killed when its twin finished. A key B shares only
 with a failed A is recurring, and one only B holds is new. The view lists new and recurring keys,
 and counts the routine ones.
+
+A failed task's exception is in the log. One the driver threw outside a task is not, so the
+driver log's exceptions are read beside the tasks', where it was joined. So are a Glue run's
+insights. An insight's key leads with Glue's event name, so a task's failure and the job's own
+stay apart.
 
 A metric moved notably when its change is 10% of A's value and at least its unit's floor: 5 s of
 time, 64 MiB, 1 for a max-to-median ratio, and 10% of A for a count. A share alone is noise on

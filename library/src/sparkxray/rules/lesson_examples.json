@@ -19,6 +19,21 @@
       "driver_time_share": 0.4838
     }
   },
+  "app.driver-oom": {
+    "source": "logs/spark-4.2.0-driver-oom/eventlog_v2_local-1792509790683",
+    "description": "a collect larger than the driver heap, which the event log records as a success",
+    "finding_id": "app.driver-oom:app",
+    "severity": "high",
+    "title": "The driver ran out of memory: Java heap space",
+    "scope": "the application",
+    "evidence": {
+      "oom_record_count": 2,
+      "first_oom_epoch_ms": 1792509796049,
+      "first_oom_reason": "Java heap space",
+      "first_oom_message": "uncaught error in thread Spark Context Cleaner, stopping SparkContext",
+      "first_oom_thread": "Spark Context Cleaner"
+    }
+  },
   "app.failed-jobs": {
     "source": "logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd",
     "description": "the whole run",
@@ -148,6 +163,7 @@
       "idle_core_hours": 0.1197,
       "idle_core_share": 0.6497,
       "idle_dpu_hours": null,
+      "glue_worker_utilization_share": null,
       "dynamic_allocation_enabled": false
     }
   },
@@ -769,6 +785,7 @@
       "run_time_gap_ms": 41315,
       "run_time_ratio": 11.13,
       "glue_skewness_ratio": 1.23,
+      "glue_metrics_skewness_ratio": null,
       "stage_wall_share": 0.2704
     }
   },

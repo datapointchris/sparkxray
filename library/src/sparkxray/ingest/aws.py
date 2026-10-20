@@ -1,16 +1,21 @@
 """Every AWS call sparkxray makes. Nothing else imports boto3.
 
 Credentials come from boto3's default chain, narrowed by a profile and a region when given. An
-S3-compatible store is reached through boto3's own `AWS_ENDPOINT_URL_S3`. Nothing here creates,
-changes or deletes an AWS resource.
+S3-compatible store is reached through boto3's own `AWS_ENDPOINT_URL_S3`, and a stand-in for
+CloudWatch or CloudWatch Logs through `AWS_ENDPOINT_URL_CLOUDWATCH` or
+`AWS_ENDPOINT_URL_CLOUDWATCH_LOGS`. Nothing here creates, changes or deletes an AWS resource.
 """
 
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import os
 from collections.abc import Iterator
+from collections.abc import Mapping
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import boto3
 import botocore.exceptions
@@ -18,6 +23,7 @@ from boto3.s3.transfer import TransferConfig
 
 from sparkxray.cache_directory import PARTIAL_MARK
 from sparkxray.errors import AwsDeniedError
+from sparkxray.errors import EnrichmentDeniedError
 from sparkxray.errors import NoEventLogError
 
 # Codes S3 and STS return when the caller may not make the call, or cannot prove who it is.
@@ -34,6 +40,16 @@ _DENIED = frozenset(
     }
 )
 _MISSING = frozenset({'404', 'NoSuchBucket', 'NoSuchKey'})
+# Codes CloudWatch and CloudWatch Logs return beside S3's when the caller may not read, or cannot prove who it is.
+_READ_DENIED = _DENIED | {
+    'AccessDeniedException',
+    'ExpiredTokenException',
+    'IncompleteSignature',
+    'InvalidClientTokenId',
+    'InvalidSignatureException',
+    'MissingAuthenticationToken',
+    'UnrecognizedClientException',
+}
 _TRANSFER = TransferConfig(multipart_threshold=64 * 2**20, multipart_chunksize=64 * 2**20, max_concurrency=8)
 
 
@@ -70,6 +86,86 @@ class S3:
             partial.replace(destination)
         finally:
             partial.unlink(missing_ok=True)
+
+
+class CloudWatch:
+    """One CloudWatch client for one enrichment, which lists and reads metrics."""
+
+    def __init__(self, *, profile: str | None = None, region: str | None = None) -> None:
+        self._client = _read_client('cloudwatch', profile, region)
+
+    def list_metrics(self, namespace: str, dimensions: Mapping[str, str]) -> Iterator[dict[str, Any]]:
+        """Every metric in `namespace` that carries each of `dimensions` among its own, as ListMetrics describes it."""
+        filters = [{'Name': name, 'Value': value} for name, value in dimensions.items()]
+        pages = self._client.get_paginator('list_metrics').paginate(Namespace=namespace, Dimensions=filters)
+        shown = ', '.join(f'{name}={value}' for name, value in dimensions.items())
+        with _read_translated('cloudwatch:ListMetrics', f'{namespace} metrics with {shown}'):
+            for page in pages:
+                yield from page.get('Metrics', [])
+
+    def metric_data(
+        self, queries: Sequence[Mapping[str, Any]], start: dt.datetime, end: dt.datetime, resource: str
+    ) -> Iterator[dict[str, Any]]:
+        """Each query's results over `[start, end)`, oldest first, as GetMetricData describes them. One query's results may span pages."""
+        pages = self._client.get_paginator('get_metric_data').paginate(
+            MetricDataQueries=list(queries), StartTime=start, EndTime=end, ScanBy='TimestampAscending'
+        )
+        with _read_translated('cloudwatch:GetMetricData', resource):
+            for page in pages:
+                yield from page.get('MetricDataResults', [])
+
+
+class CloudWatchLogs:
+    """One CloudWatch Logs client for one enrichment, which reads log streams."""
+
+    def __init__(self, *, profile: str | None = None, region: str | None = None) -> None:
+        self._client = _read_client('logs', profile, region)
+
+    def log_events(self, group: str, stream: str) -> list[dict[str, Any]] | None:
+        """Every event of one stream, oldest first, as GetLogEvents describes them. None where the group or stream does not exist."""
+        events: list[dict[str, Any]] = []
+        token = None
+        with _read_translated('logs:GetLogEvents', f'{group}:{stream}'):
+            while True:
+                page_from: dict[str, str] = {'nextToken': token} if token else {}
+                try:
+                    page = self._client.get_log_events(logGroupName=group, logStreamName=stream, startFromHead=True, **page_from)
+                except botocore.exceptions.ClientError as error:
+                    if error.response.get('Error', {}).get('Code') == 'ResourceNotFoundException':
+                        return None
+                    raise
+                events.extend(page.get('events', []))
+                # The last page hands back the token it was asked with.
+                if page.get('nextForwardToken') in (None, token):
+                    return events
+                token = page['nextForwardToken']
+
+
+def _read_client(service: str, profile: str | None, region: str | None) -> Any:
+    try:
+        return boto3.Session(profile_name=profile, region_name=region).client(service)
+    except botocore.exceptions.ProfileNotFound as error:
+        raise EnrichmentDeniedError(str(error), field='profile', hint='aws configure list-profiles') from error
+    except botocore.exceptions.NoRegionError as error:
+        raise EnrichmentDeniedError(
+            f'{service} needs a region, and none was found', field='region', hint='set AWS_DEFAULT_REGION to the region the job ran in'
+        ) from error
+
+
+@contextlib.contextmanager
+def _read_translated(action: str, resource: str) -> Iterator[None]:
+    """Turn an AWS denial of a CloudWatch or CloudWatch Logs read into EnrichmentDeniedError."""
+    try:
+        yield
+    except (botocore.exceptions.NoCredentialsError, botocore.exceptions.PartialCredentialsError) as error:
+        raise EnrichmentDeniedError(
+            f'{action} on {resource} needs AWS credentials, and none were found: {error}', hint='aws sts get-caller-identity'
+        ) from error
+    except botocore.exceptions.ClientError as error:
+        code = str(error.response.get('Error', {}).get('Code', ''))
+        if code in _READ_DENIED:
+            raise EnrichmentDeniedError(f'AWS denied {action} on {resource}: {code}', hint='aws sts get-caller-identity') from error
+        raise
 
 
 @contextlib.contextmanager

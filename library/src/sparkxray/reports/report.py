@@ -1,4 +1,4 @@
-"""One document per analyzed log: the run, its usage, what the rules found, and the stages, SQL and settings behind it.
+"""One document per analyzed log: the run, its usage, what the rules found, and the stages, SQL, I/O and settings behind it.
 
 `build_report` gathers the `Report`, and `render_json` and `render_markdown` only format it. A
 report holds no time it was made, and names a local log by its file name. So the same log file,
@@ -28,6 +28,7 @@ from sparkxray.plan.aqe_changes import AqeChanges
 from sparkxray.rules.analysis import Analysis
 from sparkxray.rules.analysis import Gate
 from sparkxray.rules.analysis import SkippedRule
+from sparkxray.rules.failure_reasons import failure_line
 from sparkxray.rules.findings import Finding
 from sparkxray.rules.rule import Severity
 from sparkxray.rules.spark_settings import READ_BY_RULES
@@ -98,6 +99,29 @@ SELECT round(core_totals.core_time_ms / 3600000, 4) AS core_hours,
     THEN round((core_totals.core_time_ms - core_totals.task_core_time_ms) / 3600000 / {GLUE_DPU_CORES}, 4) END AS idle_dpu_hours
 FROM core_totals, application
 """
+# An insight row is kept where its message parsed into a field, so the streams' other log4j lines stay out.
+_INSIGHTS_SQL = f"""
+SELECT logged_epoch_ms, event, {failure_line('failure_reason')} AS failure_reason, root_cause, cause_issue, recommended_action
+FROM glue_insights
+WHERE coalesce(event, failure_reason, root_cause, cause_issue, recommended_action) IS NOT NULL
+ORDER BY logged_epoch_ms, log_stream, message
+"""
+# A throughput metric is named by its last segment: AWS's reference spells one `bytesWrittten`, its
+# Grafana dashboard `bytesWritten`, and its limits `glue.driver.throughput.bytesWritten`.
+_THROUGHPUT_SQL = r"""
+WITH named AS (
+  SELECT regexp_extract(metric, '\.(\w+)$', 1) AS name, CASE WHEN source IS NOT NULL THEN 'read' ELSE 'write' END AS direction,
+    coalesce(source, sink) AS location, value
+  FROM glue_metrics WHERE starts_with(metric, 'glue.driver.') AND (source IS NOT NULL OR sink IS NOT NULL)
+)
+SELECT direction, location,
+  max(value) FILTER (WHERE name IN ('bytesRead', 'bytesWritten', 'bytesWrittten'))::BIGINT AS total_bytes,
+  max(value) FILTER (WHERE name IN ('recordsRead', 'recordsWritten'))::BIGINT AS total_records,
+  max(value) FILTER (WHERE name IN ('filesRead', 'filesWritten'))::BIGINT AS file_count,
+  max(value) FILTER (WHERE name = 'partitionsRead')::BIGINT AS partition_count
+FROM named GROUP BY direction, location
+ORDER BY direction, location <> 'ALL', location
+"""
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -130,7 +154,10 @@ class LogFile:
 
 @dc.dataclass(frozen=True, slots=True)
 class LogSummary:
-    """The log the report read, and what it lacked. A local `source` is the log's name, and an `s3://` one its whole URI."""
+    """The log the report read, what it lacked, and the tables joined to it from other sources.
+
+    A local `source` is the log's name, and an `s3://` one its whole URI.
+    """
 
     source: str
     layout: str
@@ -140,9 +167,15 @@ class LogSummary:
     in_progress: bool
     truncated_tail: bool
     lacks: tuple[str, ...]
+    enriched: tuple[str, ...]
 
     def to_json(self) -> dict[str, Any]:
-        return {**dc.asdict(self), 'files': [file.to_json() for file in self.files], 'lacks': list(self.lacks)}
+        return {
+            **dc.asdict(self),
+            'files': [file.to_json() for file in self.files],
+            'lacks': list(self.lacks),
+            'enriched': list(self.enriched),
+        }
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -202,22 +235,26 @@ class ConfigEntry:
 class Report:
     """One analyzed log, everything a person or a program reading the run needs, in the order a reader acts on it.
 
+    `job_run_insights` holds Glue's own account of a failed run, empty where none was joined.
     `gate` is the analysis judged at the report's `fail_on`, as `findings list --fail-on` judges it.
     `findings` and `skipped_rules` are the analysis's, in its order. `stages` holds the
     `LONGEST_STAGE_COUNT` longest by wall time. `sql` holds every execution, `executors` every
-    executor and the driver.
+    executor and the driver. `throughput` holds what each source read and each sink wrote, from
+    Glue's metrics.
     """
 
     generated_by: str
     app: AppSummary
     log: LogSummary
     usage: Usage
+    job_run_insights: tuple[Mapping[str, Any], ...]
     gate: Gate
     findings: tuple[Finding, ...]
     skipped_rules: tuple[SkippedRule, ...]
     stages: tuple[Mapping[str, Any], ...]
     sql: tuple[SqlSummary, ...]
     executors: tuple[Mapping[str, Any], ...]
+    throughput: tuple[Mapping[str, Any], ...]
     config: tuple[ConfigEntry, ...]
     schema_version: int = SCHEMA_VERSION
 
@@ -228,12 +265,14 @@ class Report:
             'app': self.app.to_json(),
             'log': self.log.to_json(),
             'usage': self.usage.to_json(),
+            'job_run_insights': [dict(insight) for insight in self.job_run_insights],
             'gate': self.gate.to_json(),
             'findings': [finding.to_json() for finding in self.findings],
             'skipped_rules': [skipped.to_json() for skipped in self.skipped_rules],
             'stages': [dict(stage) for stage in self.stages],
             'sql': [execution.to_json() for execution in self.sql],
             'executors': [dict(executor) for executor in self.executors],
+            'throughput': [dict(row) for row in self.throughput],
             'config': [entry.to_json() for entry in self.config],
         }
 
@@ -288,8 +327,10 @@ def build_report(log: EventLog, analysis: Analysis | None = None, fail_on: Sever
             in_progress=ingest.in_progress,
             truncated_tail=ingest.truncated_tail,
             lacks=tuple(manifest.lacks),
+            enriched=tuple(table.name for table in tables.enriched()),
         ),
         usage=Usage(**usage[0]) if usage else Usage(None, None, None, None, None, None),
+        job_run_insights=tuple(rows_of(tables.query(_INSIGHTS_SQL)).to_json()),
         gate=found.gate(fail_on),
         findings=found.findings,
         skipped_rules=found.skipped,
@@ -299,6 +340,7 @@ def build_report(log: EventLog, analysis: Analysis | None = None, fail_on: Sever
         ),
         sql=tuple(executions),
         executors=tuple({key: executor[key] for key in _EXECUTOR_KEYS} for executor in executor_summaries(tables).to_json()),
+        throughput=tuple(rows_of(tables.query(_THROUGHPUT_SQL)).to_json()),
         config=tuple(ConfigEntry(key, recorded.get(key)) for key in sorted(keys | set(recorded))),
     )
 
