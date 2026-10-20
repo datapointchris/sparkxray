@@ -1,5 +1,6 @@
-"""Rules run wherever their signals exist, fire on the fixture queries naming them, and record who set each threshold."""
+"""Rules run wherever their signals exist, fire on the fixture queries naming them, teach in four parts, and record who set thresholds."""
 
+import dataclasses as dc
 import importlib.resources
 import json
 import pathlib
@@ -10,7 +11,11 @@ from fixture_logs import FIXTURES
 from fixture_logs import plain_lines
 from sparkxray.ingest import EventLog
 from sparkxray.plan import parse_plan_text
+from sparkxray.rules import Finding
+from sparkxray.rules import LessonExample
 from sparkxray.rules import analyze_plan
+from sparkxray.rules import catalog
+from sparkxray.rules.lessons import lesson_examples
 
 FINDINGS_SCHEMA = jsonschema.Draft202012Validator(
     json.loads(importlib.resources.files('sparkxray').joinpath('schemas', 'findings.json').read_text())
@@ -18,6 +23,7 @@ FINDINGS_SCHEMA = jsonschema.Draft202012Validator(
 
 
 APPLICATION_PROPERTY = 'spark.sparkxray.fixture.application'
+LESSON_SECTIONS = ['## What it measures', '## Why it costs time', '## Where the Spark UI shows it', '## How to fix it']
 
 
 def _expected(description: str) -> tuple[set[str], set[str]]:
@@ -30,19 +36,21 @@ def _expected(description: str) -> tuple[set[str], set[str]]:
     }
 
 
-def _firings(path: pathlib.Path, cache_dir: pathlib.Path) -> tuple[dict[str, set[str]], str, set[str]]:
-    """The rules that fired under each job or query description, then the run's own description and the rules fired on the run.
+def _firings(path: pathlib.Path, cache_dir: pathlib.Path) -> tuple[dict[str, set[str]], str, set[str], list[Finding]]:
+    """The rules that fired under each job or query description, the run's own description, the rules fired on the run, and every finding.
 
     A finding scoped to a job counts under the job's description, one scoped to a SQL execution under the execution's,
     and any other under the run, whose description is the `spark.sparkxray.fixture.application` property.
     """
     if path.suffix == '.json':
-        captured = {}
+        captured: dict[str, set[str]] = {}
+        every: list[Finding] = []
         for capture in json.loads(path.read_text()):
             plan_only = analyze_plan(parse_plan_text(capture['text']))
             FINDINGS_SCHEMA.validate(plan_only.to_json())
             captured[capture['description']] = {finding.rule_id for finding in plan_only.findings}
-        return captured, '', set()
+            every.extend(plan_only.findings)
+        return captured, '', set(), every
     log = EventLog.open(path, cache_dir=cache_dir)
     analysis = log.analyze()
     FINDINGS_SCHEMA.validate(analysis.to_json())
@@ -60,7 +68,7 @@ def _firings(path: pathlib.Path, cache_dir: pathlib.Path) -> tuple[dict[str, set
             fired[executions[finding.scope.sql_execution_id]].add(finding.rule_id)
         else:
             on_run.add(finding.rule_id)
-    return fired, declared[0] if declared else '', on_run
+    return fired, declared[0] if declared else '', on_run, list(analysis.findings)
 
 
 def _misfired(description: str, fired: set[str], families: tuple[str, ...]) -> tuple[list[str], list[str]]:
@@ -88,17 +96,28 @@ def _misfired(description: str, fired: set[str], families: tuple[str, ...]) -> t
         ('logs/spark-3.5.9-stage-rules/app-20261019220120-0000.zstd', ('stage.', 'config.')),
         ('logs/spark-4.2.0-stage-rules/eventlog_v2_app-20261019215829-0000', ('stage.', 'config.')),
         ('logs/spark-3.5.9-edited-events/app-20261019235634-0000.zstd', ('stage.', 'config.')),
+        ('logs/apache-spark-events/application_1553914137147_0018.zstd', ()),
     ],
 )
-def test_each_rule_fires_where_a_fixture_lists_it_and_a_claimed_family_fires_nowhere_else(
+def test_each_rule_fires_where_a_fixture_lists_it_and_each_lesson_example_is_what_its_source_reports(
     source: str, families: tuple[str, ...], tmp_path: pathlib.Path
 ) -> None:
-    fired, run_description, on_run = _firings(FIXTURES / source, tmp_path)
+    fired, run_description, on_run, findings = _firings(FIXTURES / source, tmp_path)
 
     misfired = {description: _misfired(description, rules, families) for description, rules in fired.items()}
     # The run's findings are held only to what its description names: an executor's memory peak depends on when it was polled.
     misfired[f'the run: {run_description}'] = _misfired(run_description, on_run, ())
     assert {description: wrong for description, wrong in misfired.items() if wrong != ([], [])} == {}
+    # `fixtures/write_lesson_examples.py` writes the examples again after a rule or a fixture changes.
+    reported = [LessonExample.of_finding(finding, source, None) for finding in findings]
+    examples = {rule_id: example for rule_id, example in lesson_examples().items() if example.source == source}
+    assert sorted(rule_id for rule_id, example in examples.items() if dc.replace(example, description=None) not in reported) == []
+
+
+def test_every_lesson_answers_the_same_four_questions_in_order() -> None:
+    headings = {rule.rule_id: [line for line in rule.lesson_text().splitlines() if line.startswith('#')] for rule in catalog()}
+
+    assert {rule_id: found for rule_id, found in headings.items() if found != LESSON_SECTIONS} == {}
 
 
 def test_a_plan_without_metrics_runs_the_plan_rules_and_names_what_the_others_lack() -> None:

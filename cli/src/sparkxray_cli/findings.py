@@ -16,6 +16,8 @@ from sparkxray_cli.log_opening import open_log
 from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import LimitOption
 from sparkxray_cli.shared_parameters import LogArgument
+from sparkxray_cli.shared_parameters import ThresholdFileOption
+from sparkxray_cli.shared_parameters import ThresholdOption
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -31,24 +33,6 @@ RuleOption = Annotated[
             'List and gate only this rule. A rule reading the findings of another runs that one first, unlisted. '
             'Repeat for more. Every rule by default.'
         ),
-        show_default=False,
-    ),
-]
-ThresholdOption = Annotated[
-    list[str] | None,
-    typer.Option(
-        '--threshold',
-        metavar='RULE_ID.NAME=VALUE',
-        help='Override one threshold, as stage.shuffle-skew.ratio=8 or stage.shuffle-skew.min_bytes=512MiB. Repeat for more.',
-        show_default=False,
-    ),
-]
-ThresholdFileOption = Annotated[
-    Path | None,
-    typer.Option(
-        '--thresholds',
-        metavar='FILE',
-        help='A TOML file of thresholds, one ["<rule_id>"] table per rule. A --threshold beats it.',
         show_default=False,
     ),
 ]

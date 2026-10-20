@@ -202,7 +202,7 @@ _FEW_PARTITIONS_LESSON = """\
 
 `spark.sql.shuffle.partitions`, as each SQL execution ran with it, against the shuffle bytes each
 task of its stages read on average. The rule fires where the setting was unset or 200, its
-default, and a stage read at least `min_average_bytes` per task.
+default, and a stage read at least {min_average_bytes} per task.
 
 ## Why it costs time
 

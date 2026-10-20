@@ -40,7 +40,7 @@ def _many_exchanges(context: RuleContext) -> Iterator[dict[str, Any]]:
 _MANY_EXCHANGES_LESSON = """\
 ## What it measures
 
-How many `Exchange` nodes one query runs, reported at 4 or more, sparkDoctor's threshold. Each is
+How many `Exchange` nodes one query runs, reported at {min_exchanges} or more. Each is
 a shuffle: a stage boundary where every row is written out by key and read back.
 
 ## Why it costs time
@@ -119,8 +119,9 @@ A `Window` whose input is shuffled to `SinglePartition`, which is what a window 
 and no `partitionBy` asks for. Spark logs `No Partition Defined for Window operation! Moving all
 data to a single partition, this can cause serious performance degradation.`
 
-The finding is `high` where that partition holds at least 256 MiB, the size at which AQE's default
-`spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes` calls one partition skewed. Below it,
+The finding is `high` where that partition holds at least {min_bytes}, by default the size at
+which AQE's `spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes` calls one partition
+skewed. Below it,
 or where nothing measured the exchange, the finding is `info`. A window over a few thousand
 aggregated rows runs in one task in moments.
 

@@ -42,7 +42,7 @@ def _small_files_read(context: RuleContext) -> Iterator[dict[str, Any]]:
 _SMALL_FILES_READ_LESSON = """\
 ## What it measures
 
-A file scan reading more than 100 files that average under 3 MiB each, DataFlint's thresholds. The
+A file scan reading more than {many_files} files that average under {small_file_bytes} each. The
 average is the scan's `size of files read` over its `number of files read`.
 
 ## Why it costs time
@@ -108,9 +108,9 @@ def _small_files_written(context: RuleContext) -> Iterator[dict[str, Any]]:
 _SMALL_FILES_WRITTEN_LESSON = """\
 ## What it measures
 
-A write of more than 100 files that average under 3 MiB each, DataFlint's thresholds, from the
-write node's `written output` over its `number of written files`. `suggested_file_count` is how
-many files the same bytes make at 128 MiB each, DataFlint's ideal file size.
+A write of more than {many_files} files that average under {small_file_bytes} each, from the write
+node's `written output` over its `number of written files`. `suggested_file_count` is how many
+files the same bytes make at {target_file_bytes} each.
 
 ## Why it costs time
 

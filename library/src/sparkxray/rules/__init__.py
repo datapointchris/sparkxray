@@ -12,6 +12,9 @@ from sparkxray.rules.catalog import rule_by_id
 from sparkxray.rules.findings import AppliedThreshold
 from sparkxray.rules.findings import Finding
 from sparkxray.rules.findings import FindingScope
+from sparkxray.rules.lessons import LessonExample
+from sparkxray.rules.lessons import RuleLesson
+from sparkxray.rules.lessons import rule_lesson
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Severity
@@ -24,8 +27,10 @@ __all__ = [
     'Finding',
     'FindingScope',
     'Gate',
+    'LessonExample',
     'Rule',
     'RuleContext',
+    'RuleLesson',
     'RuleRun',
     'Severity',
     'Signal',
@@ -36,4 +41,5 @@ __all__ = [
     'catalog',
     'register',
     'rule_by_id',
+    'rule_lesson',
 ]

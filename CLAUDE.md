@@ -72,6 +72,7 @@ uv run pytest cli                        # the command's exit-status test
 uv build --package sparkxray --out-dir dist
 uv build --package sparkxray-cli --out-dir dist
 fixtures/regenerate.sh [VARIANT...]      # rewrite the fixtures from Spark runs in docker
+uv run python fixtures/write_lesson_examples.py   # after a rule or fixture changes
 zstd -dc fixtures/logs/spark-3.5.9/local-*.zstd | python3 fixtures/stage_totals.py
 ```
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import re
+import string
 from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Mapping
@@ -33,6 +34,8 @@ THRESHOLD_UNITS: tuple[ThresholdUnit, ...] = ('x', 'bytes', 'ms', 'count', 'rows
 _TABLE_SIGNALS = frozenset({'tasks', 'executors', 'environment', 'timeline'})
 _RULE_ID = re.compile(r'[a-z]+\.[a-z0-9]+(?:-[a-z0-9]+)*')
 _PARAMETER = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)')
+_BYTE_SCALES = ((1 << 40, 'TiB'), (1 << 30, 'GiB'), (1 << 20, 'MiB'), (1 << 10, 'KiB'))
+_DURATION_SCALES = ((3_600_000, 'h'), (60_000, 'min'), (1000, 's'))
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -47,6 +50,29 @@ class Threshold:
     def to_json(self) -> dict[str, Any]:
         default = int(self.default) if float(self.default).is_integer() else self.default
         return {'name': self.name, 'default': default, 'unit': self.unit, 'source': self.source}
+
+    def in_prose(self, value: float | None = None) -> str:
+        """`value`, or the default, as a sentence states it: `1 GiB`, `5 min`, `100,000,000`, `8%` or `5x`."""
+        return threshold_in_prose(self.unit, self.default if value is None else value)
+
+
+def threshold_in_prose(unit: ThresholdUnit, value: float) -> str:
+    """A threshold's value in its unit, whole where the unit allows: `256 MiB` rather than the Spark UI's `256.0 MiB`."""
+    if unit == 'bytes':
+        scale, name = next(((scale, name) for scale, name in _BYTE_SCALES if value >= scale), (1, 'B'))
+        return f'{_trimmed(value / scale)} {name}'
+    if unit == 'ms':
+        scale, name = next(((scale, name) for scale, name in _DURATION_SCALES if value >= scale and value % scale == 0), (1, 'ms'))
+        return f'{_trimmed(value / scale)} {name}'
+    if unit == 'fraction':
+        return f'{_trimmed(value * 100)}%'
+    if unit == 'x':
+        return f'{_trimmed(value)}x'
+    return f'{int(value):,}' if float(value).is_integer() else _trimmed(value)
+
+
+def _trimmed(value: float) -> str:
+    return f'{round(value):,}' if float(value).is_integer() else f'{value:.1f}'.removesuffix('.0')
 
 
 @dc.dataclass(frozen=True)
@@ -90,6 +116,9 @@ class Rule:
     `plan_node_id`, `plan_node_label`, `stage_id`, `stage_attempt`, `job_id`, `executor_id` and
     `worst_task_ids`, fill the finding's own fields. Every other key is evidence, named with its
     unit. `severity` is the rule's grade before the engine weighs the scope's share of the run.
+
+    `lesson` is Markdown, where `{name}` prints a threshold in prose at the value applied, so the
+    lesson states the number the rule judges by. It holds no other braces.
 
     `reads_findings_of` names the rules whose findings a `check` reads from `RuleContext.findings`.
     Selecting the rule runs them first. One not selected itself reports nothing: its findings reach
@@ -139,11 +168,17 @@ class Rule:
             problems.append("only a check reads other rules' findings")
         if self.rule_id in self.reads_findings_of:
             problems.append('it cannot read its own findings')
+        problems.extend(_lesson_problems(self.lesson, set(names)))
         if problems:
             raise InvalidRuleError(f'rule {self.rule_id!r} is malformed: {"; ".join(problems)}', field='rule')
 
     def threshold(self, name: str) -> Threshold | None:
         return next((threshold for threshold in self.thresholds if threshold.name == name), None)
+
+    def lesson_text(self, values: Mapping[str, float] | None = None) -> str:
+        """The lesson with each threshold it names at its value in `values`, or at its default."""
+        given = values or {}
+        return self.lesson.format_map({threshold.name: threshold.in_prose(given.get(threshold.name)) for threshold in self.thresholds})
 
     def to_json(self) -> dict[str, Any]:
         """What the rule reads, judges by and teaches, without the SQL or Python it runs."""
@@ -157,6 +192,19 @@ class Rule:
             'severity_ladder': {severity: self.severity_ladder[severity] for severity in SEVERITIES if severity in self.severity_ladder},
             'remediation': list(self.remediation),
             'docs': list(self.docs),
-            'lesson': self.lesson,
+            'lesson': self.lesson_text(),
             'reads_findings_of': list(self.reads_findings_of),
         }
+
+
+def _lesson_problems(lesson: str, thresholds: set[str]) -> list[str]:
+    """What keeps a lesson from printing: a stray brace, or a `{field}` naming no threshold or carrying a format."""
+    try:
+        fields = [(name, spec, conversion) for _, name, spec, conversion in string.Formatter().parse(lesson) if name is not None]
+    except ValueError:
+        return ['its lesson has a brace that opens no {threshold}']
+    unknown = sorted({name for name, _, _ in fields} - thresholds)
+    problems = [f'its lesson names {", ".join(f"{{{name}}}" for name in unknown)}, which no threshold is'] if unknown else []
+    if any(spec or conversion for _, spec, conversion in fields):
+        problems.append('a {threshold} in its lesson takes no format')
+    return problems

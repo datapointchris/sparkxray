@@ -6,11 +6,15 @@ from typing import Annotated
 
 import typer
 from rich.markdown import Markdown
+from rich.text import Text
+from sparkxray.rules import LessonExample
 from sparkxray.rules import catalog
-from sparkxray.rules import rule_by_id
+from sparkxray.rules import rule_lesson
 
 from sparkxray_cli import render
 from sparkxray_cli.shared_parameters import JsonOption
+from sparkxray_cli.shared_parameters import ThresholdFileOption
+from sparkxray_cli.shared_parameters import ThresholdOption
 
 app = typer.Typer(no_args_is_help=True, help='Learn what each rule looks for, the thresholds it judges by, and how to fix what it finds.')
 
@@ -39,26 +43,49 @@ def list_rules(as_json: JsonOption = False) -> None:
 @app.command('show')
 def show(
     rule_id: Annotated[str, typer.Argument(metavar='RULE_ID', help='A rule id, as rules list prints it.', show_default=False)],
+    threshold: ThresholdOption = None,
+    thresholds: ThresholdFileOption = None,
     as_json: JsonOption = False,
 ) -> None:
-    """Show one rule: its thresholds and where each default came from, its severity ladder, and its lesson."""
-    rule = rule_by_id(rule_id)
+    """Show one rule: its thresholds and who set each, its severity ladder, its lesson, and what it found on a fixture log."""
+    lesson = rule_lesson(rule_id, threshold_file=thresholds, threshold_flags=threshold or ())
     if as_json:
-        render.emit_json(rule.to_json())
+        render.emit_json(lesson.to_json())
         return
-    record = rule.to_json()
+    record = lesson.rule.to_json()
     render.print_record({key: record[key] for key in ('rule_id', 'rule_version', 'scope', 'signals')})
-    thresholds = [
+    applied = [
         {
-            'name': threshold.name,
-            'default': render.shown_in(threshold.unit, threshold.default),
-            'unit': threshold.unit,
-            'source': threshold.source,
+            'name': name,
+            'value': render.shown_in(value.unit, value.value),
+            'source': value.source,
+            'default': render.shown_in(value.unit, value.default),
+            'default_source': value.default_source,
         }
-        for threshold in rule.thresholds
+        for name, value in lesson.thresholds.items()
     ]
-    render.print_records(thresholds, ('name', 'default', 'unit', 'source'), title='Thresholds')
+    render.print_records(applied, ('name', 'value', 'source', 'default', 'default_source'), title='Thresholds')
     ladder = [{'severity': severity, 'when': when} for severity, when in record['severity_ladder'].items()]
     render.print_records(ladder, ('severity', 'when'), title='Severity')
-    render.stdout.print(Markdown(rule.lesson))
-    render.print_links(rule.docs)
+    render.stdout.print(Markdown(lesson.text))
+    if lesson.example is not None:
+        _print_example(lesson.example)
+    render.print_links(lesson.rule.docs)
+
+
+def _print_example(example: LessonExample) -> None:
+    render.stdout.print()
+    render.stdout.print(Markdown('## What it found on a fixture log'))
+    render.stdout.print(Text(example.title, style='bold'))
+    render.print_record(
+        {
+            'source': f'fixtures/{example.source}',
+            'description': example.description,
+            'finding_id': example.finding_id,
+            'severity': example.severity,
+            'scope': example.scope,
+        }
+    )
+    render.print_records(
+        [{'key': key, 'value': render.shown(key, value)} for key, value in example.evidence.items()], ('key', 'value'), title='Evidence'
+    )

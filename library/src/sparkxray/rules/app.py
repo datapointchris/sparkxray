@@ -106,7 +106,7 @@ HAVING count(*) >= $min_jobs
 _MANY_SMALL_JOBS_LESSON = """\
 ## What it measures
 
-The jobs that ran for less than `max_job_ms`, from submission to end. `most_common_job_name`
+The jobs that ran for less than {max_job_ms}, from submission to end. `most_common_job_name`
 is the description or call site most of them share.
 
 ## Why it costs time

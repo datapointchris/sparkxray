@@ -158,7 +158,7 @@ each conjunct of a condition it can into one entry of the scan's `PushedFilters`
 uses to skip files and row groups. A conjunct with no entry, such as one over `cast(id as string)`,
 is checked on every row read.
 
-The finding is `medium` where the scan read at least 128 MiB, the default
+The finding is `medium` where the scan read at least {min_read_bytes}, by default one split of
 `spark.sql.files.maxPartitionBytes`, and `info` below it or where nothing measured the scan. A
 smaller read fits one task's split, so skipping row groups in it saves little. The floor is
 proposed here, because no tool publishes one.
@@ -237,7 +237,7 @@ A scan of a partitioned table whose `PartitionFilters` hold nothing beyond `isno
 every partition. An event log carries no catalog, so the scan's `number of partitions read`
 metric, which only a partitioned table reports, is the sign the table is partitioned.
 
-The finding is `medium` where the scan read at least 128 MiB, the default
+The finding is `medium` where the scan read at least {min_read_bytes}, by default one split of
 `spark.sql.files.maxPartitionBytes`, and `info` below it. A table that small fits one task's split,
 so pruning it saves little. The floor is proposed here, because no tool publishes one.
 
@@ -301,7 +301,7 @@ def _long_filter(context: RuleContext) -> Iterator[dict[str, Any]]:
 _LONG_FILTER_LESSON = """\
 ## What it measures
 
-A `Filter` condition over 1,000 characters, DataFlint's threshold. A condition that long is
+A `Filter` condition over {max_characters} characters. A condition that long is
 usually a list of values written out as comparisons joined by `OR`.
 
 ## Why it costs time

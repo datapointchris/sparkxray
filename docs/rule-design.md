@@ -211,6 +211,33 @@ An override naming a rule or threshold the catalog does not hold is refused, eve
 analysis does not run that rule. So one file serves every subset of rules, and a misspelling never
 passes silently.
 
+## A lesson states each threshold at the value the rule applies
+
+Every rule's lesson answers four questions, under four headings: what it measures, why it costs
+time, where the Spark UI shows it, and how to fix it. A lesson names a threshold as `{min_bytes}`,
+never as a number. `Rule.lesson_text(values)` prints each at the value given, or at its default,
+as a sentence would: `256 MiB`, `5 min`, `8%`, `5x` or `100,000,000`. So `sparkxray rules show`
+with a `--threshold` override teaches the number the rule then judges by, and lists the layer
+that set each one.
+
+A placeholder must name one of the rule's thresholds, and takes no format or conversion. A brace
+that opens no placeholder is refused too. Each fails when the rule is built, as `E-RULE-004`.
+
+*Rejected:* writing the number into the prose. An override would leave the lesson stating a floor
+the rule no longer judges by.
+
+*Rejected:* `$name`. A SQL rule already reads its thresholds as `$name` parameters.
+
+## Each lesson ends with what the rule found on a fixture log
+
+`sparkxray rules show` follows the lesson with one finding the rule reported on a committed
+fixture: its title, scope, severity and evidence, and the log it came from. The library ships one
+per rule in `sparkxray/rules/lesson_examples.json`, and `rule_lesson(rule_id)` returns it beside
+the lesson. `fixtures/write_lesson_examples.py` writes the file. The rules test fails on an
+example its log no longer reports, so a lesson never shows output the rule has stopped giving.
+
+*Rejected:* evidence written by hand. Nothing would hold it to what the rule reports.
+
 ## Findings are written beside the tables they came from
 
 `analyze` writes `findings.parquet` into the log's table directory, and `tables.findings` reads it.

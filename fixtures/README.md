@@ -81,7 +81,9 @@ run's property. Every rule under `fires=` must fire there, and none under `silen
 source also claims rule families:
 
 - `plan.` for the base logs, the warmup log, the plan-rules logs and the captures;
-- `stage.` and `config.` for the stage-rules logs and the edited-events log.
+- `stage.` and `config.` for the stage-rules logs and the edited-events log;
+- none for Apache's `application_1553914137147_0018`, which carries no descriptions and is read
+  for the lesson example taken from it.
 
 A rule of a claimed family fires on exactly the jobs naming it. The run's property is held only to
 the rules it names, because an executor's memory peak depends on when Spark polled it.
@@ -141,6 +143,20 @@ The run's property names `executor.memory-under` and `executor.driver-memory-und
 the first stage peak of `JVMHeapMemory` becomes 97% of the 1 GiB heap. Accumulator updates stay
 as Spark wrote them, because no rule reads them. The editor refuses a log that leaves any of its
 edits unnamed, so it never edits another job's log by mistake.
+
+## Each rule's lesson ends with a finding from these logs
+
+`write_lesson_examples.py` writes the library's `sparkxray/rules/lesson_examples.json`, which
+`sparkxray rules show` prints after each lesson:
+
+```bash
+uv run python fixtures/write_lesson_examples.py
+```
+
+For each rule it keeps the first finding on a job or query whose description names it, and
+otherwise the first finding at all. It reads its sources in the order it lists them, so a log
+beats a captured explain. It prints each rule with no finding on any source. The rules test fails
+on any example its source no longer reports, so rerun the script after a rule or a fixture changes.
 
 ## Regenerating
 

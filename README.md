@@ -76,6 +76,11 @@ A table prints bytes and durations as the Spark UI does, such as `702.5 MiB` and
 prints the raw numbers instead, each under a name ending in its unit, and an empty list as `[]`.
 Progress and notes go to stderr, so stdout holds only the data.
 
+`rules show` teaches one rule: what it measures, why it costs time, where the Spark UI shows it
+and how to fix it. Each threshold reads at the value the rule would apply, so `--threshold` and
+`--thresholds` take the same overrides `findings list` does. It ends with what the rule found on
+one of sparkxray's own fixture logs.
+
 A list keeps each row on one line. On a narrow terminal its longest text ends in `…`, and
 narrower still each row prints as a block of field and value. A `show` command and `--json`
 print every value whole.
@@ -267,6 +272,9 @@ for finding in analyze_plan(parse_plan_text(printed.getvalue())).findings:
 `findings.parquet` is written beside the tables, and holds the last analysis's findings.
 `log.tables.stored_analysis()` says which rules that analysis ran, under which thresholds, and
 which it skipped.
+
+`sparkxray.rules.rule_lesson('stage.shuffle-skew', thresholds=...)` returns a rule's lesson as
+Markdown, at the thresholds it would apply, beside the finding it reported on a fixture log.
 
 ## Layout
 
