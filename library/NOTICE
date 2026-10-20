@@ -2,9 +2,9 @@ sparkxray
 Copyright (c) 2026 Chris Birch. Licensed under the MIT License, in LICENSE.
 
 Parts of the rule catalog and the metric glossary adapt wording, and the
-executor simulation ports code, from five projects licensed under the Apache
-License, Version 2.0, a copy of which is in LICENSE-APACHE-2.0.txt beside this
-file.
+executor simulation ports code, from the projects below, each licensed under
+the Apache License, Version 2.0, a copy of which is in LICENSE-APACHE-2.0.txt
+beside this file.
 
 Apache Spark (https://github.com/apache/spark), tag v4.2.0
 (commit 32f7299601108917fb01920a54e084595b7b3bf8).
