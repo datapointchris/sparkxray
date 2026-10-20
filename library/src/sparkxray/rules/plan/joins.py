@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from sparkxray.plan.node_fields import join_type
 from sparkxray.rules.plan.node_reading import OUTPUT_ROWS
 from sparkxray.rules.plan.node_reading import broadcastable_sides
 from sparkxray.rules.plan.node_reading import bytes_produced
 from sparkxray.rules.plan.node_reading import counted_nodes
-from sparkxray.rules.plan.node_reading import join_type
 from sparkxray.rules.plan.node_reading import metric
 from sparkxray.rules.plan.node_reading import rows_produced
 from sparkxray.rules.rule import Rule

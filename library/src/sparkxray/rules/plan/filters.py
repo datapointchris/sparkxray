@@ -7,15 +7,15 @@ from collections.abc import Iterator
 from typing import Any
 
 from sparkxray.plan import labels
+from sparkxray.plan.node_fields import field
+from sparkxray.plan.node_fields import filter_condition
+from sparkxray.plan.node_fields import is_cut
+from sparkxray.plan.node_fields import list_entries
+from sparkxray.plan.node_fields import scan_location
+from sparkxray.plan.node_fields import split_top_level
 from sparkxray.rules.plan.node_reading import OUTPUT_ROWS
 from sparkxray.rules.plan.node_reading import counted_nodes
-from sparkxray.rules.plan.node_reading import field
-from sparkxray.rules.plan.node_reading import filter_condition
-from sparkxray.rules.plan.node_reading import is_cut
-from sparkxray.rules.plan.node_reading import list_entries
 from sparkxray.rules.plan.node_reading import metric
-from sparkxray.rules.plan.node_reading import scan_location
-from sparkxray.rules.plan.node_reading import split_top_level
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Threshold

@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from sparkxray.plan.node_fields import field
 from sparkxray.rules.plan.node_reading import copies_counted_elsewhere
 from sparkxray.rules.plan.node_reading import counted_nodes
-from sparkxray.rules.plan.node_reading import field
 from sparkxray.rules.plan.node_reading import metric
 from sparkxray.rules.plan.node_reading import rows_produced
 from sparkxray.rules.rule import Rule

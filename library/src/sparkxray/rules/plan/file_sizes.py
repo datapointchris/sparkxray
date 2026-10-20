@@ -6,10 +6,10 @@ import math
 from collections.abc import Iterator
 from typing import Any
 
-from sparkxray.rules.plan.node_reading import FILE_SCAN_OPERATORS
+from sparkxray.plan.node_fields import FILE_SCAN_OPERATORS
+from sparkxray.plan.node_fields import scan_location
 from sparkxray.rules.plan.node_reading import counted_nodes
 from sparkxray.rules.plan.node_reading import metric
-from sparkxray.rules.plan.node_reading import scan_location
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import RuleContext
 from sparkxray.rules.rule import Threshold

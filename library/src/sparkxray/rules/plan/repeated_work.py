@@ -11,16 +11,16 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 from typing import Any
 
+from sparkxray.plan.node_fields import CUT_MARK
+from sparkxray.plan.node_fields import FILE_SCAN_OPERATORS
+from sparkxray.plan.node_fields import field
+from sparkxray.plan.node_fields import is_cut
+from sparkxray.plan.node_fields import scan_location
+from sparkxray.plan.node_fields import split_top_level
 from sparkxray.plan.tree import NumberedNode
 from sparkxray.plan.tree import Plan
-from sparkxray.rules.plan.node_reading import CUT_MARK
-from sparkxray.rules.plan.node_reading import FILE_SCAN_OPERATORS
 from sparkxray.rules.plan.node_reading import copies_counted_elsewhere
-from sparkxray.rules.plan.node_reading import field
-from sparkxray.rules.plan.node_reading import is_cut
 from sparkxray.rules.plan.node_reading import metric
-from sparkxray.rules.plan.node_reading import scan_location
-from sparkxray.rules.plan.node_reading import split_top_level
 from sparkxray.rules.plan.node_reading import subtree
 from sparkxray.rules.rule import Rule
 from sparkxray.rules.rule import RuleContext
