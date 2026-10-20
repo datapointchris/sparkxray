@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sparkxray capabilities",
+  "description": "Everything a program driving sparkxray can call or read, as sparkxray capabilities show --json prints it. It is read from the running command and library: commands from the command tree, rules from the catalog, tables from the table registry, codes from the error registry. A field removed or a meaning changed raises schema_version, and a field added does not.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "tool", "version", "commands", "rules", "signals", "tables", "schemas", "error_codes"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "tool": {"const": "sparkxray"},
+    "version": {"type": "string", "description": "The installed sparkxray library's version."},
+    "commands": {"type": "array", "items": {"$ref": "#/$defs/command"}, "description": "Every command, in the order its help lists them."},
+    "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}, "description": "Every rule in the catalog, by id."},
+    "signals": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "What a log can hold that a rule reads. A rule whose signals the log lacks is skipped, naming them."
+    },
+    "tables": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Every table and view tables query reads. findings exists once the log is analyzed. sparkxray schemas show tables gives their columns."
+    },
+    "schemas": {"type": "array", "items": {"type": "string"}, "description": "Every name sparkxray schemas show takes."},
+    "error_codes": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Every error code, retired ones included. sparkxray schemas show errors gives each one's exit code and when it is raised."
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "verb", "reads", "summary", "arguments", "flags", "exit_codes"],
+      "properties": {
+        "path": {"type": "array", "items": {"type": "string"}, "description": "The words after sparkxray, as [\"findings\", \"list\"]."},
+        "verb": {"type": "string"},
+        "reads": {
+          "type": "boolean",
+          "description": "False for a command that can write a file the caller names. Every command may write sparkxray's cache."
+        },
+        "summary": {"type": ["string", "null"], "description": "The first paragraph of the command's help."},
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "required", "help"],
+            "properties": {
+              "name": {"type": "string", "description": "The argument as help shows it, as LOG."},
+              "required": {"type": "boolean"},
+              "help": {"type": ["string", "null"]}
+            }
+          }
+        },
+        "flags": {"type": "array", "items": {"$ref": "#/$defs/flag"}},
+        "exit_codes": {
+          "type": "object",
+          "description": "What each exit status means for this command. sparkxray schemas show errors gives the status of each error code.",
+          "additionalProperties": {"type": "string"},
+          "propertyNames": {"pattern": "^[0-9]+$"}
+        }
+      }
+    },
+    "flag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "aliases", "type", "choices", "multiple", "required", "default", "help"],
+      "properties": {
+        "name": {"type": "string", "description": "The long form, as --fail-on."},
+        "aliases": {"type": "array", "items": {"type": "string"}, "description": "Other forms, as -n for --limit."},
+        "type": {"enum": ["string", "integer", "number", "boolean", "choice", "path"]},
+        "choices": {"type": ["array", "null"], "items": {"type": "string"}, "description": "The words a choice takes. Null for any other type."},
+        "multiple": {"type": "boolean", "description": "Whether the flag repeats, one value each time."},
+        "required": {"type": "boolean"},
+        "default": {"description": "What the command uses when the flag is left out. Null where it uses nothing, or a default its help describes."},
+        "help": {"type": ["string", "null"]}
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "rule_version", "scope", "signals", "thresholds"],
+      "properties": {
+        "rule_id": {"type": "string"},
+        "rule_version": {"type": "integer", "description": "Raised when the rule judges differently, so a finding names the logic that made it."},
+        "scope": {"enum": ["application", "sql_execution", "plan_node", "stage", "executor"]},
+        "signals": {"type": "array", "items": {"type": "string"}, "description": "What a log must hold for the rule to run."},
+        "thresholds": {
+          "type": "array",
+          "description": "What the rule judges by. --threshold <rule_id>.<name>=<value> overrides one, in its unit or with a unit suffix as 512MiB.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "default", "unit", "source"],
+            "properties": {
+              "name": {"type": "string"},
+              "default": {"type": "number", "description": "The value the rule uses unless overridden, in unit."},
+              "unit": {"enum": ["bytes", "ms", "x", "count", "rows", "fraction"]},
+              "source": {"type": "string", "description": "Where the default comes from."}
+            }
+          }
+        }
+      }
+    }
+  }
+}

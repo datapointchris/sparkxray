@@ -29,6 +29,33 @@ ThresholdLayer = Literal['default', 'file', 'sdk', 'flag']
 UNIT_SUFFIXES = ('_ms', '_ns', '_bytes', '_records', '_rows', '_count', '_share', '_ratio', '_hours', '_seconds', '_percent', '_id', '_ids')
 # The key of `findings.parquet`'s metadata that holds the analysis document, its findings left out.
 ANALYSIS_METADATA_KEY = 'sparkxray.analysis'
+FINDINGS_TABLE_DESCRIPTION = "The last analysis's findings, one row each, with their evidence and thresholds as JSON text."
+# `findings.parquet`'s columns and their DuckDB types: a finding's fields, with its scope's ids as columns of their own.
+FINDINGS_PARQUET_COLUMNS: tuple[tuple[str, str], ...] = (
+    ('schema_version', 'BIGINT'),
+    ('finding_id', 'VARCHAR'),
+    ('rule_id', 'VARCHAR'),
+    ('rule_version', 'BIGINT'),
+    ('severity', 'VARCHAR'),
+    ('base_severity', 'VARCHAR'),
+    ('title', 'VARCHAR'),
+    ('app_id', 'VARCHAR'),
+    ('sql_execution_id', 'BIGINT'),
+    ('plan_node_id', 'BIGINT'),
+    ('plan_node_label', 'VARCHAR'),
+    ('stage_id', 'BIGINT'),
+    ('stage_attempt', 'BIGINT'),
+    ('job_id', 'BIGINT'),
+    ('executor_id', 'VARCHAR'),
+    ('worst_task_ids', 'BIGINT[]'),
+    ('evidence', 'VARCHAR'),
+    ('thresholds', 'VARCHAR'),
+    ('impact_seconds', 'DOUBLE'),
+    ('confidence', 'VARCHAR'),
+    ('confidence_reason', 'VARCHAR'),
+    ('remediation', 'VARCHAR[]'),
+    ('docs', 'VARCHAR[]'),
+)
 
 Evidence = bool | int | float | str | None | tuple[bool | int | float | str | None, ...]
 _LABEL_CHARACTERS = 100
@@ -181,41 +208,27 @@ def write_findings_parquet(findings: Sequence[Finding], analysis: Mapping[str, A
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    rows = [finding.to_json() for finding in findings]
-    columns: dict[str, tuple[pa.DataType, list[Any]]] = {
-        'schema_version': (pa.int64(), [row['schema_version'] for row in rows]),
-        'finding_id': (pa.string(), [row['finding_id'] for row in rows]),
-        'rule_id': (pa.string(), [row['rule_id'] for row in rows]),
-        'rule_version': (pa.int64(), [row['rule_version'] for row in rows]),
-        'severity': (pa.string(), [row['severity'] for row in rows]),
-        'base_severity': (pa.string(), [row['base_severity'] for row in rows]),
-        'title': (pa.string(), [row['title'] for row in rows]),
-        'app_id': (pa.string(), [row['scope']['app_id'] for row in rows]),
-        'sql_execution_id': (pa.int64(), [row['scope']['sql_execution_id'] for row in rows]),
-        'plan_node_id': (pa.int64(), [row['scope']['plan_node_id'] for row in rows]),
-        'plan_node_label': (pa.string(), [row['scope']['plan_node_label'] for row in rows]),
-        'stage_id': (pa.int64(), [row['scope']['stage_id'] for row in rows]),
-        'stage_attempt': (pa.int64(), [row['scope']['stage_attempt'] for row in rows]),
-        'job_id': (pa.int64(), [row['scope']['job_id'] for row in rows]),
-        'executor_id': (pa.string(), [row['scope']['executor_id'] for row in rows]),
-        'worst_task_ids': (pa.list_(pa.int64()), [row['scope']['worst_task_ids'] for row in rows]),
-        'evidence': (pa.string(), [json.dumps(row['evidence'], sort_keys=True) for row in rows]),
-        'thresholds': (pa.string(), [json.dumps(row['thresholds'], sort_keys=True) for row in rows]),
-        'impact_seconds': (pa.float64(), [row['impact_seconds'] for row in rows]),
-        'confidence': (pa.string(), [row['confidence'] for row in rows]),
-        'confidence_reason': (pa.string(), [row['confidence_reason'] for row in rows]),
-        'remediation': (pa.list_(pa.string()), [row['remediation'] for row in rows]),
-        'docs': (pa.list_(pa.string()), [row['docs'] for row in rows]),
-    }
+    kinds = {'BIGINT': pa.int64(), 'DOUBLE': pa.float64(), 'VARCHAR': pa.string()}
+    rows = [_parquet_row(finding.to_json()) for finding in findings]
     metadata = {ANALYSIS_METADATA_KEY: json.dumps(analysis, sort_keys=True)}
-    schema = pa.schema([(name, kind) for name, (kind, _) in columns.items()], metadata=metadata)
-    table = pa.table({name: pa.array(values, type=kind) for name, (kind, values) in columns.items()}, schema=schema)
+    schema = pa.schema(
+        [(name, pa.list_(kinds[kind[:-2]]) if kind.endswith('[]') else kinds[kind]) for name, kind in FINDINGS_PARQUET_COLUMNS],
+        metadata=metadata,
+    )
+    table = pa.table({name: pa.array([row[name] for row in rows], type=schema.field(name).type) for name in schema.names}, schema=schema)
     partial = path.with_name(f'{path.name}{PARTIAL_MARK}{os.getpid()}-{secrets.token_hex(4)}')
     try:
         pq.write_table(table, partial)
         os.replace(partial, path)
     finally:
         partial.unlink(missing_ok=True)
+
+
+def _parquet_row(finding: Mapping[str, Any]) -> dict[str, Any]:
+    flat = {**finding, **finding['scope']}
+    flat['evidence'] = json.dumps(finding['evidence'], sort_keys=True)
+    flat['thresholds'] = json.dumps(finding['thresholds'], sort_keys=True)
+    return flat
 
 
 def _number(value: Any) -> Any:

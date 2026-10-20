@@ -9,6 +9,7 @@ import typer
 from sparkxray.errors import SparkxrayError
 from typer.core import TyperGroup
 
+from sparkxray_cli import capabilities
 from sparkxray_cli import executors
 from sparkxray_cli import findings
 from sparkxray_cli import logs
@@ -17,25 +18,28 @@ from sparkxray_cli import plans
 from sparkxray_cli import render
 from sparkxray_cli import reports
 from sparkxray_cli import rules
+from sparkxray_cli import schemas
 from sparkxray_cli import sql
 from sparkxray_cli import stages
 from sparkxray_cli import tables
 from sparkxray_cli import tasks
+from sparkxray_cli.shared_parameters import JSON_REQUESTED
 
 DISTRIBUTION = 'sparkxray-cli'
 _READING = 'Reading a run'
 _FINDING = 'Finding problems'
 _LEARNING = 'Learning'
+_PROGRAMS = 'For programs and agents'
 
 
 class SparkxrayGroup(TyperGroup):
-    """The root group. A library refusal prints on stderr and exits with the error's own status."""
+    """The root group. A library refusal prints on stderr, as one line of JSON under --json, and exits with the error's own status."""
 
     def invoke(self, ctx: Any) -> Any:
         try:
             return super().invoke(ctx)
         except SparkxrayError as error:
-            render.report_error(error)
+            render.report_error(error, as_json=bool(ctx.meta.get(JSON_REQUESTED)))
             raise typer.Exit(error.exit_code) from error
 
 
@@ -51,6 +55,8 @@ app.add_typer(findings.app, name='findings', rich_help_panel=_FINDING)
 app.add_typer(reports.app, name='reports', rich_help_panel=_FINDING)
 app.add_typer(rules.app, name='rules', rich_help_panel=_LEARNING)
 app.add_typer(metrics.app, name='metrics', rich_help_panel=_LEARNING)
+app.add_typer(capabilities.app, name='capabilities', rich_help_panel=_PROGRAMS)
+app.add_typer(schemas.app, name='schemas', rich_help_panel=_PROGRAMS)
 
 
 def installed_commit() -> str | None:
@@ -99,4 +105,7 @@ def main(
     `sparkxray findings list LOG` runs the rules, the most wall time a fix could recover first,
     and exits 3 when a finding is at or above `--fail-on`. Run any partial command with no arguments or `--help` to see what
     comes next.
+
+    A program starts at `sparkxray capabilities show --json`, which lists every command, rule,
+    table, schema and error code, and `sparkxray schemas show NAME` gives the shape of each JSON.
     """

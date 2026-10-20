@@ -16,19 +16,17 @@ from sparkxray.errors import QueryError
 from sparkxray.plan.last_plans import plan_for_event
 from sparkxray.plan.tree import Plan
 from sparkxray.rules.findings import ANALYSIS_METADATA_KEY
+from sparkxray.rules.findings import FINDINGS_TABLE_DESCRIPTION
 from sparkxray.rules.findings import findings_column_descriptions
 from sparkxray.tables.manifest import TablesManifest
 from sparkxray.tables.registry import TABLES
 from sparkxray.tables.registry import TASKS_EFFECTIVE
+from sparkxray.tables.registry import TASKS_EFFECTIVE_DESCRIPTION
 from sparkxray.tables.registry import column_unit
 from sparkxray.tables.rows import Rows
 from sparkxray.tables.rows import rows_of
 
 FINDINGS_FILE = 'findings.parquet'
-_TASKS_EFFECTIVE_DESCRIPTION = (
-    'A view of `tasks` where `effective` is true: each partition of each stage once, its first success across the stage attempts.'
-)
-_FINDINGS_DESCRIPTION = "The last analysis's findings, one row each, with their evidence and thresholds as JSON text."
 _NODE_METRIC_TOTALS_SQL = """
 SELECT metrics.execution_id, metrics.node_id, metrics.metric_name, arg_min(metrics.total, metrics.accumulator_id) AS total
 FROM plan_node_metrics AS metrics JOIN sql_executions USING (execution_id)
@@ -124,12 +122,10 @@ class Tables:
         ]
         tasks = next(table for table in listed if table.name == 'tasks')
         task_columns = {column.name: column.description for column in tasks.columns}
-        listed.insert(
-            listed.index(tasks) + 1, self._view_listing('tasks_effective', _TASKS_EFFECTIVE_DESCRIPTION, tasks.path, task_columns)
-        )
+        listed.insert(listed.index(tasks) + 1, self._view_listing('tasks_effective', TASKS_EFFECTIVE_DESCRIPTION, tasks.path, task_columns))
         if (self.path / FINDINGS_FILE).is_file():
             listed.append(
-                self._view_listing('findings', _FINDINGS_DESCRIPTION, str(self.path / FINDINGS_FILE), findings_column_descriptions())
+                self._view_listing('findings', FINDINGS_TABLE_DESCRIPTION, str(self.path / FINDINGS_FILE), findings_column_descriptions())
             )
         return tuple(listed)
 

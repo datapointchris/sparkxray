@@ -16,7 +16,20 @@ LogArgument = Annotated[
         show_default=False,
     ),
 ]
-JsonOption = Annotated[bool, typer.Option('--json', help='Print JSON to stdout instead of a table.')]
+# Set in the context's meta, which every context of one invocation shares, when the command was given --json.
+JSON_REQUESTED = 'sparkxray.json'
+
+
+def _record_json(ctx: typer.Context, value: bool) -> bool:
+    if value:
+        ctx.meta[JSON_REQUESTED] = True
+    return value
+
+
+JsonOption = Annotated[
+    bool,
+    typer.Option('--json', help='Print JSON to stdout instead of a table, and a refusal as JSON on stderr.', callback=_record_json),
+]
 LimitOption = Annotated[
     int | None,
     typer.Option('--limit', '-n', min=0, help='Keep only the first N rows. Every row by default.', show_default=False),

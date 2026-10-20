@@ -22,6 +22,9 @@ sparkxray stages list LOG --sort wall_ms -n 5
 sparkxray tables query LOG "select count(*) from tasks"
 ```
 
-`--json` prints any read as JSON on stdout, and progress goes to stderr.
+`--json` prints any read as JSON on stdout, and progress goes to stderr. Under `--json` a refusal
+prints as one line of JSON on stderr, carrying its error code. `sparkxray capabilities show --json`
+lists every command, rule, table, schema and error code, and `sparkxray schemas show NAME` prints
+the JSON Schema of each output.
 
 Source, documentation and issues: <https://github.com/datapointchris/sparkxray>.
