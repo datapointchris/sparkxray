@@ -108,7 +108,7 @@ def show(
     changes = detail.aqe_changes
     if changes is not None:
         _print_aqe_changes(changes.to_json())
-    render.note(f'its plan as a tree: {shlex.join(["sparkxray", "plans", "show", log, "--sql", str(execution_id)])}')
+    render.note(f'its plan as a tree: {shlex.join(["sparkxray", "plans", "show", log, str(execution_id)])}')
 
 
 def _print_aqe_changes(printed: dict[str, Any]) -> None:

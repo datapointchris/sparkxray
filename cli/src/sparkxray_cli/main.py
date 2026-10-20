@@ -154,7 +154,7 @@ def main(
     Each finding has an id. `findings show LOG ID` gives its evidence and its fix, and
     `rules show RULE_ID` explains its rule. Where a stage took the time, read it with
     `stages show LOG STAGE_ID`, then `tasks list LOG --stage STAGE_ID`. Where a query did, read it
-    with `sql show LOG ID`, then `plans show LOG --sql ID`. `logs diff GOOD_LOG SLOW_LOG` explains a
+    with `sql show LOG ID`, then `plans show LOG ID`. `logs diff GOOD_LOG SLOW_LOG` explains a
     slow run against a good one.
 
     `findings list` exits 3 when a finding is high or worse, so it gates a CI step as it stands.

@@ -194,7 +194,7 @@ figure, the outermost sort of a task would always win.
 
 In stage 4 of the `spark-3.5.9` fixture, the sort above the join records 6.1 GiB, the stage's
 whole spill. Its own part is 4.1 GiB. The two sorts under the join hold the rest, 1562.0 MiB and
-560.0 MiB. `sparkxray plans show <log> --sql 0` prints all three.
+560.0 MiB. `sparkxray plans show <log> 0` prints all three.
 
 The node joins the finding's scope, and its id stays the stage's. The finding is about the stage,
 and the node says where in the plan to look.

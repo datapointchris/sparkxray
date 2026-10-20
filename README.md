@@ -52,7 +52,7 @@ Glue job writes its log to S3 when it runs with these job parameters:
 sparkxray findings list ./eventlog.zstd                        # what slowed the run, the most time a fix could recover first
 sparkxray findings show ./eventlog.zstd stage.shuffle-skew:s4  # one finding: its evidence, its thresholds and how to fix it
 sparkxray rules show stage.shuffle-skew                        # what the rule measures, why it costs time, where the Spark UI shows it
-sparkxray plans show ./eventlog.zstd --sql 0                   # the query's plan, with the finding marked on the node it names
+sparkxray plans show ./eventlog.zstd 0                         # the query's plan, with the finding marked on the node it names
 sparkxray logs list                                            # every log read so far, by the app id each command also takes
 ```
 
@@ -68,7 +68,7 @@ Deleting that directory empties the cache.
 A command is `sparkxray <resource> <verb>`, and one that reads a run takes `LOG` first. `list`
 prints a set and `show` prints one. So `stages list`, then `stages show LOG 4`, then
 `tasks list LOG --stage 4` walks from the run down to one stage's tasks. `sql show LOG ID`, then
-`plans show LOG --sql ID`, does the same for a query. `sparkxray --help` lists every resource. A
+`plans show LOG ID`, does the same for a query. `sparkxray --help` lists every resource. A
 command's `--help` says what it takes, what each column means, and what it prints.
 
 Beside the findings, sparkxray does these:

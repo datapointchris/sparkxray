@@ -30,9 +30,7 @@ _UNPLACED_KEYS = ('severity', 'finding_id', 'scope', 'title')
 @app.command('show', no_args_is_help=True)
 def show(
     log: LogArgument,
-    execution_id: Annotated[
-        int, typer.Option('--sql', metavar='ID', help='The SQL execution, by the id sql list prints.', show_default=False)
-    ],
+    execution_id: Annotated[int, typer.Argument(metavar='SQL_ID', help='A SQL execution id, as sql list prints it.', show_default=False)],
     initial: Annotated[
         bool,
         typer.Option(
@@ -90,7 +88,7 @@ def _print_plan(plan: AnnotatedPlan, log: str) -> None:
     render.stdout.print()
     if plan.truncated:
         render.note('Spark cut this plan short, so a node past the cut is not in it')
-    command = ['sparkxray', 'plans', 'show', log, '--sql', str(plan.execution_id)]
+    command = ['sparkxray', 'plans', 'show', log, str(plan.execution_id)]
     unplaced = plan.unplaced_findings()
     if unplaced:
         records = [{'severity': f.severity, 'finding_id': f.finding_id, 'scope': f.scope.describe(), 'title': f.title} for f in unplaced]
