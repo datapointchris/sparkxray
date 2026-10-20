@@ -44,7 +44,7 @@ def _header(report: Report) -> str:
     facts = [f'`{app.app_id}`', f'Spark {app.spark_version or "unknown"}', app.platform, shown_in('ms', app.wall_time_ms)]
     if usage.core_hours is not None:
         idle = f', {shown_in("fraction", usage.idle_core_share)} idle' if usage.idle_core_share is not None else ''
-        facts.append(f'{usage.core_hours:,.2f} executor core-hours{idle}')
+        facts.append(f'{usage.core_hours:,.2f} core-hours{idle}')
     if usage.dpu_hours is not None:
         facts.append(f'{usage.dpu_hours:,.2f} DPU-hours')
     lines = [f'# sparkxray report: {_inline(app.app_name or app.app_id)}', '', ' · '.join(fact for fact in facts if fact)]
