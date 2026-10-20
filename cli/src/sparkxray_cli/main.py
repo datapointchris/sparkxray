@@ -154,5 +154,7 @@ def main(
     comes next.
 
     A program starts at `sparkxray capabilities show --json`, which lists every command, rule,
-    table, schema and error code, and `sparkxray schemas show NAME` gives the shape of each JSON.
+    table, schema and error code. `sparkxray schemas show NAME` prints one schema, and its
+    description names the command printing that JSON. A listing such as `stages list --json` has
+    none.
     """

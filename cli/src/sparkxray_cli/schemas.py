@@ -1,4 +1,4 @@
-"""`sparkxray schemas`: the JSON Schema of everything sparkxray prints as JSON, so a program can check what it reads."""
+"""`sparkxray schemas`: the JSON Schemas sparkxray ships, so a program can check a document it reads."""
 
 from __future__ import annotations
 
@@ -11,7 +11,10 @@ from sparkxray.schemas import schema_summaries
 from sparkxray_cli import render
 from sparkxray_cli.shared_parameters import JsonOption
 
-app = typer.Typer(no_args_is_help=True, help='The JSON Schema of every JSON sparkxray prints, the error envelope and every table included.')
+app = typer.Typer(
+    no_args_is_help=True,
+    help="The JSON Schemas of sparkxray's documents, its error envelope and a row of each table. Each names the command printing it.",
+)
 
 
 @app.command('list')

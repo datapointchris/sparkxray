@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "sparkxray report",
-  "description": "One analyzed Spark log: the application, its log, the core time it held, what the rules found, its longest stages, every SQL execution with its last plan, every executor and the settings the rules reason about. The same log, thresholds and sparkxray version give the same bytes. A field removed or a meaning changed raises schema_version, and a field added does not.",
+  "description": "One analyzed Spark log: the application, its log, the core time it held, what the rules found, its longest stages, every SQL execution with its last plan, every executor and the settings the rules reason about, as sparkxray reports write --format json writes it. The same log, thresholds and sparkxray version give the same bytes. A field removed or a meaning changed raises schema_version, and a field added does not.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "generated_by", "app", "log", "usage", "gate", "findings", "skipped_rules", "stages", "sql", "executors", "config"],

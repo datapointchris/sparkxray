@@ -1,4 +1,7 @@
-"""The JSON Schema of everything sparkxray prints as JSON, each read by the name `schemas show` takes.
+"""The JSON Schemas sparkxray ships, each read by the name `schemas show` takes, and each naming what prints it.
+
+A schema covers a document a program keeps or checks, the error envelope, or a row of a table. A
+command's listing, such as `stages list --json`, has none.
 
 `capabilities`, `findings`, `ingest-manifest`, `report` and `tables-manifest` are files in this
 package. `errors` and `tables` are built from the error registry and the table registry when they

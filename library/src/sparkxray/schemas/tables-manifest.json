@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "sparkxray tables manifest",
-  "description": "The manifest.json beside one Spark application's Parquet tables: which files they were built from, how many rows each holds, and what the log was written without.",
+  "description": "The manifest.json beside one Spark application's Parquet tables: which files they were built from, how many rows each holds, and what the log was written without. sparkxray logs show --json prints it as manifest.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "key", "row_counts", "lacks", "ingest"],

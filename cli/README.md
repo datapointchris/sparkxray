@@ -25,7 +25,8 @@ sparkxray tables query LOG "select count(*) from tasks"
 `--json` prints any read as JSON on stdout, and progress goes to stderr. Under `--json`, or
 `reports write --format json`, a refusal prints as one line of JSON on stderr, carrying its error
 code. A command line the parser refuses is `E-USAGE-001`. `sparkxray capabilities show --json`
-lists every command, rule, table, schema and error code, and `sparkxray schemas show NAME` prints
-the JSON Schema of each output.
+lists every command, rule, table, schema and error code. `sparkxray schemas show NAME` prints the
+JSON Schema of one document, whose description names the command printing it. A listing such as
+`stages list --json` has none.
 
 Source, documentation and issues: <https://github.com/datapointchris/sparkxray>.

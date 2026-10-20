@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "sparkxray findings",
-  "description": "What one analysis of a Spark run found: the rules it ran with the thresholds each applied, its findings, from the most wall time a fix could recover to the least, and the rules it skipped because the input lacked a signal they read. findings.parquet keeps this document without findings in its key-value metadata, under sparkxray.analysis. A field removed or a meaning changed raises schema_version, and a field added does not.",
+  "description": "What one analysis of a Spark run found: the rules it ran with the thresholds each applied, its findings, from the most wall time a fix could recover to the least, and the rules it skipped because the input lacked a signal they read. sparkxray findings list --json prints it, with gate, and findings show --json prints one item of findings. findings.parquet keeps this document without findings in its key-value metadata, under sparkxray.analysis. A field removed or a meaning changed raises schema_version, and a field added does not.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "app_id", "signals", "rules_run", "findings", "skipped"],
