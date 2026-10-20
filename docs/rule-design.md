@@ -163,6 +163,17 @@ and a node key would claim it is about one operator.
 The id is stable within one log only. Stage numbers shift between runs, so comparing two runs
 matches findings by rule and aligned scope, never by this string.
 
+## A stage finding names the plan node behind it where one stands out
+
+A stage runs several operators of one execution's plan. `stage.shuffle-skew` names the join that
+read the skewed shuffle, where exactly one sort-merge or shuffled hash join ran in the stage.
+`stage.spill` and `stage.spill-skew` name the node with the most `spill size` in the execution's
+last plan: a sort, an aggregate or a join. A spill no plan node counts names none. A shuffle
+write's sorter spills that way.
+
+The node joins the finding's scope, and its id stays the stage's. The finding is about the stage,
+and the node says where in the plan to look.
+
 ## Each threshold names where it came from
 
 A `Threshold` carries a `source` beside its default. Most defaults come from published prior art:

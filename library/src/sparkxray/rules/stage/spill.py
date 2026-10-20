@@ -14,6 +14,18 @@ from sparkxray.rules.stage.statistics import SLOTS
 from sparkxray.rules.stage.statistics import STAGE_CTES
 
 _TUNING_DOCS = 'https://spark.apache.org/docs/latest/tuning.html#memory-management-overview'
+# The plan node that spilled most in each stage, by `spill size` in its execution's last plan.
+_SPILL_NODES = """spill_nodes AS (
+  SELECT node_stages.stage_id, metrics.node_id AS plan_node_id, plan_nodes.label AS plan_node_label
+  FROM node_stages
+  JOIN sql_executions USING (execution_id)
+  JOIN plan_node_metrics AS metrics ON metrics.execution_id = node_stages.execution_id AND metrics.node_id = node_stages.node_id
+    AND metrics.plan_version = sql_executions.plan_version_count - 1
+  JOIN plan_nodes ON plan_nodes.execution_id = metrics.execution_id AND plan_nodes.node_id = metrics.node_id
+    AND plan_nodes.plan_version = metrics.plan_version
+  WHERE metrics.metric_name = 'spill size' AND metrics.total > 0
+  QUALIFY row_number() OVER (PARTITION BY node_stages.stage_id ORDER BY metrics.total DESC, metrics.node_id) = 1
+)"""
 
 # A single-task stage has no other task to compare with, so sparkDoctor holds it to higher floors.
 # The impact is the spilling tasks' run time spread over the stage's slots, times the disk spill's
@@ -32,9 +44,9 @@ WITH {STAGE_CTES}, spilled AS (
   GROUP BY tasks_effective.stage_id
 ), reads AS (
   SELECT stage_id, shuffle_read_bytes + coalesce(input_bytes, 0) AS read_bytes FROM stage_statistics JOIN spilled USING (stage_id)
-)
+), {_SPILL_NODES}
 SELECT stage_statistics.stage_id, stage_statistics.stage_attempt, stage_owners.job_id, stage_owners.sql_execution_id,
-  worst.worst_task_ids,
+  spill_nodes.plan_node_id, spill_nodes.plan_node_label, worst.worst_task_ids,
   CASE WHEN stage_statistics.disk_spilled_bytes >= 1073741824 OR stage_statistics.max_disk_spilled_bytes >= 536870912
     THEN 'high' ELSE 'medium' END AS severity,
   CASE WHEN reads.read_bytes > 0 THEN round(least(
@@ -53,6 +65,7 @@ JOIN reads USING (stage_id)
 LEFT JOIN stage_owners USING (stage_id)
 LEFT JOIN stage_walls USING (stage_id)
 LEFT JOIN stage_slots USING (stage_id)
+LEFT JOIN spill_nodes USING (stage_id)
 ORDER BY stage_statistics.stage_id
 """
 
@@ -129,8 +142,9 @@ WITH {STAGE_CTES}, judged AS (
   FROM tasks_effective JOIN skewed USING (stage_id)
   WHERE tasks_effective.memory_spilled_bytes > 0 OR tasks_effective.disk_spilled_bytes > 0
   GROUP BY tasks_effective.stage_id
-)
-SELECT skewed.stage_id, skewed.stage_attempt, stage_owners.job_id, stage_owners.sql_execution_id, worst.worst_task_ids,
+), {_SPILL_NODES}
+SELECT skewed.stage_id, skewed.stage_attempt, stage_owners.job_id, stage_owners.sql_execution_id,
+  spill_nodes.plan_node_id, spill_nodes.plan_node_label, worst.worst_task_ids,
   CASE WHEN skewed.disk_skewed THEN 'high' ELSE 'medium' END AS severity,
   round((skewed.max_duration_ms - skewed.median_duration_ms) / 1000, 3) AS impact_seconds,
   skewed.task_count,
@@ -141,6 +155,7 @@ SELECT skewed.stage_id, skewed.stage_attempt, stage_owners.job_id, stage_owners.
 FROM skewed
 JOIN worst USING (stage_id)
 LEFT JOIN stage_owners USING (stage_id)
+LEFT JOIN spill_nodes USING (stage_id)
 ORDER BY skewed.stage_id
 """
 
