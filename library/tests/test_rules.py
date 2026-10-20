@@ -121,7 +121,7 @@ def test_every_lesson_answers_the_same_four_questions_in_order() -> None:
 
 
 def test_a_plan_without_metrics_runs_the_plan_rules_and_names_what_the_others_lack() -> None:
-    events = [json.loads(line) for line in plain_lines(FIXTURES / 'logs' / 'spark-3.5.9-plan-shapes' / 'local-1792412428407.zstd')]
+    events = [json.loads(line) for line in plain_lines(FIXTURES / 'logs' / 'spark-3.5.9-plan-shapes' / 'local-1792455590972.zstd')]
     text = next(
         event['physicalPlanDescription'] for event in events if event['Event'].endswith('SQLExecutionStart') and event['executionId'] == 15
     )

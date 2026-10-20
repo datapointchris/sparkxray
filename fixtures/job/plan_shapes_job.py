@@ -52,6 +52,12 @@ def main() -> None:
         spark.sparkContext.setJobDescription(name)
         build().collect()
 
+    # Only AQE may broadcast, so the sort-merge join it starts from becomes a broadcast once `s` has run.
+    spark.conf.set('spark.sql.adaptive.autoBroadcastJoinThreshold', '10MB')
+    spark.sparkContext.setJobDescription('aqe-join-switch')
+    t.join(s, 'id').collect()
+    spark.conf.unset('spark.sql.adaptive.autoBroadcastJoinThreshold')
+
     for name, length in (('max-plan-length', 400), ('max-plan-length-zero', 0)):
         spark.conf.set('spark.sql.maxPlanStringLength', length)
         spark.sparkContext.setJobDescription(name)
