@@ -171,7 +171,11 @@ submit_and_kill() {
     sleep 1
   done
   sleep 5
-  docker kill "$name" >/dev/null
+  if ! docker kill "$name" >/dev/null; then
+    docker rm "$name" >/dev/null
+    echo "regenerate.sh: the run ended within 5 seconds of the driver starting $jobs jobs, before it could be killed" >&2
+    exit 1
+  fi
   docker rm "$name" >/dev/null
   docker run --rm --user 0 -v "$out:/out" -v "$work/data:/data" --entrypoint chown "$image" \
     -R "$(id -u):$(id -g)" /out /data
