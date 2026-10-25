@@ -88,7 +88,7 @@ def enrich(
                 from sparkxray.ingest.aws import CloudWatch
                 from sparkxray.ingest.aws import CloudWatchLogs
 
-                span = tables.query(RUN_SPAN_SQL).fetchone()
+                span = tables.first_row(RUN_SPAN_SQL)
                 start_epoch_ms, end_epoch_ms = span if span is not None else (None, None)
                 samples = SAMPLE_SCHEMA.empty_table()
                 if start_epoch_ms is not None and end_epoch_ms is not None:

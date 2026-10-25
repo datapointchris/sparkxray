@@ -236,7 +236,7 @@ def analyze(
     node_metrics: dict[int | None, dict[int, dict[str, float]]] = {
         execution_id: totals for execution_id, totals in tables.node_metric_totals().items()
     }
-    application = tables.query('SELECT app_id FROM application').fetchone()
+    application = tables.first_row('SELECT app_id FROM application')
     from sparkxray.tables.registry import WALL_SHARES_SQL
 
     shares = {(level, scope_id): share for level, scope_id, _, share in tables.query(WALL_SHARES_SQL).fetchall() if share is not None}

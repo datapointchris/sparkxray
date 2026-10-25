@@ -110,7 +110,7 @@ class RunModel:
     @classmethod
     def read(cls, tables: Tables) -> RunModel:
         """The model of one log's run."""
-        wall_ms = tables.query(f'SELECT end_epoch_ms - start_epoch_ms FROM ({RUN_SPAN_SQL})').fetchone()
+        wall_ms = tables.first_row(f'SELECT end_epoch_ms - start_epoch_ms FROM ({RUN_SPAN_SQL})')
         jobs = [
             JobSpan(row['job_id'], row['sql_execution_id'], row['submit_epoch_ms'], row['end_epoch_ms'], tuple(row['stage_ids']))
             for row in rows_of(tables.query(_JOBS_SQL)).to_json()

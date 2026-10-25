@@ -176,7 +176,7 @@ def _memory_over(context: RuleContext) -> Iterable[Mapping[str, Any]]:
     fullest = None if context.tables is None or ran_out else _fullest_executor(context.tables)
     if context.tables is None or fullest is None or fullest['peak_memory_share'] >= context.thresholds['min_peak_share']:
         return []
-    gc_share = context.tables.query(_EXECUTOR_GC_SQL).fetchone()
+    gc_share = context.tables.first_row(_EXECUTOR_GC_SQL)
     measured_by_task = fullest['peak_memory_source'] == 'task_peaks'
     return [
         {
@@ -294,7 +294,7 @@ WHERE executors.is_driver AND executors.peak_jvm_heap_bytes IS NOT NULL
 
 
 def _driver_memory_under(context: RuleContext) -> Iterable[Mapping[str, Any]]:
-    row = None if context.tables is None else context.tables.query(_DRIVER_MEMORY_SQL).fetchone()
+    row = None if context.tables is None else context.tables.first_row(_DRIVER_MEMORY_SQL)
     if row is None:
         return []
     peak_bytes, peak_source, setting = row

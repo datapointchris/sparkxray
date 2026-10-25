@@ -57,9 +57,7 @@ def _firings(path: pathlib.Path, cache_dir: pathlib.Path) -> tuple[dict[str, set
     FINDINGS_SCHEMA.validate(analysis.to_json())
     jobs = dict(log.tables.query("SELECT job_id, coalesce(description, '') FROM jobs").fetchall())
     executions = dict(log.tables.query("SELECT execution_id, coalesce(description, '') FROM sql_executions").fetchall())
-    declared = log.tables.query(
-        "SELECT value FROM environment WHERE section = 'spark' AND key = $key", {'key': APPLICATION_PROPERTY}
-    ).fetchone()
+    declared = log.tables.first_row("SELECT value FROM environment WHERE section = 'spark' AND key = $key", {'key': APPLICATION_PROPERTY})
     fired: dict[str, set[str]] = {description: set() for description in (*jobs.values(), *executions.values())}
     on_run = set()
     for finding in analysis.findings:

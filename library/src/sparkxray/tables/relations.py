@@ -121,6 +121,15 @@ class Tables:
         """A relation over any SQL that reads the tables, by their names, with `$name` or `?` parameters."""
         return self.connection.sql(sql, params=parameters)
 
+    def first_row(self, sql: str, parameters: object = None) -> tuple[Any, ...] | None:
+        """The first row of `query(sql, parameters)`, or None where it returns no rows.
+
+        DuckDB 2.0 removed `fetchone` from a relation and names `limit(1).fetchall()` in its place,
+        which DuckDB 1.5 runs too.
+        """
+        rows = self.query(sql, parameters).limit(1).fetchall()
+        return rows[0] if rows else None
+
     def rows(self, sql: str, parameters: object = None) -> Rows:
         """The rows of a caller's SQL over the tables. SQL DuckDB refuses raises `QueryError` with DuckDB's message.
 

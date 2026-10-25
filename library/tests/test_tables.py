@@ -56,12 +56,12 @@ def test_tasks_effective_keeps_the_first_success_of_each_partition_of_each_stage
     tables = EventLog.open(log, cache_dir=tmp_path / 'cache').tables
     assert tables.query('select stage_id, partition_id from tasks_effective order by all').fetchall() == sorted(succeeded)
     assert tables.query('select attempt, name from stages where stage_id = 99 and is_highest_attempt').fetchall() == [(1, None)]
-    stage = tables.query(
+    stage = tables.first_row(
         'select max(shuffle_read_records), median(shuffle_read_records), max(executor_run_time_ms) from tasks_effective where stage_id = 4'
     )
-    assert stage.fetchone() == (32_536_313, 506_215, 25_607)
-    cpu = tables.query('select executor_cpu_time_ns from tasks_effective where task_id = ?', [longest['Task Info']['Task ID']])
-    assert cpu.fetchone() == (longest['Task Metrics']['Executor CPU Time'],)
+    assert stage == (32_536_313, 506_215, 25_607)
+    cpu = tables.first_row('select executor_cpu_time_ns from tasks_effective where task_id = ?', [longest['Task Info']['Task ID']])
+    assert cpu == (longest['Task Metrics']['Executor CPU Time'],)
 
 
 def test_a_sort_reading_a_join_of_two_spilling_sorts_leaves_their_spills_out_of_its_own(tmp_path: pathlib.Path) -> None:

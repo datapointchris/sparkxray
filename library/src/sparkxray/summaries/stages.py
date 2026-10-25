@@ -192,9 +192,9 @@ def _require_stage(tables: Tables, stage_id: int) -> None:
     held = [row[0] for row in tables.query('SELECT DISTINCT stage_id FROM stages ORDER BY stage_id').fetchall()]
     if stage_id in held:
         return
-    listed = tables.query(
+    listed = tables.first_row(
         'SELECT job_id, result FROM jobs WHERE list_contains(stage_ids, $stage_id) ORDER BY job_id LIMIT 1', {'stage_id': stage_id}
-    ).fetchone()
+    )
     if listed is None:
         message = f'the run has no stage {stage_id}'
     elif listed[1] == 'JobSucceeded':

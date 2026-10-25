@@ -44,7 +44,7 @@ class CachedLog:
     @classmethod
     def of(cls, tables: Tables) -> CachedLog:
         """The cached log one log's tables are."""
-        row = tables.query('SELECT app_name FROM application').fetchone()
+        row = tables.first_row('SELECT app_name FROM application')
         return cls._built(tables.manifest, tables.path, None if row is None else row[0], _openable(tables.manifest.ingest.source))
 
     @classmethod
