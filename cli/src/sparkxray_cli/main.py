@@ -175,4 +175,15 @@ def main(
 
     A resource with no verb, such as `sparkxray stages`, lists its verbs. A command missing its
     arguments, or given `--help`, shows what it takes.
+
+    Examples:
+
+    ```text
+    sparkxray findings list ./eventlog.zstd                     what slowed the run, costliest first
+    sparkxray findings show ./eventlog.zstd stage.task-skew:s0  one finding's evidence and its fix
+    sparkxray logs diff ./good.zstd ./slow.zstd                 why a run got slower than the last good one
+    sparkxray stages list ./eventlog.zstd --sort wall_ms -n 5   the five stages that took the most time
+    sparkxray rules show stage.task-skew                        what a rule looks for, and how to fix it
+    sparkxray capabilities show --json                          every command, rule and schema, for a program
+    ```
     """

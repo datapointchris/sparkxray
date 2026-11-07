@@ -22,7 +22,17 @@ from sparkxray_cli.shared_parameters import LogArgument
 from sparkxray_cli.shared_parameters import ThresholdFileOption
 from sparkxray_cli.shared_parameters import ThresholdOption
 
-app = typer.Typer(no_args_is_help=True, help='See where in a query the rows, bytes and time went, and which node a finding is about.')
+PLANS_HELP = """See where in a query the rows, bytes and time went, and which node a finding is about.
+
+Examples:
+
+```text
+sparkxray plans show ./eventlog.zstd 1              where SQL execution 1's rows, bytes and time went
+sparkxray plans show ./eventlog.zstd 1 --initial    the plan before AQE re-planned it
+```
+"""
+
+app = typer.Typer(no_args_is_help=True, help=PLANS_HELP)
 
 _UNPLACED_KEYS = ('severity', 'finding_id', 'scope', 'title')
 
@@ -64,6 +74,15 @@ def show(
     `--initial` or `--plan-version`, lists them below the tree, because findings number the last
     plan's nodes. A node AQE kept carries its metrics into every later version, so an earlier
     version shows the values of the nodes it shares with the last.
+
+    Examples:
+
+    ```text
+    sparkxray plans show ./eventlog.zstd 1                     which node of SQL execution 1 a finding is about
+    sparkxray plans show ./eventlog.zstd 1 --initial           the plan before AQE re-planned it
+    sparkxray plans show ./eventlog.zstd 1 --plan-version 1    the plan after AQE's first re-plan
+    sparkxray plans show ./eventlog.zstd 1 --json              each metric's min, median and max per node, for a program
+    ```
     """
     if initial and version not in (None, 0):
         raise typer.BadParameter('--initial is version 0, so give one of --initial and --plan-version', param_hint='--initial')

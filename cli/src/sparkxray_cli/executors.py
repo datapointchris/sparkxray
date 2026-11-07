@@ -18,10 +18,18 @@ from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import LimitOption
 from sparkxray_cli.shared_parameters import LogArgument
 
-app = typer.Typer(
-    no_args_is_help=True,
-    help='See whether the run had more executors than work, which ones failed tasks, and how it would run on more or fewer.',
-)
+EXECUTORS_HELP = """See whether the run had more executors than work, which ones failed tasks, and how it would run on more or fewer.
+
+Examples:
+
+```text
+sparkxray executors list ./eventlog.zstd                         which executors sat idle or failed tasks
+sparkxray executors simulate ./eventlog.zstd                     whether more or fewer executors would pay off
+sparkxray executors simulate ./eventlog.zstd --executors 2..8    the run at each count from 2 to 8
+```
+"""
+
+app = typer.Typer(no_args_is_help=True, help=EXECUTORS_HELP)
 
 _REFERENCE_KEYS = ('wall_ms', 'driver_ms', 'executor_ms', 'critical_path_ms', 'perfect_parallel_ms', 'single_core_ms')
 _CURVE_COLUMNS = ('executor_count', 'estimated_wall_ms', 'utilization_share', 'core_hours')
@@ -88,6 +96,13 @@ def list_executors(log: LogArgument, limit: LimitOption = None, as_json: JsonOpt
     The idle share is the part of an executor's core time, lifetime times cores, that no task held,
     each task holding spark.task.cpus cores. The peak heap's source says whether it came from
     per-stage executor metrics or only from task-end polls.
+
+    Examples:
+
+    ```text
+    sparkxray executors list ./eventlog.zstd           which executors sat idle, failed tasks or were removed
+    sparkxray executors list ./eventlog.zstd --json    every executor's numbers, for a program
+    ```
     """
     rows = executor_summaries(open_tables(log), limit=limit)
     if as_json:
@@ -141,6 +156,15 @@ def simulate_executors(
     run time of retried and speculative task attempts, which the model leaves out.
 
     Exits 0 when it ran and 2 on a usage error. Exits 3 when the log could not be read, or its stages could not be replayed.
+
+    Examples:
+
+    ```text
+    sparkxray executors simulate ./eventlog.zstd                                whether more or fewer executors would pay off
+    sparkxray executors simulate ./eventlog.zstd --executors 2..8               the run at each count from 2 to 8
+    sparkxray executors simulate ./eventlog.zstd --executors 4,8 --cores 4      the run on bigger executors
+    sparkxray executors simulate ./eventlog.zstd --json                         the curve and reference times, for a program
+    ```
     """
     simulation = simulate(open_log(log), executors=executors, cores=cores)
     if as_json:

@@ -27,10 +27,19 @@ from sparkxray_cli.shared_parameters import LogArgument
 from sparkxray_cli.shared_parameters import ThresholdFileOption
 from sparkxray_cli.shared_parameters import ThresholdOption
 
-app = typer.Typer(
-    no_args_is_help=True,
-    help='Diff two runs of one job, list and show the logs the cache holds, and join a Glue run or a driver log to one.',
-)
+LOGS_HELP = """Diff two runs of one job, list and show the logs the cache holds, and join a Glue run or a driver log to one.
+
+Examples:
+
+```text
+sparkxray logs diff ./good.zstd ./slow.zstd                      why a run got slower than the last good one
+sparkxray logs list                                              the logs already read, by the app id that opens each
+sparkxray logs show ./eventlog.zstd                              what a log holds, and what it was written without
+sparkxray logs ingest ./eventlog.zstd --driver-log driver.log    join a driver's log, so the rules read it
+```
+"""
+
+app = typer.Typer(no_args_is_help=True, help=LOGS_HELP)
 
 _RUN_COLUMNS = ('run', 'app_id', 'app_name', 'spark_version', 'wall_ms', 'succeeded')
 
@@ -107,6 +116,14 @@ def ingest(
     that rules read. Giving one again replaces its table. An upgrade of sparkxray rebuilds the
     tables without the joined ones, so give the flags again after one. With --json, `enrichment`
     gives each joined table's rows and each warning, and is null where neither flag was given.
+
+    Examples:
+
+    ```text
+    sparkxray logs ingest ./eventlog.zstd                             read a log ahead of time, and print where its tables are
+    sparkxray logs ingest ./eventlog.zstd --driver-log driver.log     join a driver's structured log, so the driver rules run
+    sparkxray logs ingest ./eventlog.zstd --json                      the cached log and what was joined, for a program
+    ```
     """
     opened = open_log(log, app=app_id)
     tables = tables_of(opened)
@@ -126,7 +143,16 @@ def ingest(
 
 @app.command('list')
 def list_logs(limit: LimitOption = None, as_json: JsonOption = False) -> None:
-    """List the logs the cache under $XDG_CACHE_HOME/sparkxray/ holds tables for, newest first, each by the app id that opens it."""
+    """List the logs the cache under $XDG_CACHE_HOME/sparkxray/ holds tables for, newest first, each by the app id that opens it.
+
+    Examples:
+
+    ```text
+    sparkxray logs list           the logs already read, to open one again by its app id
+    sparkxray logs list -n 5      the five read most recently
+    sparkxray logs list --json    every cached log and where it was read from, for a program
+    ```
+    """
     logs = cached_logs(limit=limit)
     if as_json:
         render.emit_json([cached.to_json() for cached in logs])
@@ -139,7 +165,15 @@ def list_logs(limit: LimitOption = None, as_json: JsonOption = False) -> None:
 
 @app.command('show', no_args_is_help=True)
 def show(log: LogArgument, as_json: JsonOption = False) -> None:
-    """Show the application a log holds, the files it was read from, and what the log was written without."""
+    """Show the application a log holds, the files it was read from, and what the log was written without.
+
+    Examples:
+
+    ```text
+    sparkxray logs show ./eventlog.zstd           which app, Spark version and files, and what the log lacks
+    sparkxray logs show ./eventlog.zstd --json    the application and its manifest, for a program
+    ```
+    """
     detail = application_detail(open_tables(log))
     if as_json:
         render.emit_json(detail.to_json())
@@ -213,6 +247,15 @@ def diff(
     Exits 0 when it ran, whatever changed, and 2 on a usage error. Exits 3 when `--fail-on` is
     given and LOG_B has a finding at or above it that is new or was below it in LOG_A, or when a
     log could not be read.
+
+    Examples:
+
+    ```text
+    sparkxray logs diff ./good.zstd ./slow.zstd                                 why the slow run took longer than the good one
+    sparkxray logs diff ./good.zstd ./slow.zstd --fail-on high                  a CI step that fails on a new high finding
+    sparkxray logs diff ./good.zstd ./slow.zstd --ignore-config 'spark.app.*'   leave out settings that differ every run
+    sparkxray logs diff ./good.zstd ./slow.zstd --json                          every pair, setting and finding, for a program
+    ```
     """
     opened_a, opened_b = open_log(log_a), open_log(log_b)
     opened_baselines = [open_log(location) for location in baseline or ()]

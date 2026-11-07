@@ -17,7 +17,18 @@ from sparkxray_cli.shared_parameters import LimitOption
 from sparkxray_cli.shared_parameters import LogArgument
 from sparkxray_cli.shared_parameters import SortOption
 
-app = typer.Typer(no_args_is_help=True, help='Find the stages that took the time, and see how evenly their tasks shared it.')
+STAGES_HELP = """Find the stages that took the time, and see how evenly their tasks shared it.
+
+Examples:
+
+```text
+sparkxray stages list ./eventlog.zstd                     which stages took the run's time
+sparkxray stages show ./eventlog.zstd 0                   whether stage 0's tasks shared it evenly
+sparkxray tasks list ./eventlog.zstd --stage 0 -n 5       the tasks stage 0 waited on
+```
+"""
+
+app = typer.Typer(no_args_is_help=True, help=STAGES_HELP)
 
 _LIST_COLUMNS = (
     'stage_id',
@@ -50,6 +61,15 @@ def list_stages(log: LogArgument, sort: SortOption = None, limit: LimitOption = 
     `--json` and `stages show` add the in-memory bytes spilled, the core-hours available and
     used, and the parallelism ratio: the stage's partitions over the run's task slots, so one
     under 1 left slots idle.
+
+    Examples:
+
+    ```text
+    sparkxray stages list ./eventlog.zstd                            every stage, in the order it ran
+    sparkxray stages list ./eventlog.zstd --sort wall_ms -n 5        the five stages that took the most time
+    sparkxray stages list ./eventlog.zstd --sort wasted_core_hours   the stage that left the most cores idle first
+    sparkxray stages list ./eventlog.zstd --json                     every column, for a program
+    ```
     """
     rows = stage_summaries(open_tables(log), sort=sort, limit=limit)
     if as_json:
@@ -72,6 +92,13 @@ def show(
     The quantiles are taken as the Stages tab takes its summary metrics, so a max far above the
     p50 is the skew the Spark UI would show. A stage a job skipped, because an earlier stage had
     written its shuffle output, ran no tasks and has none to show.
+
+    Examples:
+
+    ```text
+    sparkxray stages show ./eventlog.zstd 0          whether stage 0's slowest task ran far past its median
+    sparkxray stages show ./eventlog.zstd 0 --json   the stage and its task quantiles, for a program
+    ```
     """
     detail = stage_detail(open_tables(log), stage_id)
     if as_json:

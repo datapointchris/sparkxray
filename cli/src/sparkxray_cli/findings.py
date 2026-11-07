@@ -25,10 +25,18 @@ from sparkxray_cli.shared_parameters import LogArgument
 from sparkxray_cli.shared_parameters import ThresholdFileOption
 from sparkxray_cli.shared_parameters import ThresholdOption
 
-app = typer.Typer(
-    no_args_is_help=True,
-    help='Find what slowed a run, costliest first. findings list exits 3 on a high finding or worse, so it gates a CI step.',
-)
+FINDINGS_HELP = """Find what slowed a run, costliest first. findings list exits 3 on a high finding or worse, so it gates a CI step.
+
+Examples:
+
+```text
+sparkxray findings list ./eventlog.zstd                       what slowed the run, costliest first
+sparkxray findings show ./eventlog.zstd stage.task-skew:s0    one finding's evidence, thresholds and fix
+sparkxray findings list ./eventlog.zstd --fail-on critical    a CI step that fails on critical findings alone
+```
+"""
+
+app = typer.Typer(no_args_is_help=True, help=FINDINGS_HELP)
 
 RuleOption = Annotated[
     list[str] | None,
@@ -73,6 +81,18 @@ def list_findings(
     read. So `sparkxray findings list LOG` gates a CI step on high findings as it stands, and
     `--fail-on critical` gates on critical ones alone. A finding below the bar is listed and never
     fails the step. `--json` carries the gate it was judged by.
+
+    Examples:
+
+    ```text
+    sparkxray findings list ./eventlog.zstd                                          what slowed the run, costliest first
+    sparkxray findings list ./eventlog.zstd --min-severity high                      only what needs fixing first
+    sparkxray findings list ./eventlog.zstd --rule stage.task-skew                   whether one problem came back
+    sparkxray findings list ./eventlog.zstd --threshold stage.shuffle-skew.ratio=8   judge skew more leniently for this job
+    sparkxray findings list ./eventlog.zstd --thresholds thresholds.toml             judge by the thresholds kept beside the job
+    sparkxray findings list ./eventlog.zstd --fail-on critical                       a CI step that fails on critical findings alone
+    sparkxray findings list ./eventlog.zstd --json                                   every finding and the gate, for a program
+    ```
     """
     analysis = analyze_log(open_log(log), rule, threshold, thresholds)
     gate = analysis.gate(fail_on)
@@ -120,6 +140,13 @@ def show(
     took, as `findings list --help` says. confidence says how sure the rule is that its evidence
     shows the problem it names. Where it is below high, confidence_reason says why, as when peak
     memory came only from task-end polls.
+
+    Examples:
+
+    ```text
+    sparkxray findings show ./eventlog.zstd stage.task-skew:s0          its evidence, thresholds and how to fix it
+    sparkxray findings show ./eventlog.zstd stage.task-skew:s0 --json   the same, for a program
+    ```
     """
     finding = analyze_log(open_log(log), None, threshold, thresholds).finding(finding_id)
     if as_json:

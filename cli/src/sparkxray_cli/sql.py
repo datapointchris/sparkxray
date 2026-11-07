@@ -17,11 +17,19 @@ from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import LimitOption
 from sparkxray_cli.shared_parameters import LogArgument
 
-app = typer.Typer(
-    no_args_is_help=True,
-    help='Find the SQL execution, a query or DataFrame action, that took the time, and what its plan holds. '
-    'To run SQL of your own, use tables query.',
-)
+SQL_HELP = """Find the SQL execution, a query or DataFrame action, that took the time, and what its plan holds. \
+To run SQL of your own, use tables query.
+
+Examples:
+
+```text
+sparkxray sql list ./eventlog.zstd        which query or action took the run's time
+sparkxray sql show ./eventlog.zstd 1      its jobs, its operators, and what AQE changed in it
+sparkxray plans show ./eventlog.zstd 1    its plan as a tree, with each node's numbers
+```
+"""
+
+app = typer.Typer(no_args_is_help=True, help=SQL_HELP)
 
 _LIST_COLUMNS = (
     'execution_id',
@@ -70,7 +78,16 @@ _SHUFFLE_READ_HEADERS = {
 
 @app.command('list', no_args_is_help=True)
 def list_executions(log: LogArgument, limit: LimitOption = None, as_json: JsonOption = False) -> None:
-    """List every SQL execution: its duration and share of the run, jobs, stages, and the operators of its last plan."""
+    """List every SQL execution: its duration and share of the run, jobs, stages, and the operators of its last plan.
+
+    Examples:
+
+    ```text
+    sparkxray sql list ./eventlog.zstd           which query or action took the run's time
+    sparkxray sql list ./eventlog.zstd -n 3      the first three, as they ran
+    sparkxray sql list ./eventlog.zstd --json    every execution's numbers, for a program
+    ```
+    """
     rows = sql_summaries(open_tables(log), limit=limit)
     if as_json:
         render.emit_json(rows.to_json())
@@ -97,6 +114,13 @@ def show(
     `read` the partitions AQE read them as. `coalesced` counts the reads that merged small
     partitions, `skewed` the partitions split for skew, `splits` the reads those became, and
     `empty` the partitions that held no rows. `data` is the bytes read.
+
+    Examples:
+
+    ```text
+    sparkxray sql show ./eventlog.zstd 1           its jobs, its operators, and the joins and reads AQE changed
+    sparkxray sql show ./eventlog.zstd 1 --json    the same, for a program
+    ```
     """
     detail = sql_detail(open_tables(log), execution_id)
     if as_json:

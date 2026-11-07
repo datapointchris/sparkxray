@@ -11,7 +11,17 @@ from sparkxray_cli.log_opening import open_tables
 from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import LogArgument
 
-app = typer.Typer(no_args_is_help=True, help='Ask the run anything with SQL over its tables, which any Parquet reader also opens.')
+TABLES_HELP = """Ask the run anything with SQL over its tables, which any Parquet reader also opens.
+
+Examples:
+
+```text
+sparkxray tables list ./eventlog.zstd                                           which tables and columns a query can read
+sparkxray tables query ./eventlog.zstd "select count(*) from tasks_effective"   a question no other command answers
+```
+"""
+
+app = typer.Typer(no_args_is_help=True, help=TABLES_HELP)
 
 _COLUMN_KEYS = ('name', 'type', 'unit', 'description')
 
@@ -22,6 +32,13 @@ def list_tables(log: LogArgument, as_json: JsonOption = False) -> None:
 
     findings appears once `findings list` or `reports write` has run on the log. `metrics list`
     gives every column with a unit, and every plan metric, with no log needed.
+
+    Examples:
+
+    ```text
+    sparkxray tables list ./eventlog.zstd           which tables and columns a query can read, and what each holds
+    sparkxray tables list ./eventlog.zstd --json    each table's Parquet path and columns, for a program
+    ```
     """
     listed = open_tables(log).listing()
     if as_json:
@@ -46,12 +63,19 @@ def query(
 ) -> None:
     """Run DuckDB SQL over the log's tables and print its rows.
 
-    The slowest task of each stage, counting each partition once:
-
-        sparkxray tables query LOG "select stage_id, max(duration_ms) from tasks_effective group by all"
-
     tasks_effective holds each partition's first successful attempt, and tasks holds every
     attempt, retries and speculative copies included.
+
+    Examples:
+
+    ```text
+    sparkxray tables query ./eventlog.zstd "select stage_id, max(duration_ms) from tasks_effective group by all"
+        the slowest task of each stage, counting each partition once
+    sparkxray tables query ./eventlog.zstd "select executor_id, count(*) from tasks where end_reason <> 'Success' group by all"
+        which executors failed tasks
+    sparkxray tables query ./eventlog.zstd "select count(*) from tasks_effective" --json
+        the rows as JSON, for a program
+    ```
     """
     rows = open_tables(log).rows(sql)
     if as_json:

@@ -20,13 +20,18 @@ from sparkxray_cli.shared_parameters import LogArgument
 from sparkxray_cli.shared_parameters import ThresholdFileOption
 from sparkxray_cli.shared_parameters import ThresholdOption
 
-app = typer.Typer(
-    no_args_is_help=True,
-    help=(
-        'Write one document of a run to read, attach to a ticket or commit: its findings with their evidence, then its longest '
-        'stages, plans and settings. It gates as findings list does.'
-    ),
-)
+REPORTS_HELP = """Write one document of a run to read, attach to a ticket or commit: its findings with their evidence, then its longest \
+stages, plans and settings. It gates as findings list does.
+
+Examples:
+
+```text
+sparkxray reports write ./eventlog.zstd --out report.md    a report to attach to a ticket
+sparkxray reports write ./eventlog.zstd                    the same report on stdout, to read now
+```
+"""
+
+app = typer.Typer(no_args_is_help=True, help=REPORTS_HELP)
 
 
 @app.command('write', no_args_is_help=True)
@@ -59,6 +64,15 @@ def write(
 
     Exits 0 when no finding reaches `--fail-on` and 3 when one does, and the report is written in
     both cases, stating the verdict. Exits 2 on a usage error, and 3 when the log could not be read.
+
+    Examples:
+
+    ```text
+    sparkxray reports write ./eventlog.zstd --out report.md                      a report to attach to a ticket
+    sparkxray reports write ./eventlog.zstd                                      the same report on stdout, to read now
+    sparkxray reports write ./eventlog.zstd --format json --out report.json      the run and its findings, to keep and diff
+    sparkxray reports write ./eventlog.zstd --out report.md --fail-on critical   a CI step that keeps the report and fails on critical
+    ```
     """
     opened = open_log(log)
     analysis = analyze_log(opened, None, threshold, thresholds)

@@ -19,7 +19,17 @@ from sparkxray_cli.shared_parameters import JsonOption
 from sparkxray_cli.shared_parameters import ThresholdFileOption
 from sparkxray_cli.shared_parameters import ThresholdOption
 
-app = typer.Typer(no_args_is_help=True, help='Learn what each rule looks for, the thresholds it judges by, and how to fix what it finds.')
+RULES_HELP = """Learn what each rule looks for, the thresholds it judges by, and how to fix what it finds.
+
+Examples:
+
+```text
+sparkxray rules show stage.task-skew    what a finding's rule looks for, and how to fix it
+sparkxray rules list                    every rule, the signals it needs and its thresholds
+```
+"""
+
+app = typer.Typer(no_args_is_help=True, help=RULES_HELP)
 
 # A title's `{name}` or `{name:spec}`, where a `plural` spec carries the noun, and a second form after `|`.
 _PLACEHOLDER = re.compile(r'\{[^{}:]*(?::plural ([^{}|]*)(?:\|([^{}]*))?|:[^{}]*)?\}')
@@ -35,6 +45,13 @@ def list_rules(as_json: JsonOption = False) -> None:
     dropped none of the run. glue_metrics, glue_insights and driver_log hold rows once `logs ingest`
     joins a Glue run or a driver log. plan_estimates is printed by explain(mode='cost') alone. A
     log lacking a rule's signal skips the rule, and `findings list` names each skip.
+
+    Examples:
+
+    ```text
+    sparkxray rules list           every rule, what it finds and the thresholds it judges by
+    sparkxray rules list --json    every rule with its severity ladder and docs, for a program
+    ```
     """
     rules = catalog()
     if as_json:
@@ -76,6 +93,14 @@ def show(
     A threshold's default comes from the tool or document its `default from` names, and
     `proposed` marks one sparkxray chose itself, where no published tool gives one. The example
     is what the rule found on one of the runs sparkxray is tested against.
+
+    Examples:
+
+    ```text
+    sparkxray rules show stage.task-skew                                             what it looks for, and how to fix it
+    sparkxray rules show stage.shuffle-skew --threshold stage.shuffle-skew.ratio=8   its lesson at the value a job overrides
+    sparkxray rules show stage.task-skew --json                                      its thresholds, ladder and lesson, for a program
+    ```
     """
     lesson = rule_lesson(rule_id, threshold_file=thresholds, threshold_flags=threshold or ())
     if as_json:
