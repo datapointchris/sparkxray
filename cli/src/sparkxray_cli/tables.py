@@ -28,9 +28,9 @@ _COLUMN_KEYS = ('name', 'type', 'unit', 'description')
 
 @app.command('list', no_args_is_help=True)
 def list_tables(log: LogArgument, as_json: JsonOption = False) -> None:
-    """List the tables and views tables query reads in one log: row counts, each Parquet file, and every column's type, unit and meaning.
+    """List the tables and views `tables query` reads in one log: row counts, each Parquet file, and every column's type, unit and meaning.
 
-    findings appears once `findings list` or `reports write` has run on the log. `metrics list`
+    `findings` appears once `findings list` or `reports write` has run on the log. `metrics list`
     gives every column with a unit, and every plan metric, with no log needed.
 
     Examples:
@@ -58,12 +58,12 @@ def list_tables(log: LogArgument, as_json: JsonOption = False) -> None:
 @app.command('query', no_args_is_help=True)
 def query(
     log: LogArgument,
-    sql: Annotated[str, typer.Argument(metavar='SQL', help='DuckDB SQL naming the tables tables list prints.', show_default=False)],
+    sql: Annotated[str, typer.Argument(metavar='SQL', help='DuckDB SQL naming the tables `tables list` prints.', show_default=False)],
     as_json: JsonOption = False,
 ) -> None:
     """Run DuckDB SQL over the log's tables and print its rows.
 
-    tasks_effective holds each partition's first successful attempt, and tasks holds every
+    `tasks_effective` holds each partition's first successful attempt, and `tasks` holds every
     attempt, retries and speculative copies included.
 
     Examples:
