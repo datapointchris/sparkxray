@@ -125,6 +125,7 @@ pinned = ["ruff"]
 [dependency-groups]
 dev = [
     "jsonschema>=4.26.0",
+    "moto[cloudwatch,logs,s3]>=5.0.0",
     "mypy>=1.10.0",
     "pre-commit>=4.3.0",
     "pytest>=8.0.0",

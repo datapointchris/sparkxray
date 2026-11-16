@@ -123,8 +123,9 @@ by hand, when a manifest field or a table is removed or changes meaning.
 DuckDB never reads a URL. Ingest copies S3 objects into the cache with boto3 first, because
 DuckDB's `httpfs` extension downloads itself at first use and locked-down networks block that.
 boto3 is imported only in `sparkxray/ingest/aws.py`, and every AWS call goes through it: S3,
-CloudWatch and CloudWatch Logs. The suite starts no stand-in for them. So verify a change there
-by hand against one, such as moto's server, named by `AWS_ENDPOINT_URL_S3`,
+CloudWatch and CloudWatch Logs. `library/tests/test_aws.py` reads an S3 log and enriches a Glue
+run against moto's stand-in for each, from the dev group. The unlocked Python 3.11 legs install
+no moto, so they skip it. A real endpoint or another stand-in is named by `AWS_ENDPOINT_URL_S3`,
 `AWS_ENDPOINT_URL_CLOUDWATCH` or `AWS_ENDPOINT_URL_CLOUDWATCH_LOGS`.
 Nothing is ever written to AWS. httpx2 is
 imported only in `sparkxray/ingest/rest_client.py`, and every request to a Spark server goes
