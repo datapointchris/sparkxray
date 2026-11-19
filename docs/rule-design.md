@@ -82,8 +82,10 @@ estimates, and the stages that ran each node, which a log rebuilt from REST JSON
 gives its tasks, executors, environment and timeline. `whole_run` is a run the server held whole,
 which one past its `spark.ui.retained*` limits does not. Each table `enrich` joins is a signal of
 its own. `sparkxray capabilities show --json` lists every signal under `signals`. `SIGNALS` in
-`rules/rule.py` declares them, and `_SIGNALS_SQL` in `rules/analysis.py` decides whether a log
-holds each. So a new signal adds a column there.
+`rules/rule.py` declares them. `_SIGNALS_SQL` in `rules/analysis.py` decides whether a log holds
+each signal read from its tables, with one column per name in `_COUNTED_SIGNALS`. So a new table
+signal adds a column there and its name to `_COUNTED_SIGNALS`. `analyze` decides `plan` from the
+log's plans and `whole_run` from the manifest's `lacks`. No log holds `plan_estimates`.
 
 A rule whose signals are missing is skipped, and the skip names the missing signal. So a `plan.*`
 rule reading the plan alone runs on a bare `explain()` plan with no event log. One reading
