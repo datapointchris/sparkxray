@@ -85,13 +85,13 @@ def list_findings(
     Examples:
 
     ```text
-    sparkxray findings list ./eventlog.zstd                                          what slowed the run, costliest first
-    sparkxray findings list ./eventlog.zstd --min-severity high                      only what needs fixing first
-    sparkxray findings list ./eventlog.zstd --rule stage.task-skew                   whether one problem came back
-    sparkxray findings list ./eventlog.zstd --threshold stage.shuffle-skew.ratio=8   judge skew more leniently for this job
-    sparkxray findings list ./eventlog.zstd --thresholds thresholds.toml             judge by the thresholds kept beside the job
-    sparkxray findings list ./eventlog.zstd --fail-on critical                       a CI step that fails on critical findings alone
-    sparkxray findings list ./eventlog.zstd --json                                   every finding and the gate, for a program
+    sparkxray findings list ./eventlog.zstd                                       what slowed the run, costliest first
+    sparkxray findings list ./eventlog.zstd --min-severity high                   only what needs fixing first
+    sparkxray findings list ./eventlog.zstd --rule stage.task-skew                whether one problem came back
+    sparkxray findings list ./eventlog.zstd --threshold stage.task-skew.ratio=8   judge skew more leniently for this job
+    sparkxray findings list ./eventlog.zstd --thresholds thresholds.toml          judge by the thresholds kept beside the job
+    sparkxray findings list ./eventlog.zstd --fail-on critical                    a CI step that fails on critical findings alone
+    sparkxray findings list ./eventlog.zstd --json                                every finding and the gate, for a program
     ```
     """
     analysis = analyze_log(open_log(log), rule, threshold, thresholds)

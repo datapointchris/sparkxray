@@ -36,8 +36,9 @@ ThresholdOption = Annotated[
         '--threshold',
         metavar='RULE_ID.NAME=VALUE',
         help=(
-            'Override one threshold, as stage.shuffle-skew.ratio=8 or stage.shuffle-skew.min_bytes=512MiB. '
-            "sparkxray rules show RULE_ID names a rule's thresholds. Repeat for more."
+            'Override one threshold. RULE_ID is the rule, as stage.task-skew, NAME one of its thresholds, as ratio, '
+            "and VALUE the new value, as 8. A size takes a unit, as 512MiB. sparkxray rules show RULE_ID names a rule's "
+            'thresholds. Repeat for more.'
         ),
         show_default=False,
     ),

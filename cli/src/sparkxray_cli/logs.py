@@ -93,8 +93,8 @@ def ingest(
         typer.Option(
             '--driver-log',
             metavar='LOCATION',
-            help='A log Spark 4 wrote with spark.log.structuredLogging.enabled=true: a file, an s3:// object, '
-            'or cloudwatch:GROUP:STREAM. Repeat it for each log.',
+            help="A driver's log that Spark 4 wrote as JSON, which the setting structuredLogging.enabled=true under "
+            'the spark.log. prefix turns on: a file, an s3:// object, or cloudwatch:GROUP:STREAM. Repeat it for each log.',
             show_default=False,
         ),
     ] = None,

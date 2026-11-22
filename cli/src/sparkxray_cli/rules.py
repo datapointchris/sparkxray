@@ -97,9 +97,9 @@ def show(
     Examples:
 
     ```text
-    sparkxray rules show stage.task-skew                                             what it looks for, and how to fix it
-    sparkxray rules show stage.shuffle-skew --threshold stage.shuffle-skew.ratio=8   its lesson at the value a job overrides
-    sparkxray rules show stage.task-skew --json                                      its thresholds, ladder and lesson, for a program
+    sparkxray rules show stage.task-skew                                       what it looks for, and how to fix it
+    sparkxray rules show stage.task-skew --threshold stage.task-skew.ratio=8   its lesson at the value a job overrides
+    sparkxray rules show stage.task-skew --json                                its thresholds, ladder and lesson, for a program
     ```
     """
     lesson = rule_lesson(rule_id, threshold_file=thresholds, threshold_flags=threshold or ())
